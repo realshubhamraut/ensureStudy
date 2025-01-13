@@ -13,24 +13,98 @@
 html {
   scroll-behavior: smooth;
   -webkit-overflow-scrolling: touch;
+  /* Custom scroll smoothing */
+  scroll-snap-type: y proximity;
+}
+
+/* Smoother, slower scrolling feel */
+html,
+body {
+  overscroll-behavior: smooth;
+  scroll-padding-top: 80px;
+}
+
+/* Slow down scroll animations */
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: auto;
+    /* Let browser handle with its own easing */
+  }
+
+  /* Custom smooth scroll for anchor links only */
+  html:focus-within {
+    scroll-behavior: smooth;
+  }
 }
 
 * {
   scroll-margin-top: 80px;
 }
 
-/* Scroll performance optimizations */
+/* ============================================
+   SITE-WIDE PERFORMANCE OPTIMIZATIONS
+   These apply to all pages for smooth scrolling
+   ============================================ */
+
+/* Noise background optimization */
 .noise-bg {
   contain: paint;
   isolation: isolate;
 }
 
-/* GPU layer promotion for fixed elements */
+/* GPU layer promotion for fixed/sticky elements */
 nav[class*="fixed"],
-div[class*="fixed"] {
+div[class*="fixed"],
+header[class*="fixed"],
+aside[class*="fixed"],
+[class*="sticky"] {
   transform: translateZ(0);
   backface-visibility: hidden;
   -webkit-font-smoothing: subpixel-antialiased;
+}
+
+/* Optimize backdrop blur elements for performance */
+[class*="backdrop-blur"] {
+  transform: translateZ(0);
+  will-change: transform;
+}
+
+/* Optimize transition/animation elements */
+[class*="transition"],
+[class*="animate-"] {
+  transform: translateZ(0);
+}
+
+/* Optimize cards and hoverable elements */
+[class*="card"],
+[class*="hover:shadow"],
+[class*="hover:scale"] {
+  transform: translateZ(0);
+  will-change: transform, box-shadow;
+}
+
+/* Scroll container optimization */
+[class*="overflow-auto"],
+[class*="overflow-scroll"],
+[class*="overflow-y-auto"],
+[class*="overflow-x-auto"] {
+  -webkit-overflow-scrolling: touch;
+  scroll-behavior: smooth;
+}
+
+/* Optimize modals and overlays */
+[class*="modal"],
+[class*="overlay"],
+[role="dialog"] {
+  transform: translateZ(0);
+  will-change: opacity, transform;
+}
+
+/* Reduce paint areas for large containers */
+main,
+section,
+article {
+  contain: layout style;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -76,6 +150,32 @@ body {
 
 .dark ::-webkit-scrollbar-thumb {
   background: #6b7280;
+}
+
+/* Ensure form inputs have explicit black text on all systems */
+input,
+textarea,
+select {
+  color: #000000 !important;
+  background-color: #ffffff;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: #9ca3af !important;
+}
+
+/* Override for dark mode if needed */
+.dark input,
+.dark textarea,
+.dark select {
+  color: #ffffff !important;
+  background-color: #1f2937;
+}
+
+.dark input::placeholder,
+.dark textarea::placeholder {
+  color: #6b7280 !important;
 }
 
 /* Utility classes */
@@ -128,6 +228,46 @@ body {
 
 .animate-float {
   animation: float 3s ease-in-out infinite;
+}
+
+/* Wave animation for hand emoji */
+@keyframes wave {
+  0% {
+    transform: rotate(0deg);
+  }
+
+  10% {
+    transform: rotate(14deg);
+  }
+
+  20% {
+    transform: rotate(-8deg);
+  }
+
+  30% {
+    transform: rotate(14deg);
+  }
+
+  40% {
+    transform: rotate(-4deg);
+  }
+
+  50% {
+    transform: rotate(10deg);
+  }
+
+  60% {
+    transform: rotate(0deg);
+  }
+
+  100% {
+    transform: rotate(0deg);
+  }
+}
+
+.animate-wave {
+  animation: wave 2.5s ease-in-out 2;
+  display: inline-block;
 }
 
 /* Chat bubble styles */

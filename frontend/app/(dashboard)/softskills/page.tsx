@@ -94,7 +94,7 @@ export default function SoftSkillsPage() {
                             className="group"
                         >
                             <div
-                                className={`relative overflow-hidden rounded-3xl bg-white/60 backdrop-blur-xl border-2 ${mode.borderColor} p-8 shadow-lg transition-all duration-300 transform hover:scale-[1.02] hover:shadow-xl hover:bg-white/80 cursor-pointer`}
+                                className={`relative overflow-hidden rounded-3xl bg-white/60 backdrop-blur-xl border-2 ${mode.borderColor} p-8 shadow-lg transition-all duration-300 transform hover:scale-[1.02] hover:shadow-xl hover:bg-white/80 cursor-pointer h-full flex flex-col`}
                                 onMouseEnter={() => setSelectedMode(mode.id)}
                                 onMouseLeave={() => setSelectedMode(null)}
                             >

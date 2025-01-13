@@ -204,8 +204,8 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
                     </header>
                 )}
 
-                {/* Page content */}
-                <main className={`flex-1 overflow-y-auto ${pathname?.startsWith('/chat') ? 'p-0' : 'p-6'}`}>
+                {/* Page content - optimized for smooth scrolling */}
+                <main className={`flex-1 overflow-y-auto scroll-smooth ${pathname?.startsWith('/chat') ? 'p-0' : 'p-6'}`} style={{ willChange: 'scroll-position' }}>
                     {children}
                 </main>
             </div>
