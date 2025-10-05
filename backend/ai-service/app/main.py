@@ -13,6 +13,7 @@ from .api.routes.softskills import router as softskills_router
 from .api.routes.web_ingest import router as web_ingest_router
 from .api.routes.indexing import router as indexing_router
 from .api.notes import router as notes_router
+from .api.meetings import router as meetings_router
 from .proctor.api import router as proctor_router
 from .utils.logging import log_startup, log_action, log_error, Colors
 
@@ -59,10 +60,10 @@ async def log_requests(request: Request, call_next):
         raise
 
 
-# CORS middleware
+# CORS middleware - allow all origins for LAN access
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:3001"],
+    allow_origins=["*"],  # Allow all origins for LAN access
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -75,6 +76,7 @@ app.include_router(evaluation_router)
 app.include_router(mock_interview_router)
 app.include_router(softskills_router)
 app.include_router(notes_router)
+app.include_router(meetings_router)
 app.include_router(proctor_router)
 app.include_router(web_ingest_router)
 app.include_router(indexing_router)

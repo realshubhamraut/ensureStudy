@@ -2,7 +2,7 @@
 Student Progress Routes
 """
 from flask import Blueprint, request, jsonify
-from datetime import datetime
+from datetime import datetime, date, timedelta
 from uuid import uuid4
 from app import db
 from app.models.user import Progress
@@ -151,3 +151,176 @@ def get_progress_summary():
         "average_confidence": round(avg_confidence, 2),
         "subjects": subjects
     }), 200
+
+
+@progress_bp.route("/study-streak", methods=["GET"])
+@require_auth
+def get_study_streak():
+    """Get study streak based on days with activity"""
+    user_id = request.user_id
+    
+    # Get all progress records with last_studied dates
+    progress_records = Progress.query.filter(
+        Progress.user_id == user_id,
+        Progress.last_studied.isnot(None)
+    ).all()
+    
+    if not progress_records:
+        return jsonify({
+            "currentStreak": 0,
+            "longestStreak": 0,
+            "totalStudyDays": 0,
+            "lastStudiedDate": None
+        }), 200
+    
+    # Get unique study dates
+    study_dates = set()
+    for p in progress_records:
+        if p.last_studied:
+            study_dates.add(p.last_studied.date())
+    
+    if not study_dates:
+        return jsonify({
+            "currentStreak": 0,
+            "longestStreak": 0,
+            "totalStudyDays": 0,
+            "lastStudiedDate": None
+        }), 200
+    
+    # Sort dates descending
+    sorted_dates = sorted(study_dates, reverse=True)
+    today = date.today()
+    
+    # Calculate current streak
+    current_streak = 0
+    check_date = today
+    
+    for d in sorted_dates:
+        if d == check_date or d == check_date - timedelta(days=1):
+            current_streak += 1
+            check_date = d - timedelta(days=1)
+        else:
+            break
+    
+    # Calculate longest streak
+    longest_streak = 1
+    current_run = 1
+    for i in range(1, len(sorted_dates)):
+        if sorted_dates[i] == sorted_dates[i-1] - timedelta(days=1):
+            current_run += 1
+            longest_streak = max(longest_streak, current_run)
+        else:
+            current_run = 1
+    
+    return jsonify({
+        "currentStreak": current_streak,
+        "longestStreak": longest_streak,
+        "totalStudyDays": len(study_dates),
+        "lastStudiedDate": sorted_dates[0].isoformat() if sorted_dates else None
+    }), 200
+
+
+@progress_bp.route("/overview", methods=["GET"])
+@require_auth
+def get_progress_overview():
+    """Get overview stats matching frontend Progress page"""
+    user_id = request.user_id
+    
+    all_progress = Progress.query.filter_by(user_id=user_id).all()
+    
+    if not all_progress:
+        return jsonify({
+            "avgConfidence": 0,
+            "topicsMastered": 0,
+            "topicsNeedAttention": 0,
+            "studyStreak": 0,
+            "totalTopics": 0,
+            "subjects": []
+        }), 200
+    
+    # Calculate stats
+    avg_confidence = round(sum(p.confidence_score for p in all_progress) / len(all_progress), 1)
+    topics_mastered = len([p for p in all_progress if p.confidence_score >= 70])
+    topics_need_attention = len([p for p in all_progress if p.is_weak or p.confidence_score < 50])
+    
+    # Calculate streak
+    study_dates = set()
+    for p in all_progress:
+        if p.last_studied:
+            study_dates.add(p.last_studied.date())
+    
+    current_streak = 0
+    if study_dates:
+        sorted_dates = sorted(study_dates, reverse=True)
+        check_date = date.today()
+        for d in sorted_dates:
+            if d == check_date or d == check_date - timedelta(days=1):
+                current_streak += 1
+                check_date = d - timedelta(days=1)
+            else:
+                break
+    
+    # Group by subject
+    subjects_dict = {}
+    for p in all_progress:
+        if p.subject not in subjects_dict:
+            subjects_dict[p.subject] = {"scores": [], "count": 0}
+        subjects_dict[p.subject]["scores"].append(p.confidence_score)
+        subjects_dict[p.subject]["count"] += 1
+    
+    subjects = [
+        {
+            "subject": name,
+            "avgConfidence": round(sum(data["scores"]) / len(data["scores"]), 1),
+            "topicCount": data["count"]
+        }
+        for name, data in subjects_dict.items()
+    ]
+    
+    return jsonify({
+        "avgConfidence": avg_confidence,
+        "topicsMastered": topics_mastered,
+        "topicsNeedAttention": topics_need_attention,
+        "studyStreak": current_streak,
+        "totalTopics": len(all_progress),
+        "subjects": sorted(subjects, key=lambda x: x["avgConfidence"], reverse=True)
+    }), 200
+
+
+@progress_bp.route("/topics-list", methods=["GET"])
+@require_auth
+def get_topics_list():
+    """Get all topics matching frontend TopicProgress interface"""
+    user_id = request.user_id
+    
+    all_progress = Progress.query.filter_by(user_id=user_id).order_by(
+        Progress.confidence_score.desc()
+    ).all()
+    
+    def format_relative_time(dt):
+        if not dt:
+            return "Never"
+        now = datetime.utcnow()
+        diff = now - dt
+        
+        if diff.days > 7:
+            return f"{diff.days // 7} weeks ago"
+        elif diff.days > 0:
+            return f"{diff.days} day{'s' if diff.days > 1 else ''} ago"
+        elif diff.seconds > 3600:
+            hours = diff.seconds // 3600
+            return f"{hours} hour{'s' if hours > 1 else ''} ago"
+        else:
+            return "Just now"
+    
+    return jsonify([
+        {
+            "topic": p.topic,
+            "subject": p.subject,
+            "confidence": round(p.confidence_score, 1),
+            "isWeak": p.is_weak or p.confidence_score < 50,
+            "timesStudied": p.times_studied or 0,
+            "lastStudied": format_relative_time(p.last_studied)
+        }
+        for p in all_progress
+    ]), 200

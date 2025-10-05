@@ -1,3 +1,5 @@
+'use client'
+
 import Link from 'next/link'
 import {
     AcademicCapIcon,
@@ -5,151 +7,194 @@ import {
     ChartBarIcon,
     BookOpenIcon,
     TrophyIcon,
-    SparklesIcon
+    SparklesIcon,
+    ArrowRightIcon
 } from '@heroicons/react/24/outline'
 
 export default function Home() {
     return (
-        <main className="min-h-screen bg-gradient-to-br from-primary-50 via-white to-secondary-50">
-            {/* Hero Section */}
-            <div className="relative overflow-hidden">
-                <div className="absolute inset-0 bg-grid-pattern opacity-5"></div>
+        <main className="min-h-screen bg-[#FDFBF7] relative noise-bg">
+            {/* Grain texture overlay - GPU accelerated */}
+            <div
+                className="fixed inset-0 pointer-events-none opacity-[0.15]"
+                style={{
+                    backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 400 400' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='1.5' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E")`,
+                    transform: 'translateZ(0)',
+                    backfaceVisibility: 'hidden',
+                }}
+            />
 
-                <nav className="relative z-10 flex items-center justify-between px-8 py-6 max-w-7xl mx-auto">
+            {/* Navigation - Sticky Header */}
+            <nav className="fixed top-0 left-0 right-0 z-50 bg-[#FDFBF7]">
+                <div className="w-full h-px bg-gray-300 absolute bottom-0 left-0" />
+                <div className="flex items-center justify-between px-8 py-5 max-w-6xl mx-auto">
                     <div className="flex items-center gap-2">
-                        <AcademicCapIcon className="w-8 h-8 text-primary-600" />
-                        <span className="text-2xl font-bold gradient-text">ensureStudy</span>
+                        <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-600 to-violet-600 flex items-center justify-center">
+                            <AcademicCapIcon className="w-5 h-5 text-white" />
+                        </div>
+                        <span className="text-xl font-semibold text-gray-900">ensureStudy</span>
                     </div>
-                    <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-6">
+                        <Link
+                            href="#features"
+                            className="text-gray-600 hover:text-gray-900 text-sm font-medium transition-colors"
+                        >
+                            Features
+                        </Link>
                         <Link
                             href="/auth/signup"
-                            className="text-gray-600 hover:text-primary-600 font-medium transition-colors"
+                            className="text-gray-600 hover:text-gray-900 text-sm font-medium transition-colors"
                         >
                             Sign Up
                         </Link>
                         <Link
                             href="/auth/signin"
-                            className="btn-primary"
+                            className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors shadow-sm"
                         >
                             Sign In
                         </Link>
                     </div>
-                </nav>
+                </div>
+            </nav>
 
-                <div className="relative z-10 max-w-7xl mx-auto px-8 py-20 text-center">
-                    <div className="inline-flex items-center gap-2 px-4 py-2 bg-primary-100 rounded-full mb-8">
-                        <SparklesIcon className="w-5 h-5 text-primary-600" />
-                        <span className="text-primary-700 font-medium">AI-Powered Education Platform</span>
+            {/* Hero Section */}
+            <section className="relative z-10 px-8 pt-32 pb-24 max-w-6xl mx-auto">
+                <div className="max-w-3xl">
+                    <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-emerald-100/80 border-2 border-emerald-200 rounded-full mb-6">
+                        <SparklesIcon className="w-4 h-4 text-emerald-600" />
+                        <span className="text-emerald-800 text-sm font-medium">AI-Powered Education Platform</span>
                     </div>
 
-                    <h1 className="text-5xl md:text-7xl font-bold text-gray-900 mb-8 leading-snug pb-2">
-                        Your Complete
-                        <span className="block gradient-text">Smart Classroom</span>
+                    <h1 className="text-5xl md:text-6xl font-bold text-gray-900 mb-6 leading-tight">
+                        Learn smarter with
+                        <br />
+                        <span className="text-indigo-600">AI-powered tutoring</span>
                     </h1>
 
-                    <p className="text-xl text-gray-600 max-w-2xl mx-auto mb-12">
-                        AI-powered tutoring, automated answer evaluation,
-                        and personalized learning paths. Everything teachers and students need in one place.
+                    <p className="text-xl text-gray-600 mb-10 max-w-2xl leading-relaxed">
+                        AI tutoring, automated answer evaluation, and personalized learning paths.
+                        Everything teachers and students need in one place.
                     </p>
 
-                    <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
+                    <div className="flex flex-col sm:flex-row items-start gap-4">
                         <Link
                             href="/auth/signin"
-                            className="btn-primary text-lg px-8 py-3 flex items-center gap-2"
+                            className="inline-flex items-center gap-2 px-6 py-3 bg-indigo-600 text-white font-medium rounded-lg hover:bg-indigo-700 transition-colors shadow-sm"
                         >
-                            <SparklesIcon className="w-5 h-5" />
-                            Start Learning Free
+                            Get started free
+                            <ArrowRightIcon className="w-4 h-4" />
                         </Link>
                         <Link
                             href="#features"
-                            className="btn-secondary text-lg px-8 py-3"
+                            className="inline-flex items-center gap-2 px-6 py-3 text-gray-900 font-medium border-2 border-gray-900 rounded-lg bg-white/50 hover:bg-white/70 hover:border-black transition-colors"
                         >
-                            See Features
+                            See how it works
                         </Link>
                     </div>
                 </div>
-            </div>
+
+                {/* Decorative elements */}
+                <div className="absolute top-20 right-20 w-72 h-72 bg-amber-100/50 rounded-full" />
+                <div className="absolute bottom-10 right-40 w-48 h-48 bg-indigo-100/40 rounded-full" />
+            </section>
+
 
             {/* Features Section */}
-            <section id="features" className="py-20 px-8 max-w-7xl mx-auto">
-                <h2 className="text-3xl md:text-4xl font-bold text-center mb-4">
-                    Everything You Need to <span className="gradient-text">Excel</span>
-                </h2>
-                <p className="text-gray-600 text-center max-w-2xl mx-auto mb-16">
-                    Our AI-powered platform adapts to your learning style and helps you achieve your goals.
-                </p>
-
-                <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
-                    {/* Feature Cards */}
-                    <FeatureCard
-                        icon={<ChatBubbleLeftRightIcon className="w-8 h-8" />}
-                        title="AI Tutor Chat"
-                        description="Stuck on a problem? Ask our AI and get step-by-step explanations with sources from your textbooks—instantly."
-                        gradient="from-blue-500 to-cyan-500"
-                    />
-                    <FeatureCard
-                        icon={<BookOpenIcon className="w-8 h-8" />}
-                        title="Smart Answer Evaluation"
-                        description="Submit handwritten answers. Our AI reads, scores, and gives feedback—so teachers review faster, students learn better."
-                        gradient="from-purple-500 to-pink-500"
-                    />
-                    <FeatureCard
-                        icon={<ChartBarIcon className="w-8 h-8" />}
-                        title="AI Progress Insights"
-                        description="Every quiz, every answer is analyzed. AI spots your weak topics before you do and shows exactly where to focus."
-                        gradient="from-orange-500 to-red-500"
-                    />
-                    <FeatureCard
-                        icon={<AcademicCapIcon className="w-8 h-8" />}
-                        title="Adaptive Quizzes"
-                        description="AI generates practice questions based on what you got wrong. The more you practice, the smarter it gets."
-                        gradient="from-green-500 to-emerald-500"
-                    />
-                    <FeatureCard
-                        icon={<TrophyIcon className="w-8 h-8" />}
-                        title="Virtual Classrooms"
-                        description="Join your teacher's classroom, access materials, submit homework, and track grades—all in one place."
-                        gradient="from-yellow-500 to-orange-500"
-                    />
-                    <FeatureCard
-                        icon={<SparklesIcon className="w-8 h-8" />}
-                        title="Personalized Learning Path"
-                        description="AI builds your study plan based on your performance, upcoming exams, and available time. Study smarter, not harder."
-                        gradient="from-indigo-500 to-purple-500"
-                    />
-                </div>
-            </section>
-
-            {/* CTA Section */}
-            <section className="py-20 px-8 bg-gradient-to-r from-primary-600 to-secondary-600">
-                <div className="max-w-4xl mx-auto text-center text-white">
-                    <h2 className="text-3xl md:text-4xl font-bold mb-4">
-                        Ready to Transform Your Learning?
+            <section id="features" className="relative z-10 py-20 px-8 max-w-6xl mx-auto">
+                <div className="mb-16">
+                    <h2 className="text-3xl font-bold text-gray-900 mb-4">
+                        Everything you need to <span className="text-indigo-600">Excel</span>
                     </h2>
-                    <p className="text-xl opacity-90 mb-8">
-                        Join thousands of students already using ensureStudy to ace their exams.
+                    <p className="text-gray-600 max-w-2xl text-lg">
+                        Our platform adapts to your learning style and helps you achieve your goals.
                     </p>
-                    <Link
-                        href="/auth/signup"
-                        className="inline-flex items-center gap-2 px-8 py-4 bg-white text-primary-600 
-                       rounded-lg font-bold text-lg hover:bg-gray-100 transition-colors"
-                    >
-                        <AcademicCapIcon className="w-6 h-6" />
-                        Get Started for Free
-                    </Link>
+                </div>
+
+                <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    <FeatureCard
+                        icon={<ChatBubbleLeftRightIcon className="w-6 h-6" />}
+                        title="AI Tutor Chat"
+                        description="Stuck on a problem? Ask our AI and get step-by-step explanations with sources from your textbooks."
+                        color="indigo"
+                    />
+                    <FeatureCard
+                        icon={<BookOpenIcon className="w-6 h-6" />}
+                        title="Smart Answer Evaluation"
+                        description="Submit handwritten answers. Our AI reads, scores, and gives feedback instantly."
+                        color="violet"
+                    />
+                    <FeatureCard
+                        icon={<ChartBarIcon className="w-6 h-6" />}
+                        title="AI Progress Insights"
+                        description="Every quiz is analyzed. AI spots your weak topics and shows exactly where to focus."
+                        color="amber"
+                    />
+                    <FeatureCard
+                        icon={<AcademicCapIcon className="w-6 h-6" />}
+                        title="Adaptive Quizzes"
+                        description="AI generates practice questions based on what you got wrong. Practice makes perfect."
+                        color="emerald"
+                    />
+                    <FeatureCard
+                        icon={<TrophyIcon className="w-6 h-6" />}
+                        title="Virtual Classrooms"
+                        description="Join classrooms, access materials, submit homework, and track grades—all in one place."
+                        color="rose"
+                    />
+                    <FeatureCard
+                        icon={<SparklesIcon className="w-6 h-6" />}
+                        title="Personalized Learning"
+                        description="AI builds your study plan based on performance, exams, and available time."
+                        color="cyan"
+                    />
                 </div>
             </section>
 
-            {/* Footer */}
-            <footer className="py-12 px-8 bg-gray-900 text-gray-400">
-                <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
-                    <div className="flex items-center gap-2">
-                        <AcademicCapIcon className="w-6 h-6 text-primary-500" />
-                        <span className="text-white font-bold">ensureStudy</span>
+            {/* Gumroad-style Separator */}
+            <div className="relative z-10 w-full h-px bg-gray-300" />
+
+            {/* CTA Section + Footer - Full Width */}
+            <section className="relative z-10 py-16 bg-white overflow-hidden">
+                {/* Decorative elements - no blur for performance */}
+                <div className="absolute top-10 right-20 w-64 h-64 bg-indigo-50 rounded-full" />
+                <div className="absolute -bottom-20 left-20 w-72 h-72 bg-amber-50 rounded-full" />
+
+                <div className="max-w-6xl mx-auto px-8 relative">
+                    <div className="max-w-2xl">
+                        <h2 className="text-3xl font-bold text-gray-900 mb-4">
+                            Ready to transform your learning?
+                        </h2>
+                        <p className="text-gray-600 text-lg mb-8">
+                            Join thousands of students already using ensureStudy to ace their exams.
+                        </p>
+                        <Link
+                            href="/auth/signup"
+                            className="inline-flex items-center gap-2 px-6 py-3 bg-indigo-600 text-white font-medium rounded-lg hover:bg-indigo-700 transition-colors shadow-sm"
+                        >
+                            Get started for free
+                            <ArrowRightIcon className="w-4 h-4" />
+                        </Link>
                     </div>
-                    <p>© 2025 ensureStudy. All rights reserved.</p>
                 </div>
-            </footer>
+
+                {/* Divider */}
+                <div className="max-w-6xl mx-auto px-8 relative mt-16 mb-8">
+                    <div className="w-full h-px bg-gray-300" />
+                </div>
+
+                {/* Footer */}
+                <div className="max-w-6xl mx-auto px-8 relative">
+                    <div className="flex flex-col md:flex-row items-center justify-between gap-4">
+                        <div className="flex items-center gap-2">
+                            <div className="w-6 h-6 rounded-md bg-gradient-to-br from-indigo-600 to-violet-600 flex items-center justify-center">
+                                <AcademicCapIcon className="w-4 h-4 text-white" />
+                            </div>
+                            <span className="text-gray-900 font-semibold">ensureStudy</span>
+                        </div>
+                        <p className="text-gray-500 text-sm">© 2026 ensureStudy. All rights reserved.</p>
+                    </div>
+                </div>
+            </section>
         </main>
     )
 }
@@ -158,22 +203,29 @@ function FeatureCard({
     icon,
     title,
     description,
-    gradient
+    color
 }: {
     icon: React.ReactNode
     title: string
     description: string
-    gradient: string
+    color: 'indigo' | 'violet' | 'amber' | 'emerald' | 'rose' | 'cyan'
 }) {
+    const colorStyles = {
+        indigo: 'bg-indigo-100 text-indigo-600 group-hover:bg-indigo-200',
+        violet: 'bg-violet-100 text-violet-600 group-hover:bg-violet-200',
+        amber: 'bg-amber-100 text-amber-600 group-hover:bg-amber-200',
+        emerald: 'bg-emerald-100 text-emerald-600 group-hover:bg-emerald-200',
+        rose: 'bg-rose-100 text-rose-600 group-hover:bg-rose-200',
+        cyan: 'bg-cyan-100 text-cyan-600 group-hover:bg-cyan-200',
+    }
+
     return (
-        <div className="card-hover group">
-            <div className={`w-14 h-14 rounded-xl bg-gradient-to-br ${gradient} 
-                       flex items-center justify-center text-white mb-4
-                       group-hover:scale-110 transition-transform duration-300`}>
+        <div className="group p-6 rounded-xl border border-gray-200 bg-white hover:shadow-lg hover:border-gray-300 transition-all">
+            <div className={`w-11 h-11 rounded-xl ${colorStyles[color]} flex items-center justify-center mb-4 transition-colors`}>
                 {icon}
             </div>
-            <h3 className="text-xl font-bold text-gray-900 mb-2">{title}</h3>
-            <p className="text-gray-600">{description}</p>
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">{title}</h3>
+            <p className="text-gray-600 text-sm leading-relaxed">{description}</p>
         </div>
     )
 }

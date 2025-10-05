@@ -1,11 +1,12 @@
 import type { Metadata } from 'next'
-import { Inter, Arimo } from 'next/font/google'
+import { Inter, Arimo, Roboto_Slab } from 'next/font/google'
 import './globals.css'
 import { Providers } from '@/components/Providers'
 import { Toaster } from 'react-hot-toast'
 
 const inter = Inter({ subsets: ['latin'], variable: '--font-inter' })
 const arimo = Arimo({ subsets: ['latin'], variable: '--font-arimo' })
+const robotoSlab = Roboto_Slab({ subsets: ['latin'], variable: '--font-roboto-slab' })
 
 export const metadata: Metadata = {
     title: 'ensureStudy - AI Learning Platform',
@@ -24,7 +25,7 @@ export default function RootLayout({
 }) {
     return (
         <html lang="en" suppressHydrationWarning>
-            <body className={`${inter.variable} ${arimo.variable} font-sans antialiased`}>
+            <body className={`${inter.variable} ${arimo.variable} ${robotoSlab.variable} font-sans antialiased`}>
                 <Providers>
                     {children}
                     <Toaster

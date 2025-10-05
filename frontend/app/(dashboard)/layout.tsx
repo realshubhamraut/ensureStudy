@@ -25,7 +25,8 @@ import clsx from 'clsx'
 const navigation = [
     { name: 'Dashboard', href: '/dashboard', icon: HomeIcon },
     { name: 'My Classrooms', href: '/classrooms', icon: FolderIcon },
-    { name: 'AI Tutor', href: '/chat', icon: ChatBubbleLeftRightIcon },
+    { name: 'Interact', href: '/interact', icon: ChatBubbleLeftRightIcon },
+    { name: 'AI Tutor', href: '/chat', icon: BookOpenIcon },
     { name: 'Soft Skills AI', href: '/softskills', icon: UserGroupIcon },
     { name: 'Assessments', href: '/assessments', icon: ClipboardDocumentListIcon },
     { name: 'Progress', href: '/progress', icon: ChartBarIcon },

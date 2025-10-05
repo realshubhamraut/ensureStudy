@@ -69,7 +69,8 @@ def verify_token(token: str, token_type: str = "access") -> Dict[str, Any]:
     
     payload = jwt.decode(token, secret, algorithms=[JWT_ALGORITHM])
     
-    if payload.get("type") != token_type:
+    # Only check token type if it exists in payload (for backwards compatibility)
+    if payload.get("type") and payload.get("type") != token_type:
         raise jwt.InvalidTokenError(f"Invalid token type. Expected {token_type}")
     
     return payload

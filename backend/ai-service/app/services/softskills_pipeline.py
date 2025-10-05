@@ -214,6 +214,11 @@ class SoftSkillsPipeline:
         self.session_start_time = time.time()
         self.frame_results = []
         
+        print(f"[Pipeline] Starting session. MEDIAPIPE_AVAILABLE={MEDIAPIPE_AVAILABLE}")
+        print(f"[Pipeline] Gaze analyzer: {self.gaze_analyzer}")
+        print(f"[Pipeline] Gesture analyzer: {self.gesture_analyzer}")
+        print(f"[Pipeline] Posture analyzer: {self.posture_analyzer}")
+        
         # Reset trackers
         if self._gesture_analyzer:
             self._gesture_analyzer.reset()
@@ -236,28 +241,43 @@ class SoftSkillsPipeline:
         
         # Gaze analysis
         if self.gaze_analyzer:
-            gaze_result = self.gaze_analyzer.analyze_frame(frame)
-            result.face_detected = gaze_result.face_detected
-            result.gaze_direction = gaze_result.gaze_direction
-            result.gaze_score = gaze_result.score
-            result.is_looking_at_camera = gaze_result.is_looking_at_camera
-            result.head_yaw = gaze_result.head_yaw
-            result.head_pitch = gaze_result.head_pitch
+            try:
+                gaze_result = self.gaze_analyzer.analyze_frame(frame)
+                result.face_detected = gaze_result.face_detected
+                result.gaze_direction = gaze_result.gaze_direction
+                result.gaze_score = gaze_result.score
+                result.is_looking_at_camera = gaze_result.is_looking_at_camera
+                result.head_yaw = gaze_result.head_yaw
+                result.head_pitch = gaze_result.head_pitch
+            except Exception as e:
+                print(f"[Pipeline] Gaze analysis error: {e}")
+        else:
+            print("[Pipeline] No gaze analyzer available")
         
         # Gesture analysis
         if self.gesture_analyzer:
-            gesture_result = self.gesture_analyzer.analyze_frame(frame)
-            result.hands_visible = gesture_result.hands_visible
-            result.num_hands = gesture_result.num_hands
-            result.gesture_score = gesture_result.score
+            try:
+                gesture_result = self.gesture_analyzer.analyze_frame(frame)
+                result.hands_visible = gesture_result.hands_visible
+                result.num_hands = gesture_result.num_hands
+                result.gesture_score = gesture_result.score
+            except Exception as e:
+                print(f"[Pipeline] Gesture analysis error: {e}")
+        else:
+            print("[Pipeline] No gesture analyzer available")
         
         # Posture analysis
         if self.posture_analyzer:
-            posture_result = self.posture_analyzer.analyze_frame(frame)
-            result.body_detected = posture_result.body_detected
-            result.posture_score = posture_result.score
-            result.is_upright = posture_result.is_upright
-            result.shoulders_level = posture_result.shoulders_level
+            try:
+                posture_result = self.posture_analyzer.analyze_frame(frame)
+                result.body_detected = posture_result.body_detected
+                result.posture_score = posture_result.score
+                result.is_upright = posture_result.is_upright
+                result.shoulders_level = posture_result.shoulders_level
+            except Exception as e:
+                print(f"[Pipeline] Posture analysis error: {e}")
+        else:
+            print("[Pipeline] No posture analyzer available")
         
         # Store result
         self.frame_results.append(result)

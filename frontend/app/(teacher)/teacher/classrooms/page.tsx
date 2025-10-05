@@ -38,7 +38,7 @@ export default function TeacherClassroomsPage() {
         subject: ''
     })
 
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || `${getApiBaseUrl()}'
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || getApiBaseUrl()
 
     useEffect(() => {
         fetchClassrooms()

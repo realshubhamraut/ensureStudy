@@ -1,0 +1,561 @@
+{
+    "version": "1.0",
+    "total_questions": 100,
+    "categories": [
+        {
+            "id": "self_introduction",
+            "name": "Self Introduction",
+            "questions": [
+                {
+                    "id": 1,
+                    "text": "Tell me about yourself and your educational background.",
+                    "difficulty": "easy"
+                },
+                {
+                    "id": 2,
+                    "text": "What are you currently studying and why did you choose this field?",
+                    "difficulty": "easy"
+                },
+                {
+                    "id": 3,
+                    "text": "Describe yourself in three words and explain why.",
+                    "difficulty": "medium"
+                },
+                {
+                    "id": 4,
+                    "text": "What is your greatest academic achievement so far?",
+                    "difficulty": "easy"
+                },
+                {
+                    "id": 5,
+                    "text": "How would your friends describe you?",
+                    "difficulty": "easy"
+                },
+                {
+                    "id": 6,
+                    "text": "What motivates you to get up every morning?",
+                    "difficulty": "medium"
+                },
+                {
+                    "id": 7,
+                    "text": "Share an interesting fact about yourself that's not on your resume.",
+                    "difficulty": "medium"
+                },
+                {
+                    "id": 8,
+                    "text": "What are your core values and how do they guide your decisions?",
+                    "difficulty": "hard"
+                },
+                {
+                    "id": 9,
+                    "text": "Describe your ideal learning environment.",
+                    "difficulty": "easy"
+                },
+                {
+                    "id": 10,
+                    "text": "What makes you unique compared to other candidates?",
+                    "difficulty": "hard"
+                },
+                {
+                    "id": 11,
+                    "text": "Walk me through your typical day.",
+                    "difficulty": "easy"
+                },
+                {
+                    "id": 12,
+                    "text": "What are you most passionate about?",
+                    "difficulty": "medium"
+                },
+                {
+                    "id": 13,
+                    "text": "How do you define success for yourself?",
+                    "difficulty": "hard"
+                },
+                {
+                    "id": 14,
+                    "text": "What role does education play in achieving your dreams?",
+                    "difficulty": "medium"
+                },
+                {
+                    "id": 15,
+                    "text": "If you could have dinner with anyone, who would it be and why?",
+                    "difficulty": "medium"
+                }
+            ]
+        },
+        {
+            "id": "strengths_weaknesses",
+            "name": "Strengths & Weaknesses",
+            "questions": [
+                {
+                    "id": 16,
+                    "text": "What are your greatest strengths and how do they help you in learning?",
+                    "difficulty": "easy"
+                },
+                {
+                    "id": 17,
+                    "text": "What is your biggest weakness and how are you working to improve it?",
+                    "difficulty": "medium"
+                },
+                {
+                    "id": 18,
+                    "text": "Describe a skill you've worked hard to develop.",
+                    "difficulty": "medium"
+                },
+                {
+                    "id": 19,
+                    "text": "What subject do you find most challenging and why?",
+                    "difficulty": "easy"
+                },
+                {
+                    "id": 20,
+                    "text": "How do you handle constructive criticism?",
+                    "difficulty": "medium"
+                },
+                {
+                    "id": 21,
+                    "text": "What feedback have you received that helped you grow?",
+                    "difficulty": "medium"
+                },
+                {
+                    "id": 22,
+                    "text": "Describe a time when you turned a weakness into a strength.",
+                    "difficulty": "hard"
+                },
+                {
+                    "id": 23,
+                    "text": "What skills do you want to develop in the next year?",
+                    "difficulty": "easy"
+                },
+                {
+                    "id": 24,
+                    "text": "How do you leverage your strengths in group projects?",
+                    "difficulty": "medium"
+                },
+                {
+                    "id": 25,
+                    "text": "What aspect of your personality would you like to change?",
+                    "difficulty": "hard"
+                },
+                {
+                    "id": 26,
+                    "text": "Describe a compliment that meant a lot to you.",
+                    "difficulty": "easy"
+                },
+                {
+                    "id": 27,
+                    "text": "How do you stay motivated when working on difficult tasks?",
+                    "difficulty": "medium"
+                },
+                {
+                    "id": 28,
+                    "text": "What do you consider your greatest accomplishment?",
+                    "difficulty": "medium"
+                },
+                {
+                    "id": 29,
+                    "text": "How do you ensure you keep learning and growing?",
+                    "difficulty": "medium"
+                },
+                {
+                    "id": 30,
+                    "text": "Describe how you've overcome a personal limitation.",
+                    "difficulty": "hard"
+                }
+            ]
+        },
+        {
+            "id": "problem_solving",
+            "name": "Problem Solving",
+            "questions": [
+                {
+                    "id": 31,
+                    "text": "Describe a challenging situation you faced and how you overcame it.",
+                    "difficulty": "medium"
+                },
+                {
+                    "id": 32,
+                    "text": "How do you approach solving a complex problem?",
+                    "difficulty": "medium"
+                },
+                {
+                    "id": 33,
+                    "text": "Tell me about a time when you had to think creatively to solve a problem.",
+                    "difficulty": "hard"
+                },
+                {
+                    "id": 34,
+                    "text": "Describe a situation where you had to make a quick decision.",
+                    "difficulty": "medium"
+                },
+                {
+                    "id": 35,
+                    "text": "How do you handle unexpected obstacles?",
+                    "difficulty": "medium"
+                },
+                {
+                    "id": 36,
+                    "text": "Tell me about a problem you solved that others couldn't.",
+                    "difficulty": "hard"
+                },
+                {
+                    "id": 37,
+                    "text": "How do you prioritize when facing multiple problems?",
+                    "difficulty": "medium"
+                },
+                {
+                    "id": 38,
+                    "text": "Describe a time when your first solution didn't work. What did you do?",
+                    "difficulty": "hard"
+                },
+                {
+                    "id": 39,
+                    "text": "How do you gather information when facing an unfamiliar problem?",
+                    "difficulty": "medium"
+                },
+                {
+                    "id": 40,
+                    "text": "Tell me about a time when you anticipated a problem before it occurred.",
+                    "difficulty": "hard"
+                },
+                {
+                    "id": 41,
+                    "text": "How do you remain calm when dealing with a crisis?",
+                    "difficulty": "medium"
+                },
+                {
+                    "id": 42,
+                    "text": "Describe your process for breaking down a large task.",
+                    "difficulty": "medium"
+                },
+                {
+                    "id": 43,
+                    "text": "How do you know when to ask for help solving a problem?",
+                    "difficulty": "easy"
+                },
+                {
+                    "id": 44,
+                    "text": "Tell me about a time when you improved an existing process.",
+                    "difficulty": "hard"
+                },
+                {
+                    "id": 45,
+                    "text": "How do you learn from your mistakes?",
+                    "difficulty": "medium"
+                }
+            ]
+        },
+        {
+            "id": "teamwork_leadership",
+            "name": "Teamwork & Leadership",
+            "questions": [
+                {
+                    "id": 46,
+                    "text": "Describe your experience working in a team.",
+                    "difficulty": "easy"
+                },
+                {
+                    "id": 47,
+                    "text": "What role do you typically take in group projects?",
+                    "difficulty": "easy"
+                },
+                {
+                    "id": 48,
+                    "text": "Tell me about a time when you led a team or project.",
+                    "difficulty": "medium"
+                },
+                {
+                    "id": 49,
+                    "text": "How do you handle disagreements with team members?",
+                    "difficulty": "medium"
+                },
+                {
+                    "id": 50,
+                    "text": "Describe a successful team project you were part of.",
+                    "difficulty": "medium"
+                },
+                {
+                    "id": 51,
+                    "text": "How do you motivate others in a team setting?",
+                    "difficulty": "hard"
+                },
+                {
+                    "id": 52,
+                    "text": "Tell me about a time when a team project failed. What did you learn?",
+                    "difficulty": "hard"
+                },
+                {
+                    "id": 53,
+                    "text": "How do you handle working with someone you don't get along with?",
+                    "difficulty": "hard"
+                },
+                {
+                    "id": 54,
+                    "text": "What makes a good team leader in your opinion?",
+                    "difficulty": "medium"
+                },
+                {
+                    "id": 55,
+                    "text": "Describe how you contribute to team meetings.",
+                    "difficulty": "easy"
+                },
+                {
+                    "id": 56,
+                    "text": "How do you ensure everyone's voice is heard in a group?",
+                    "difficulty": "medium"
+                },
+                {
+                    "id": 57,
+                    "text": "Tell me about a time when you helped a struggling team member.",
+                    "difficulty": "medium"
+                },
+                {
+                    "id": 58,
+                    "text": "How do you balance individual work with team responsibilities?",
+                    "difficulty": "medium"
+                },
+                {
+                    "id": 59,
+                    "text": "Describe a situation where you had to delegate tasks.",
+                    "difficulty": "hard"
+                },
+                {
+                    "id": 60,
+                    "text": "What do you do when a team member isn't contributing?",
+                    "difficulty": "hard"
+                }
+            ]
+        },
+        {
+            "id": "communication",
+            "name": "Communication",
+            "questions": [
+                {
+                    "id": 61,
+                    "text": "How would you explain a complex concept to someone unfamiliar with it?",
+                    "difficulty": "medium"
+                },
+                {
+                    "id": 62,
+                    "text": "Describe a situation where effective communication was crucial.",
+                    "difficulty": "medium"
+                },
+                {
+                    "id": 63,
+                    "text": "How do you adapt your communication style for different audiences?",
+                    "difficulty": "hard"
+                },
+                {
+                    "id": 64,
+                    "text": "Tell me about a presentation you gave and how it went.",
+                    "difficulty": "medium"
+                },
+                {
+                    "id": 65,
+                    "text": "How do you handle misunderstandings in communication?",
+                    "difficulty": "medium"
+                },
+                {
+                    "id": 66,
+                    "text": "Describe your experience with public speaking.",
+                    "difficulty": "medium"
+                },
+                {
+                    "id": 67,
+                    "text": "How do you ensure your message is clearly understood?",
+                    "difficulty": "medium"
+                },
+                {
+                    "id": 68,
+                    "text": "Tell me about a time when you had to deliver bad news.",
+                    "difficulty": "hard"
+                },
+                {
+                    "id": 69,
+                    "text": "How do you use non-verbal communication effectively?",
+                    "difficulty": "hard"
+                },
+                {
+                    "id": 70,
+                    "text": "Describe a situation where listening was more important than speaking.",
+                    "difficulty": "medium"
+                },
+                {
+                    "id": 71,
+                    "text": "How do you communicate in high-pressure situations?",
+                    "difficulty": "hard"
+                },
+                {
+                    "id": 72,
+                    "text": "What strategies do you use to be a better listener?",
+                    "difficulty": "medium"
+                },
+                {
+                    "id": 73,
+                    "text": "Describe how you would give constructive feedback to a peer.",
+                    "difficulty": "medium"
+                },
+                {
+                    "id": 74,
+                    "text": "How do you handle communicating with someone who disagrees with you?",
+                    "difficulty": "hard"
+                },
+                {
+                    "id": 75,
+                    "text": "Tell me about a time when you persuaded someone to see your point of view.",
+                    "difficulty": "hard"
+                }
+            ]
+        },
+        {
+            "id": "behavioral",
+            "name": "Behavioral",
+            "questions": [
+                {
+                    "id": 76,
+                    "text": "Describe a time when you had to work under pressure.",
+                    "difficulty": "medium"
+                },
+                {
+                    "id": 77,
+                    "text": "Tell me about a time when you failed. How did you handle it?",
+                    "difficulty": "hard"
+                },
+                {
+                    "id": 78,
+                    "text": "Describe a situation where you had to step out of your comfort zone.",
+                    "difficulty": "medium"
+                },
+                {
+                    "id": 79,
+                    "text": "How do you manage your time effectively?",
+                    "difficulty": "easy"
+                },
+                {
+                    "id": 80,
+                    "text": "Tell me about a goal you set and achieved.",
+                    "difficulty": "medium"
+                },
+                {
+                    "id": 81,
+                    "text": "Describe a time when you had to adapt to a major change.",
+                    "difficulty": "medium"
+                },
+                {
+                    "id": 82,
+                    "text": "How do you handle stress and maintain work-life balance?",
+                    "difficulty": "medium"
+                },
+                {
+                    "id": 83,
+                    "text": "Tell me about a time when you went above and beyond expectations.",
+                    "difficulty": "hard"
+                },
+                {
+                    "id": 84,
+                    "text": "Describe how you handle multiple deadlines.",
+                    "difficulty": "medium"
+                },
+                {
+                    "id": 85,
+                    "text": "How do you stay organized with your studies and activities?",
+                    "difficulty": "easy"
+                },
+                {
+                    "id": 86,
+                    "text": "Tell me about a time when you took initiative.",
+                    "difficulty": "medium"
+                },
+                {
+                    "id": 87,
+                    "text": "Describe a situation where you had to be very patient.",
+                    "difficulty": "medium"
+                },
+                {
+                    "id": 88,
+                    "text": "How do you handle rejection or setbacks?",
+                    "difficulty": "hard"
+                },
+                {
+                    "id": 89,
+                    "text": "Tell me about a time when you had to follow rules you disagreed with.",
+                    "difficulty": "hard"
+                },
+                {
+                    "id": 90,
+                    "text": "Describe your approach to learning something new.",
+                    "difficulty": "easy"
+                }
+            ]
+        },
+        {
+            "id": "future_goals",
+            "name": "Future Goals",
+            "questions": [
+                {
+                    "id": 91,
+                    "text": "Where do you see yourself in five years?",
+                    "difficulty": "medium"
+                },
+                {
+                    "id": 92,
+                    "text": "What are your short-term and long-term career goals?",
+                    "difficulty": "medium"
+                },
+                {
+                    "id": 93,
+                    "text": "How do you plan to achieve your goals?",
+                    "difficulty": "medium"
+                },
+                {
+                    "id": 94,
+                    "text": "What impact do you want to make in your field?",
+                    "difficulty": "hard"
+                },
+                {
+                    "id": 95,
+                    "text": "Describe your dream job and why it appeals to you.",
+                    "difficulty": "medium"
+                },
+                {
+                    "id": 96,
+                    "text": "What steps are you taking now to prepare for your future?",
+                    "difficulty": "medium"
+                },
+                {
+                    "id": 97,
+                    "text": "How will this opportunity help you achieve your goals?",
+                    "difficulty": "medium"
+                },
+                {
+                    "id": 98,
+                    "text": "What legacy do you want to leave behind?",
+                    "difficulty": "hard"
+                },
+                {
+                    "id": 99,
+                    "text": "How do you plan to continue learning after your formal education?",
+                    "difficulty": "medium"
+                },
+                {
+                    "id": 100,
+                    "text": "What motivates you to learn new things?",
+                    "difficulty": "easy"
+                }
+            ]
+        }
+    ],
+    "scoring_weights": {
+        "fluency": 0.35,
+        "grammar": 0.25,
+        "eye_contact": 0.20,
+        "hand_gestures": 0.10,
+        "posture": 0.10
+    },
+    "session_config": {
+        "questions_per_session": 5,
+        "min_response_time_seconds": 30,
+        "max_response_time_seconds": 120,
+        "default_difficulty": "medium"
+    }
+}

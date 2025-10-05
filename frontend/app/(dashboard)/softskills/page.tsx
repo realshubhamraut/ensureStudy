@@ -30,7 +30,7 @@ export default function SoftSkillsPage() {
                 'Identify weak topics for improvement'
             ],
             color: 'from-blue-500 to-indigo-600',
-            hoverColor: 'hover:from-blue-600 hover:to-indigo-700',
+            borderColor: 'border-blue-200 hover:border-blue-300',
             href: '/softskills/mock-interview'
         },
         {
@@ -46,7 +46,7 @@ export default function SoftSkillsPage() {
                 'Detailed improvement suggestions'
             ],
             color: 'from-purple-500 to-pink-600',
-            hoverColor: 'hover:from-purple-600 hover:to-pink-700',
+            borderColor: 'border-purple-200 hover:border-purple-300',
             href: '/softskills/communication'
         }
     ]
@@ -94,52 +94,53 @@ export default function SoftSkillsPage() {
                             className="group"
                         >
                             <div
-                                className={`relative overflow-hidden rounded-3xl bg-gradient-to-br ${mode.color} ${mode.hoverColor} p-8 text-white shadow-xl transition-all duration-300 transform hover:scale-[1.02] hover:shadow-2xl cursor-pointer`}
+                                className={`relative overflow-hidden rounded-3xl bg-white/60 backdrop-blur-xl border-2 ${mode.borderColor} p-8 shadow-lg transition-all duration-300 transform hover:scale-[1.02] hover:shadow-xl hover:bg-white/80 cursor-pointer`}
                                 onMouseEnter={() => setSelectedMode(mode.id)}
                                 onMouseLeave={() => setSelectedMode(null)}
                             >
-                                {/* Background Pattern */}
-                                <div className="absolute inset-0 opacity-10">
-                                    <div className="absolute top-0 right-0 w-64 h-64 rounded-full bg-white/20 -translate-y-1/2 translate-x-1/2" />
-                                    <div className="absolute bottom-0 left-0 w-48 h-48 rounded-full bg-white/20 translate-y-1/2 -translate-x-1/2" />
-                                </div>
+                                {/* Subtle Background Gradient */}
+                                <div className={`absolute inset-0 opacity-[0.08] bg-gradient-to-br ${mode.color}`} />
+
+                                {/* Decorative Elements */}
+                                <div className="absolute top-0 right-0 w-48 h-48 rounded-full bg-gradient-to-br from-gray-200/30 to-transparent -translate-y-1/2 translate-x-1/2" />
+                                <div className="absolute bottom-0 left-0 w-32 h-32 rounded-full bg-gradient-to-br from-gray-200/20 to-transparent translate-y-1/2 -translate-x-1/2" />
 
                                 {/* Icon */}
                                 <div className="relative">
-                                    <div className="w-16 h-16 rounded-2xl bg-white/20 backdrop-blur-sm flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
-                                        <mode.icon className="w-8 h-8 text-white" />
+                                    <div className={`w-14 h-14 rounded-2xl bg-gradient-to-br ${mode.color} bg-opacity-20 flex items-center justify-center mb-5 group-hover:scale-110 transition-transform shadow-md`}>
+                                        <mode.icon className="w-7 h-7 text-white" />
                                     </div>
 
                                     {/* Title */}
-                                    <div className="mb-4">
-                                        <h2 className="text-2xl font-bold mb-1">{mode.title}</h2>
-                                        <p className="text-white/80 text-sm font-medium">{mode.subtitle}</p>
+                                    <div className="mb-3">
+                                        <h2 className="text-xl font-bold text-gray-800 mb-1">{mode.title}</h2>
+                                        <p className={`text-sm font-medium bg-gradient-to-r ${mode.color} bg-clip-text text-transparent`}>{mode.subtitle}</p>
                                     </div>
 
                                     {/* Description */}
-                                    <p className="text-white/90 text-sm leading-relaxed mb-6">
+                                    <p className="text-gray-600 text-sm leading-relaxed mb-5">
                                         {mode.description}
                                     </p>
 
                                     {/* Features */}
-                                    <ul className="space-y-2 mb-6">
+                                    <ul className="space-y-2 mb-5">
                                         {mode.features.map((feature, idx) => (
-                                            <li key={idx} className="flex items-center gap-2 text-sm text-white/90">
-                                                <SparklesIcon className="w-4 h-4 text-white/70 flex-shrink-0" />
+                                            <li key={idx} className="flex items-center gap-2 text-sm text-gray-600">
+                                                <SparklesIcon className={`w-4 h-4 flex-shrink-0 bg-gradient-to-r ${mode.color} bg-clip-text`} style={{ color: mode.id === 'interview' ? '#6366f1' : '#a855f7' }} />
                                                 <span>{feature}</span>
                                             </li>
                                         ))}
                                     </ul>
 
                                     {/* CTA */}
-                                    <div className="flex items-center gap-2 text-white font-semibold group-hover:gap-4 transition-all">
+                                    <div className={`flex items-center gap-2 font-semibold group-hover:gap-3 transition-all bg-gradient-to-r ${mode.color} bg-clip-text text-transparent`}>
                                         <span>Get Started</span>
-                                        <ArrowRightIcon className="w-5 h-5" />
+                                        <ArrowRightIcon className="w-4 h-4" style={{ color: mode.id === 'interview' ? '#6366f1' : '#a855f7' }} />
                                     </div>
                                 </div>
 
-                                {/* Hover Indicator */}
-                                <div className={`absolute bottom-0 left-0 right-0 h-1 bg-white/50 transform scale-x-0 group-hover:scale-x-100 transition-transform origin-left`} />
+                                {/* Bottom Accent Line */}
+                                <div className={`absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r ${mode.color} transform scale-x-0 group-hover:scale-x-100 transition-transform origin-left opacity-60`} />
                             </div>
                         </Link>
                     ))}

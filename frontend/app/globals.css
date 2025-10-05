@@ -10,6 +10,29 @@
   --background-end-rgb: 255, 255, 255;
 }
 
+html {
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+}
+
+* {
+  scroll-margin-top: 80px;
+}
+
+/* Scroll performance optimizations */
+.noise-bg {
+  contain: paint;
+  isolation: isolate;
+}
+
+/* GPU layer promotion for fixed elements */
+nav[class*="fixed"],
+div[class*="fixed"] {
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  -webkit-font-smoothing: subpixel-antialiased;
+}
+
 @media (prefers-color-scheme: dark) {
   :root {
     --foreground-rgb: 255, 255, 255;

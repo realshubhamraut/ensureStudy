@@ -75,3 +75,4 @@ deepface>=0.0.79              # Face verification (optional, graceful fallback)
 # Audio Detection (optional, requires portaudio system dependency)
 # pyaudio>=0.2.14             # Uncomment if audio detection needed
 
+websockets>=12.0

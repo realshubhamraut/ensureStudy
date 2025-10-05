@@ -68,7 +68,7 @@ export default function InteractPage() {
     const [sendingMessage, setSendingMessage] = useState(false)
     const messagesEndRef = useRef<HTMLDivElement>(null)
 
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || `${getApiBaseUrl()}'
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || getApiBaseUrl()
 
     // Fetch conversations
     useEffect(() => {

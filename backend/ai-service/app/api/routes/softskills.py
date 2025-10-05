@@ -144,7 +144,27 @@ def _analyze_fluency_basic(transcript: str, duration_seconds: float) -> FluencyM
 
 
 def analyze_grammar(transcript: str) -> GrammarMetrics:
-    """Analyze grammar quality."""
+    """Analyze grammar quality using the grammar analyzer service."""
+    try:
+        from ...services.grammar_analyzer import get_grammar_analyzer
+        
+        analyzer = get_grammar_analyzer()
+        result = analyzer.analyze(transcript)
+        
+        return GrammarMetrics(
+            error_count=result.error_count,
+            sentence_count=result.sentence_count,
+            avg_sentence_length=result.avg_sentence_length,
+            score=result.score
+        )
+    except Exception as e:
+        print(f"[SoftSkills] Grammar analysis error: {e}")
+        # Fallback to basic analysis
+        return _analyze_grammar_basic(transcript)
+
+
+def _analyze_grammar_basic(transcript: str) -> GrammarMetrics:
+    """Basic grammar analysis fallback."""
     sentences = [s.strip() for s in transcript.replace('?', '.').replace('!', '.').split('.') if s.strip()]
     sentence_count = len(sentences)
     
@@ -508,34 +528,51 @@ async def websocket_realtime_analysis(websocket: WebSocket, session_id: str):
         
         print(f"[WebSocket] Session {session_id} connected")
         
+        frame_count = 0
         while True:
             # Receive message
             data = await websocket.receive_text()
             message = json.loads(data)
             
-            if message.get("type") == "frame":
+            msg_type = message.get("type")
+            print(f"[WebSocket] Received message type: {msg_type}")
+            
+            if msg_type == "frame":
                 # Process frame
                 frame_base64 = message.get("data", "")
                 
                 if frame_base64:
-                    result = pipeline.process_frame_base64(frame_base64)
+                    frame_count += 1
+                    print(f"[WebSocket] Processing frame {frame_count} (data length: {len(frame_base64)})")
                     
-                    # Send result back
-                    await websocket.send_json({
-                        "type": "analysis",
-                        "timestamp": result.timestamp_ms,
-                        "face_detected": result.face_detected,
-                        "gaze_direction": result.gaze_direction,
-                        "gaze_score": round(result.gaze_score, 1),
-                        "is_looking_at_camera": result.is_looking_at_camera,
-                        "hands_visible": result.hands_visible,
-                        "num_hands": result.num_hands,
-                        "gesture_score": round(result.gesture_score, 1),
-                        "body_detected": result.body_detected,
-                        "posture_score": round(result.posture_score, 1),
-                        "is_upright": result.is_upright,
-                        "shoulders_level": result.shoulders_level
-                    })
+                    try:
+                        result = pipeline.process_frame_base64(frame_base64)
+                        
+                        response = {
+                            "type": "analysis",
+                            "timestamp": result.timestamp_ms,
+                            "face_detected": result.face_detected,
+                            "gaze_direction": result.gaze_direction,
+                            "gaze_score": round(result.gaze_score, 1),
+                            "is_looking_at_camera": result.is_looking_at_camera,
+                            "hands_visible": result.hands_visible,
+                            "num_hands": result.num_hands,
+                            "gesture_score": round(result.gesture_score, 1),
+                            "body_detected": result.body_detected,
+                            "posture_score": round(result.posture_score, 1),
+                            "is_upright": result.is_upright,
+                            "shoulders_level": result.shoulders_level
+                        }
+                        print(f"[WebSocket] Sending analysis: gaze={result.gaze_score:.1f}, posture={result.posture_score:.1f}")
+                        
+                        # Send result back
+                        await websocket.send_json(response)
+                    except Exception as e:
+                        print(f"[WebSocket] Frame processing error: {e}")
+                        import traceback
+                        traceback.print_exc()
+                else:
+                    print("[WebSocket] Frame message received but no data")
             
             elif message.get("type") == "transcript":
                 # Process transcript for fluency
@@ -603,3 +640,127 @@ async def health_check():
             "error": str(e),
             "timestamp": datetime.now().isoformat()
         }
+
+
+# ============================================
+# Questions API
+# ============================================
+
+import random
+import os
+
+def load_questions():
+    """Load questions from JSON file."""
+    try:
+        data_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+            "data", "softskills_questions.json"
+        )
+        with open(data_path, 'r') as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"[SoftSkills] Error loading questions: {e}")
+        return None
+
+
+class QuestionResponse(BaseModel):
+    """Single question response."""
+    id: int
+    text: str
+    category: str
+    difficulty: str
+
+
+class QuestionsListResponse(BaseModel):
+    """List of questions response."""
+    questions: List[QuestionResponse]
+    total: int
+    session_config: dict
+
+
+@router.get("/questions", response_model=QuestionsListResponse)
+async def get_questions(
+    count: int = 5,
+    category: Optional[str] = None,
+    difficulty: Optional[str] = None
+):
+    """
+    Get random questions for a soft skills session.
+    
+    - count: Number of questions to return (default 5)
+    - category: Optional category filter (self_introduction, strengths_weaknesses, etc.)
+    - difficulty: Optional difficulty filter (easy, medium, hard)
+    """
+    data = load_questions()
+    if not data:
+        raise HTTPException(status_code=500, detail="Could not load questions")
+    
+    all_questions = []
+    
+    for cat in data["categories"]:
+        cat_id = cat["id"]
+        cat_name = cat["name"]
+        
+        # Filter by category if specified
+        if category and cat_id != category:
+            continue
+            
+        for q in cat["questions"]:
+            # Filter by difficulty if specified
+            if difficulty and q.get("difficulty") != difficulty:
+                continue
+            
+            all_questions.append({
+                "id": q["id"],
+                "text": q["text"],
+                "category": cat_name,
+                "difficulty": q.get("difficulty", "medium")
+            })
+    
+    # Shuffle and select
+    random.shuffle(all_questions)
+    selected = all_questions[:count]
+    
+    return QuestionsListResponse(
+        questions=[QuestionResponse(**q) for q in selected],
+        total=len(selected),
+        session_config=data.get("session_config", {})
+    )
+
+
+@router.get("/questions/categories")
+async def get_question_categories():
+    """Get available question categories."""
+    data = load_questions()
+    if not data:
+        raise HTTPException(status_code=500, detail="Could not load questions")
+    
+    categories = []
+    for cat in data["categories"]:
+        categories.append({
+            "id": cat["id"],
+            "name": cat["name"],
+            "count": len(cat["questions"])
+        })
+    
+    return {
+        "categories": categories,
+        "scoring_weights": data.get("scoring_weights", {})
+    }
+
+
+@router.get("/scoring-weights")
+async def get_scoring_weights():
+    """Get the scoring weights used for evaluation."""
+    data = load_questions()
+    if data and "scoring_weights" in data:
+        return data["scoring_weights"]
+    
+    # Default weights
+    return {
+        "fluency": 0.35,
+        "grammar": 0.25,
+        "eye_contact": 0.20,
+        "hand_gestures": 0.10,
+        "posture": 0.10
+    }

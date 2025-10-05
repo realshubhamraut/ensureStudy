@@ -19,12 +19,27 @@ def require_auth(f):
             return jsonify({"error": "Missing authorization header"}), 401
         
         try:
-            token = auth_header.split()[1]
+            parts = auth_header.split()
+            if len(parts) != 2 or parts[0].lower() != 'bearer':
+                return jsonify({"error": "Invalid authorization format"}), 401
+            
+            token = parts[1]
             payload = verify_token(token)
-            request.user_id = payload["user_id"]
-            request.user_role = payload["role"]
+            
+            # Handle both user_id and sub fields (NextAuth compatibility)
+            user_id = payload.get("user_id") or payload.get("sub")
+            role = payload.get("role", "student")
+            
+            if not user_id:
+                return jsonify({"error": "Invalid token: missing user ID"}), 401
+            
+            request.user_id = user_id
+            request.user_role = role
             return f(*args, **kwargs)
         except Exception as e:
+            import traceback
+            print(f"[Auth Error] {str(e)}")
+            traceback.print_exc()
             return jsonify({"error": f"Invalid token: {str(e)}"}), 401
     
     return decorated

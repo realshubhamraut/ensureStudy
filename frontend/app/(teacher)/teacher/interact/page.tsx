@@ -66,7 +66,7 @@ export default function TeacherInteractPage() {
     const [searchQuery, setSearchQuery] = useState('')
     const messagesEndRef = useRef<HTMLDivElement>(null)
 
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || `${getApiBaseUrl()}'
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || getApiBaseUrl()
 
     // Fetch conversations
     useEffect(() => {

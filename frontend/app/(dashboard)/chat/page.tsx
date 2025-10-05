@@ -800,7 +800,7 @@ export default function AITutorPage() {
     }
 
     return (
-        <div className="flex h-[calc(100vh-0px)] bg-gray-100 overflow-hidden">
+        <div className="flex h-[calc(100vh-0px)] bg-gray-100 overflow-hidden font-roboto-slab">
             {/* History Sidebar */}
             <div className={`${showHistory ? 'w-72' : 'w-0'} transition-all duration-300 overflow-hidden flex-shrink-0 bg-gray-50 border-r border-gray-200`}>
                 <div className="h-full flex flex-col w-72">

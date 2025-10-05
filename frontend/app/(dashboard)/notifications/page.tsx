@@ -40,7 +40,7 @@ export default function NotificationsPage() {
     const [filter, setFilter] = useState<string>('all')
     const [page, setPage] = useState(1)
     const [totalPages, setTotalPages] = useState(1)
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || `${getApiBaseUrl()}'
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || getApiBaseUrl()
 
     // Fetch notifications
     useEffect(() => {

@@ -56,6 +56,10 @@ def create_app(config_name=None):
     from app.routes.assignment import assignment_bp
     from app.routes.files import files_bp
     from app.routes.evaluation import evaluation_bp
+    from app.routes.interact import interact_bp
+    from app.routes.notifications import notifications_bp
+    from app.routes.teacher_assistant import teacher_assistant_bp
+    from app.routes.meetings import meetings_bp
     
     app.register_blueprint(auth_bp)
     app.register_blueprint(users_bp)
@@ -71,6 +75,10 @@ def create_app(config_name=None):
     app.register_blueprint(assignment_bp)
     app.register_blueprint(files_bp)
     app.register_blueprint(evaluation_bp)
+    app.register_blueprint(interact_bp)
+    app.register_blueprint(notifications_bp)
+    app.register_blueprint(teacher_assistant_bp)
+    app.register_blueprint(meetings_bp)
     
     # Import models for table creation
     from app.models.organization import Organization, LicensePurchase
@@ -80,6 +88,8 @@ def create_app(config_name=None):
     from app.models.notes import NoteProcessingJob, DigitizedNotePage, NoteEmbedding, NoteSearchHistory
     from app.models.assignment import Assignment, AssignmentAttachment, Submission, SubmissionFile
     from app.models.exam_evaluation import ExamSession, StudentEvaluation
+    from app.models.notification import Notification
+    from app.models.meeting import Meeting, MeetingParticipant, MeetingRecording
     
     # Health check endpoint
     @app.route('/health')
