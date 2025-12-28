@@ -1,0 +1,77 @@
+# AI Tutor Service Dependencies
+# All FREE, LOCAL models - No paid APIs
+
+# Core Framework
+fastapi>=0.109.0
+uvicorn>=0.27.0
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+
+# Hugging Face Models (FREE, LOCAL)
+sentence-transformers>=2.3.0  # For embeddings (all-mpnet-base-v2)
+transformers>=4.36.0          # For FLAN-T5 and TrOCR
+torch>=2.1.0                  # PyTorch backend
+
+# Vector Database
+qdrant-client>=1.7.0
+
+# HTTP (for development)
+httpx>=0.26.0
+requests>=2.31.0
+
+# Utilities
+python-dotenv>=1.0.0
+
+# Web Resource Fetching (FREE, no API keys)
+youtube-search-python>=1.6.6  # YouTube video search
+duckduckgo-search>=4.1.1      # Web images and articles
+aiohttp>=3.9.0                # Async HTTP client
+
+# Content Extraction (Fetch + Readability + Cache)
+readability-lxml>=0.8.1       # Mozilla Readability for clean extraction
+beautifulsoup4>=4.12.0        # HTML parsing
+lxml>=5.0.0                   # Fast XML/HTML parser
+
+# ==================== Notes Digitization ====================
+
+# Video Processing
+opencv-python>=4.9.0          # Video frame extraction
+# ffmpeg-python>=0.2.0        # Optional: advanced video processing
+
+# Image Enhancement  
+Pillow>=10.0.0                # Image manipulation
+scikit-image>=0.22.0          # Advanced image processing
+
+# OCR (Handwritten Text Recognition)
+# TrOCR is included via transformers
+# pytesseract>=0.3.10         # Optional: Tesseract fallback (needs system install)
+
+# LangChain & LangGraph for Agentic AI
+langchain>=0.1.0              # LLM orchestration
+langgraph>=0.0.20             # Agentic workflows
+
+# ==================== Document Processing ====================
+
+# PDF Processing
+pypdf>=4.0.0                  # PDF text extraction
+pdf2image>=1.17.0             # PDF to image conversion
+
+# Office Documents
+python-pptx>=0.6.23           # PowerPoint processing
+mammoth>=1.6.0                # Word document processing
+
+# Caching
+redis>=5.0.0                  # Redis client for response caching
+
+# NumPy (required by OpenCV)
+numpy>=1.24.0
+
+# ==================== Proctoring ====================
+
+# Face Detection & Recognition
+dlib>=19.24.0                 # Face detection, landmarks
+deepface>=0.0.79              # Face verification (optional, graceful fallback)
+
+# Audio Detection (optional, requires portaudio system dependency)
+# pyaudio>=0.2.14             # Uncomment if audio detection needed
+

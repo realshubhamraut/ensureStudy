@@ -1,0 +1,84 @@
+# Kafka Topics Configuration for ensureStudy
+
+topics:
+  # Student interaction events
+  - name: student-events
+    partitions: 3
+    replication_factor: 1
+    retention_ms: 604800000  # 7 days
+    description: "All student interaction events (clicks, page views, study sessions)"
+
+  # Chat messages for async processing
+  - name: chat-messages
+    partitions: 3
+    replication_factor: 1
+    retention_ms: 2592000000  # 30 days
+    description: "Chat messages between students and AI tutor"
+
+  # Assessment submissions
+  - name: assessment-submissions
+    partitions: 3
+    replication_factor: 1
+    retention_ms: 2592000000  # 30 days
+    description: "Assessment submissions and results"
+
+  # Moderation events
+  - name: moderation-events
+    partitions: 2
+    replication_factor: 1
+    retention_ms: 2592000000  # 30 days
+    description: "Content moderation decisions and logs"
+
+  # Leaderboard updates
+  - name: leaderboard-updates
+    partitions: 2
+    replication_factor: 1
+    retention_ms: 86400000  # 1 day
+    description: "Points and badge updates for leaderboards"
+
+  # Progress updates
+  - name: progress-updates
+    partitions: 3
+    replication_factor: 1
+    retention_ms: 604800000  # 7 days
+    description: "Student progress and confidence score updates"
+
+  # Analytics events
+  - name: analytics-events
+    partitions: 3
+    replication_factor: 1
+    retention_ms: 2592000000  # 30 days
+    description: "Aggregated analytics events for dashboards"
+
+  # INTEGRATION NOTE: Document processing pipeline topic
+  - name: document-processing
+    partitions: 3
+    replication_factor: 1
+    retention_ms: 604800000  # 7 days  
+    description: "Document upload processing events for LangGraph pipeline"
+
+consumer_groups:
+  - name: agent-consumers
+    topics:
+      - chat-messages
+      - student-events
+
+  - name: analytics-consumers
+    topics:
+      - student-events
+      - assessment-submissions
+      - progress-updates
+
+  - name: moderation-consumers
+    topics:
+      - chat-messages
+
+  - name: leaderboard-consumers
+    topics:
+      - assessment-submissions
+      - progress-updates
+
+  # INTEGRATION NOTE: Document processing consumer group
+  - name: document-consumers
+    topics:
+      - document-processing

@@ -1,0 +1,49 @@
+{
+    "name": "ensure-study-web",
+    "version": "0.1.0",
+    "private": true,
+    "scripts": {
+        "dev": "next dev",
+        "build": "next build",
+        "start": "next start",
+        "lint": "next lint"
+    },
+    "dependencies": {
+        "@headlessui/react": "^1.7.17",
+        "@heroicons/react": "^2.1.1",
+        "@react-three/drei": "^10.7.7",
+        "@react-three/fiber": "^9.4.2",
+        "@types/three": "^0.182.0",
+        "axios": "^1.6.2",
+        "clsx": "^2.0.0",
+        "date-fns": "^3.0.6",
+        "highlight.js": "^11.9.0",
+        "katex": "^0.16.27",
+        "mermaid": "^11.12.2",
+        "next": "14.0.4",
+        "next-auth": "^4.24.5",
+        "react": "^18.2.0",
+        "react-dom": "^18.2.0",
+        "react-hot-toast": "^2.4.1",
+        "react-markdown": "^9.1.0",
+        "react-pdf": "^10.2.0",
+        "recharts": "^2.10.3",
+        "rehype-highlight": "^7.0.2",
+        "rehype-katex": "^7.0.1",
+        "remark-gfm": "^4.0.1",
+        "remark-math": "^6.0.0",
+        "three": "^0.182.0",
+        "zustand": "^4.4.7"
+    },
+    "devDependencies": {
+        "@types/node": "^20.10.5",
+        "@types/react": "^18.2.45",
+        "@types/react-dom": "^18.2.18",
+        "autoprefixer": "^10.4.16",
+        "eslint": "^8.56.0",
+        "eslint-config-next": "14.0.4",
+        "postcss": "^8.4.32",
+        "tailwindcss": "^3.4.0",
+        "typescript": "^5.3.3"
+    }
+}

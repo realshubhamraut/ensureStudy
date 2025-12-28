@@ -1,0 +1,265 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+env:
+  PYTHON_VERSION: '3.11'
+  NODE_VERSION: '20'
+
+jobs:
+  # ====================
+  # Linting and Type Checking
+  # ====================
+  lint:
+    name: Lint & Type Check
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: Install linting tools
+        run: |
+          pip install flake8 black mypy
+      
+      - name: Run Black (check)
+        run: |
+          black --check backend/
+      
+      - name: Run Flake8
+        run: |
+          flake8 backend/ --max-line-length=120 --ignore=E501,W503
+  
+  # ====================
+  # Core Service Tests
+  # ====================
+  test-core-service:
+    name: Test Core Service
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: test_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: Install dependencies
+        working-directory: backend/core-service
+        run: |
+          pip install -r requirements.txt
+          pip install pytest pytest-cov pytest-flask
+      
+      - name: Run tests
+        working-directory: backend/core-service
+        env:
+          DATABASE_URL: postgresql://test:test@localhost:5432/test_db
+          JWT_SECRET: test-jwt-secret-key-for-ci-testing
+        run: |
+          pytest tests/ -v --cov=app --cov-report=xml
+      
+      - name: Upload coverage
+        uses: codecov/codecov-action@v3
+        with:
+          file: backend/core-service/coverage.xml
+          flags: core-service
+  
+  # ====================
+  # AI Service Tests
+  # ====================
+  test-ai-service:
+    name: Test AI Service
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: Install dependencies
+        working-directory: backend/ai-service
+        run: |
+          pip install -r requirements.txt
+          pip install pytest pytest-cov pytest-asyncio
+      
+      - name: Run tests
+        working-directory: backend/ai-service
+        env:
+          JWT_SECRET: test-jwt-secret-key-for-ci-testing
+          OPENAI_API_KEY: sk-test-key
+        run: |
+          pytest tests/ -v --cov=app --cov-report=xml
+      
+      - name: Upload coverage
+        uses: codecov/codecov-action@v3
+        with:
+          file: backend/ai-service/coverage.xml
+          flags: ai-service
+  
+  # ====================
+  # Frontend Tests
+  # ====================
+  test-frontend:
+    name: Test Frontend
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+      
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+      
+      - name: Run linting
+        working-directory: frontend
+        run: npm run lint
+      
+      - name: Build
+        working-directory: frontend
+        run: npm run build
+        env:
+          NEXT_PUBLIC_API_URL: http://localhost:8000
+          NEXT_PUBLIC_AI_SERVICE_URL: http://localhost:8001
+  
+  # ====================
+  # Build Docker Images
+  # ====================
+  build-images:
+    name: Build Docker Images
+    runs-on: ubuntu-latest
+    needs: [test-core-service, test-ai-service, test-frontend]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Build Core Service
+        uses: docker/build-push-action@v5
+        with:
+          context: backend/core-service
+          push: false
+          tags: ensurestudy/core-service:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      
+      - name: Build AI Service
+        uses: docker/build-push-action@v5
+        with:
+          context: backend/ai-service
+          push: false
+          tags: ensurestudy/ai-service:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      
+      - name: Build Frontend
+        uses: docker/build-push-action@v5
+        with:
+          context: frontend
+          push: false
+          tags: ensurestudy/frontend:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+  
+  # ====================
+  # Integration Tests
+  # ====================
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: [test-core-service, test-ai-service]
+    if: github.event_name == 'push'
+    
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: test_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: Install test dependencies
+        run: |
+          pip install pytest requests
+      
+      - name: Start services
+        run: |
+          # Start core service
+          cd backend/core-service
+          pip install -r requirements.txt
+          flask run --port 8000 &
+          
+          # Start AI service
+          cd ../ai-service
+          pip install -r requirements.txt
+          uvicorn app.main:app --port 8001 &
+          
+          # Wait for services
+          sleep 10
+        env:
+          FLASK_APP: app
+          DATABASE_URL: postgresql://test:test@localhost:5432/test_db
+          JWT_SECRET: test-jwt-secret-key-for-ci-testing
+      
+      - name: Run integration tests
+        run: |
+          pytest tests/integration/ -v -m integration
+        env:
+          CORE_API_URL: http://localhost:8000
+          AI_SERVICE_URL: http://localhost:8001

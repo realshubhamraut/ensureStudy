@@ -1,0 +1,267 @@
+version: '3.8'
+
+services:
+  # ===========================================
+  # DATABASES & INFRASTRUCTURE
+  # ===========================================
+  
+  # PostgreSQL - Main Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: ensure-study-postgres
+    environment:
+      POSTGRES_USER: ensure_study_user
+      POSTGRES_PASSWORD: secure_password_123
+      POSTGRES_DB: ensure_study
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/core-service/migrations/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ensure_study_user -d ensure_study"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ensure-study
+
+  # Redis - Caching & Session Store
+  redis:
+    image: redis:7-alpine
+    container_name: ensure-study-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ensure-study
+
+  # Qdrant - Vector Database
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: ensure-study-qdrant
+    ports:
+      - "6333:6333"  # HTTP API
+      - "6334:6334"  # gRPC API
+    volumes:
+      - qdrant_storage:/qdrant/storage
+    environment:
+      QDRANT__SERVICE__GRPC_PORT: 6334
+      QDRANT__STORAGE__SNAPSHOT_PATH: /qdrant/storage/snapshots
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ensure-study
+
+  # ===========================================
+  # KAFKA & ZOOKEEPER
+  # ===========================================
+  
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: ensure-study-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+    volumes:
+      - zookeeper_data:/var/lib/zookeeper/data
+      - zookeeper_log:/var/lib/zookeeper/log
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "2181"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ensure-study
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: ensure-study-kafka
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_DELETE_TOPIC_ENABLE: "true"
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+    networks:
+      - ensure-study
+
+  # Kafka UI for debugging
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: ensure-study-kafka-ui
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: ensure-study
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+      KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
+    depends_on:
+      - kafka
+    networks:
+      - ensure-study
+
+  # ===========================================
+  # APPLICATION SERVICES
+  # ===========================================
+  
+  # Core Service (Flask) - Auth & DB Operations
+  core-api:
+    build:
+      context: ./backend/core-service
+      dockerfile: Dockerfile
+    container_name: ensure-study-core-api
+    ports:
+      - "8000:8000"
+    environment:
+      FLASK_ENV: development
+      DATABASE_URL: postgresql://ensure_study_user:secure_password_123@postgres:5432/ensure_study
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET:-your-super-secret-key-min-32-chars-here}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend/core-service:/app
+    command: flask run --host 0.0.0.0 --port 8000 --reload
+    networks:
+      - ensure-study
+
+  # AI Service (FastAPI) - RAG & Agents
+  ai-service:
+    build:
+      context: ./backend/ai-service
+      dockerfile: Dockerfile
+    container_name: ensure-study-ai-service
+    ports:
+      - "8001:8001"
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      QDRANT_HOST: qdrant
+      QDRANT_PORT: 6333
+      QDRANT_COLLECTION_NAME: ensure_study_documents
+      DATABASE_URL: postgresql://ensure_study_user:secure_password_123@postgres:5432/ensure_study
+      REDIS_URL: redis://redis:6379
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      LLM_MODEL: gpt-4
+      EMBEDDING_MODEL: text-embedding-3-small
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    volumes:
+      - ./backend/ai-service:/app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
+    networks:
+      - ensure-study
+
+  # Frontend (Next.js)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: ensure-study-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+      NEXT_PUBLIC_AI_SERVICE_URL: http://localhost:8001
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-your-nextauth-secret}
+      NEXTAUTH_URL: http://localhost:3000
+    depends_on:
+      - core-api
+      - ai-service
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.next
+    networks:
+      - ensure-study
+
+  # Streamlit Dashboards
+  dashboards:
+    build:
+      context: ./dashboards
+      dockerfile: Dockerfile
+    container_name: ensure-study-dashboards
+    ports:
+      - "8501:8501"
+    environment:
+      QDRANT_HOST: qdrant
+      QDRANT_PORT: 6333
+      DATABASE_URL: postgresql://ensure_study_user:secure_password_123@postgres:5432/ensure_study
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+    depends_on:
+      - postgres
+      - qdrant
+    volumes:
+      - ./dashboards:/app
+    command: streamlit run app.py --server.port 8501 --server.address 0.0.0.0
+    networks:
+      - ensure-study
+
+  # MLflow Tracking Server
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.9.0
+    container_name: ensure-study-mlflow
+    ports:
+      - "5000:5000"
+    environment:
+      MLFLOW_BACKEND_STORE_URI: postgresql://ensure_study_user:secure_password_123@postgres:5432/ensure_study
+      MLFLOW_DEFAULT_ARTIFACT_ROOT: /mlflow/artifacts
+    volumes:
+      - mlflow_artifacts:/mlflow/artifacts
+    command: mlflow server --host 0.0.0.0 --port 5000 --backend-store-uri postgresql://ensure_study_user:secure_password_123@postgres:5432/ensure_study --default-artifact-root /mlflow/artifacts
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - ensure-study
+
+volumes:
+  postgres_data:
+  redis_data:
+  qdrant_storage:
+  zookeeper_data:
+  zookeeper_log:
+  kafka_data:
+  mlflow_artifacts:
+
+networks:
+  ensure-study:
+    driver: bridge

@@ -1,0 +1,2 @@
+/backend/ai-service/app/proctor/models/weights/shape_predictor_68_face_landmarks.dat filter=lfs diff=lfs merge=lfs -text
+/try/pdfs/Docker.dmg filter=lfs diff=lfs merge=lfs -text
