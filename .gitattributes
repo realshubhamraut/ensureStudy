@@ -1,2 +1,7 @@
+*.dmg filter=lfs diff=lfs merge=lfs -text
+*.dat filter=lfs diff=lfs merge=lfs -text
+*.pdf filter=lfs diff=lfs merge=lfs -text
+*.pt filter=lfs diff=lfs merge=lfs -text
+*.task filter=lfs diff=lfs merge=lfs -text
 /backend/ai-service/app/proctor/models/weights/shape_predictor_68_face_landmarks.dat filter=lfs diff=lfs merge=lfs -text
 /try/pdfs/Docker.dmg filter=lfs diff=lfs merge=lfs -text
