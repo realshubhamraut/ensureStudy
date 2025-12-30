@@ -55,16 +55,15 @@ if ! python -c "import streamlit" 2>/dev/null; then
     pip install streamlit plotly pandas
 fi
 
-# Load environment variables from .env (except DATABASE_URL which we override for local)
+# Load environment variables from .env
 if [ -f "$PROJECT_ROOT/.env" ]; then
-    # Load all env vars except DATABASE_URL (we force SQLite for local dev)
-    export $(grep -v '^#' "$PROJECT_ROOT/.env" | grep -v 'DATABASE_URL' | xargs)
+    export $(grep -v '^#' "$PROJECT_ROOT/.env" | xargs)
 fi
 
-# Set environment variables - FORCE SQLite for local development
+# Set environment variables - Use PostgreSQL from .env
 export FLASK_APP=app
 export FLASK_DEBUG=1
-export DATABASE_URL="sqlite:///$PROJECT_ROOT/backend/core-service/local.db"  # Force SQLite
+# DATABASE_URL is loaded from .env (PostgreSQL)
 export JWT_SECRET="${JWT_SECRET:-local-dev-jwt-secret-key-32chars}"
 export OPENAI_API_KEY="${OPENAI_API_KEY:-sk-test-key}"
 export PYTHONUNBUFFERED=1  # Force unbuffered output for real-time logging

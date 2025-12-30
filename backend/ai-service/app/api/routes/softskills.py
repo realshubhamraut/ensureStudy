@@ -6,12 +6,15 @@ Provides endpoints for evaluating communication skills:
 - Grammar checking
 - Eye contact and posture (from video)
 - Overall soft skills score
+- Real-time frame analysis via WebSocket
 """
 
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
-from typing import List, Optional
-import random
+from typing import List, Optional, Dict
+import json
+import base64
+import asyncio
 from datetime import datetime
 
 router = APIRouter(prefix="/softskills", tags=["Soft Skills"])
@@ -27,6 +30,7 @@ class SoftSkillsEvaluationRequest(BaseModel):
     transcript: str = Field(..., description="Transcribed speech from user")
     audio_duration_seconds: float = Field(default=60.0, description="Duration of audio")
     has_video: bool = Field(default=False, description="Whether video was captured")
+    pause_ratio: float = Field(default=0.0, description="Ratio of pause time to total time")
     
 
 class FluencyMetrics(BaseModel):
@@ -68,9 +72,16 @@ class FrameAnalysisResult(BaseModel):
     """Result from analyzing a single frame."""
     face_present: bool
     gaze_direction: str  # center, left, right
-    head_deviation: str  # normal, up, down, left, right
+    gaze_score: float
+    head_yaw: float
+    head_pitch: float
     hands_visible: bool
     num_hands: int
+    gesture_score: float
+    body_detected: bool
+    posture_score: float
+    is_upright: bool
+    shoulders_level: bool
 
 
 class SoftSkillsResult(BaseModel):
@@ -86,58 +97,54 @@ class SoftSkillsResult(BaseModel):
 
 
 # ============================================
-# Analysis Functions
+# Analysis Functions (using new services)
 # ============================================
 
-# Common filler words to detect
-FILLER_WORDS = [
-    "um", "uh", "like", "you know", "basically", "actually", 
-    "literally", "so", "well", "I mean", "kind of", "sort of"
-]
+def analyze_fluency_with_service(transcript: str, duration_seconds: float, pause_ratio: float = 0.0) -> FluencyMetrics:
+    """Analyze speech fluency using the fluency analyzer service."""
+    try:
+        from ...services.fluency_analyzer import get_fluency_analyzer
+        
+        analyzer = get_fluency_analyzer()
+        result = analyzer.analyze(transcript, duration_seconds, pause_ratio)
+        
+        return FluencyMetrics(
+            words_per_minute=round(result.wpm, 1),
+            pause_ratio=round(result.pause_ratio, 2),
+            filler_word_count=result.filler_count,
+            filler_words_used=result.fillers_detected[:5],
+            score=round(result.score, 1)
+        )
+    except Exception as e:
+        print(f"[SoftSkills] Fluency analysis error: {e}")
+        # Fallback to basic analysis
+        return _analyze_fluency_basic(transcript, duration_seconds)
 
 
-def analyze_fluency(transcript: str, duration_seconds: float) -> FluencyMetrics:
-    """Analyze speech fluency."""
+def _analyze_fluency_basic(transcript: str, duration_seconds: float) -> FluencyMetrics:
+    """Basic fluency analysis fallback."""
     words = transcript.split()
     word_count = len(words)
-    
-    # Words per minute
     wpm = (word_count / duration_seconds) * 60 if duration_seconds > 0 else 0
     
-    # Detect filler words
+    FILLER_WORDS = ["um", "uh", "like", "you know", "basically", "actually"]
     transcript_lower = transcript.lower()
-    filler_count = 0
-    fillers_found = []
-    for filler in FILLER_WORDS:
-        count = transcript_lower.count(filler)
-        if count > 0:
-            filler_count += count
-            fillers_found.append(filler)
+    filler_count = sum(transcript_lower.count(f) for f in FILLER_WORDS)
+    fillers_found = [f for f in FILLER_WORDS if f in transcript_lower]
     
-    # Estimate pause ratio (simplified - count periods/commas as pauses)
-    pause_indicators = transcript.count('.') + transcript.count(',') + transcript.count('...')
-    pause_ratio = min(1.0, pause_indicators / max(1, word_count / 10))
-    
-    # Calculate score
-    # Ideal WPM is 120-150 for speaking
-    wpm_score = 100 if 120 <= wpm <= 150 else max(0, 100 - abs(wpm - 135) * 0.5)
-    filler_penalty = min(30, filler_count * 5)
-    pause_penalty = pause_ratio * 10
-    
-    score = max(0, min(100, wpm_score - filler_penalty - pause_penalty))
+    score = max(0, min(100, 80 - filler_count * 5))
     
     return FluencyMetrics(
         words_per_minute=round(wpm, 1),
-        pause_ratio=round(pause_ratio, 2),
+        pause_ratio=0.0,
         filler_word_count=filler_count,
-        filler_words_used=fillers_found[:5],  # Top 5
+        filler_words_used=fillers_found[:5],
         score=round(score, 1)
     )
 
 
 def analyze_grammar(transcript: str) -> GrammarMetrics:
     """Analyze grammar quality."""
-    # Split into sentences
     sentences = [s.strip() for s in transcript.replace('?', '.').replace('!', '.').split('.') if s.strip()]
     sentence_count = len(sentences)
     
@@ -146,19 +153,17 @@ def analyze_grammar(transcript: str) -> GrammarMetrics:
     
     avg_sentence_length = word_count / sentence_count if sentence_count > 0 else 0
     
-    # Simple grammar checks (in production, use language-tool-python or similar)
+    # Simple grammar checks
     errors = 0
     transcript_lower = transcript.lower()
     
-    # Check for common errors
     if " i " in transcript_lower or transcript_lower.startswith("i "):
-        errors += 1  # Should be "I"
+        errors += 1
     if "  " in transcript:
-        errors += 1  # Double spaces
+        errors += 1
     if transcript_lower.count("dont") > 0 or transcript_lower.count("wont") > 0:
-        errors += 1  # Missing apostrophes
+        errors += 1
     
-    # Score calculation
     error_penalty = min(40, errors * 10)
     length_score = 100 if 10 <= avg_sentence_length <= 20 else max(50, 100 - abs(avg_sentence_length - 15) * 3)
     
@@ -172,18 +177,11 @@ def analyze_grammar(transcript: str) -> GrammarMetrics:
     )
 
 
-def analyze_visual(has_video: bool, video_bytes: bytes = None) -> VisualMetrics:
+def analyze_visual_with_pipeline(has_video: bool, video_bytes: bytes = None) -> VisualMetrics:
     """
-    Analyze visual aspects from video using computer vision.
-    
-    Uses the VideoAnalyzer service which integrates:
-    - Face detection (dlib)
-    - Gaze tracking (eye landmark analysis)
-    - Head pose estimation (PnP)
-    - Hand detection (MediaPipe)
+    Analyze visual aspects from video using the soft skills pipeline.
     """
     if not has_video or video_bytes is None:
-        # Default scores when no video
         return VisualMetrics(
             eye_contact_score=75.0,
             posture_score=75.0,
@@ -191,21 +189,37 @@ def analyze_visual(has_video: bool, video_bytes: bytes = None) -> VisualMetrics:
         )
     
     try:
-        from ..services.video_analyzer import get_video_analyzer
+        from ...services.softskills_pipeline import get_softskills_pipeline
+        import cv2
+        import numpy as np
         
-        analyzer = get_video_analyzer()
-        result = analyzer.analyze_video_bytes(video_bytes)
+        pipeline = get_softskills_pipeline()
+        pipeline.start_session()
+        
+        # Decode video and process frames
+        nparr = np.frombuffer(video_bytes, np.uint8)
+        
+        # For now, treat as single image (MVP)
+        # In production, would extract frames from video
+        frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        
+        if frame is not None:
+            pipeline.process_frame(frame)
+        
+        # Get aggregated metrics
+        visual_metrics = pipeline.aggregate_visual_metrics()
         
         return VisualMetrics(
-            eye_contact_score=round(result.eye_contact_score, 1),
-            posture_score=round(result.posture_score, 1),
-            hand_gesture_score=round(result.hand_gesture_score, 1)
+            eye_contact_score=round(visual_metrics.eye_contact_score, 1),
+            posture_score=round(visual_metrics.posture_score, 1),
+            hand_gesture_score=round(visual_metrics.gesture_score, 1),
+            gaze_center_ratio=visual_metrics.gaze_center_ratio,
+            hands_visible_ratio=visual_metrics.hands_visible_ratio,
+            frames_analyzed=visual_metrics.frames_analyzed
         )
         
     except Exception as e:
-        # Fallback to defaults if analysis fails
-        import logging
-        logging.warning(f"Video analysis failed: {e}")
+        print(f"[SoftSkills] Video analysis failed: {e}")
         return VisualMetrics(
             eye_contact_score=75.0,
             posture_score=75.0,
@@ -256,6 +270,11 @@ def generate_feedback(
     else:
         improvements.append("Sit upright and maintain a confident posture")
     
+    if visual.hand_gesture_score >= 80:
+        strengths.append("Natural and expressive hand gestures")
+    elif visual.hand_gesture_score < 60:
+        improvements.append("Keep your hands visible and use natural gestures")
+    
     # Overall feedback
     if overall >= 80:
         feedback.insert(0, "Outstanding performance! You demonstrated excellent communication skills.")
@@ -279,17 +298,23 @@ async def evaluate_soft_skills(request: SoftSkillsEvaluationRequest):
         raise HTTPException(status_code=400, detail="Transcript too short for evaluation")
     
     # Analyze each component
-    fluency = analyze_fluency(request.transcript, request.audio_duration_seconds)
+    fluency = analyze_fluency_with_service(
+        request.transcript, 
+        request.audio_duration_seconds,
+        request.pause_ratio
+    )
     grammar = analyze_grammar(request.transcript)
-    visual = analyze_visual(request.has_video)
+    visual = analyze_visual_with_pipeline(request.has_video)
     
     # Calculate overall score using weighted formula
     overall_score = (
-        0.35 * fluency.score +
-        0.25 * grammar.score +
-        0.20 * visual.eye_contact_score +
+        0.30 * fluency.score +
+        0.20 * grammar.score +
+        0.15 * visual.eye_contact_score +
         0.10 * visual.hand_gesture_score +
-        0.10 * visual.posture_score
+        0.10 * visual.posture_score +
+        0.10 * 75.0 +  # Expression placeholder
+        0.05 * 75.0    # Other
     )
     
     # Generate feedback
@@ -301,9 +326,9 @@ async def evaluate_soft_skills(request: SoftSkillsEvaluationRequest):
         visual=visual,
         overall_score=round(overall_score, 1),
         breakdown={
-            "fluency": {"weight": "35%", "score": fluency.score},
-            "grammar": {"weight": "25%", "score": grammar.score},
-            "eye_contact": {"weight": "20%", "score": visual.eye_contact_score},
+            "fluency": {"weight": "30%", "score": fluency.score},
+            "grammar": {"weight": "20%", "score": grammar.score},
+            "eye_contact": {"weight": "15%", "score": visual.eye_contact_score},
             "hand_gestures": {"weight": "10%", "score": visual.hand_gesture_score},
             "posture": {"weight": "10%", "score": visual.posture_score}
         },
@@ -330,8 +355,8 @@ async def evaluate_with_video(
     - Posture
     """
     # Validate file type
-    if not video.content_type.startswith('video/'):
-        raise HTTPException(status_code=400, detail="File must be a video")
+    if not video.content_type.startswith('video/') and not video.content_type.startswith('image/'):
+        raise HTTPException(status_code=400, detail="File must be a video or image")
     
     # Read video bytes
     video_bytes = await video.read()
@@ -344,19 +369,21 @@ async def evaluate_with_video(
         raise HTTPException(status_code=400, detail="Transcript too short for evaluation")
     
     # Analyze each component
-    fluency = analyze_fluency(transcript, audio_duration_seconds)
+    fluency = analyze_fluency_with_service(transcript, audio_duration_seconds)
     grammar = analyze_grammar(transcript)
     
     # Analyze video with real CV detection
-    visual = analyze_visual(has_video=True, video_bytes=video_bytes)
+    visual = analyze_visual_with_pipeline(has_video=True, video_bytes=video_bytes)
     
-    # Calculate overall score using weighted formula
+    # Calculate overall score
     overall_score = (
-        0.35 * fluency.score +
-        0.25 * grammar.score +
-        0.20 * visual.eye_contact_score +
+        0.30 * fluency.score +
+        0.20 * grammar.score +
+        0.15 * visual.eye_contact_score +
         0.10 * visual.hand_gesture_score +
-        0.10 * visual.posture_score
+        0.10 * visual.posture_score +
+        0.10 * 75.0 +  # Expression placeholder
+        0.05 * 75.0
     )
     
     # Generate feedback
@@ -368,9 +395,9 @@ async def evaluate_with_video(
         visual=visual,
         overall_score=round(overall_score, 1),
         breakdown={
-            "fluency": {"weight": "35%", "score": fluency.score},
-            "grammar": {"weight": "25%", "score": grammar.score},
-            "eye_contact": {"weight": "20%", "score": visual.eye_contact_score},
+            "fluency": {"weight": "30%", "score": fluency.score},
+            "grammar": {"weight": "20%", "score": grammar.score},
+            "eye_contact": {"weight": "15%", "score": visual.eye_contact_score},
             "hand_gestures": {"weight": "10%", "score": visual.hand_gesture_score},
             "posture": {"weight": "10%", "score": visual.posture_score}
         },
@@ -389,37 +416,190 @@ async def analyze_frame(request: FrameAnalysisRequest):
     Returns immediate detection results for:
     - Face presence
     - Gaze direction (center/left/right)
-    - Head position (normal/up/down/left/right)
+    - Head position (yaw, pitch)
     - Hand visibility
+    - Posture metrics
     """
-    import base64
-    import cv2
-    import numpy as np
-    
     try:
-        # Decode base64 frame
-        frame_bytes = base64.b64decode(request.frame_base64)
-        frame_array = np.frombuffer(frame_bytes, dtype=np.uint8)
-        frame = cv2.imdecode(frame_array, cv2.IMREAD_COLOR)
+        from ...services.softskills_pipeline import get_softskills_pipeline
         
-        if frame is None:
-            raise HTTPException(status_code=400, detail="Invalid frame data")
-        
-        # Analyze frame
-        from ..services.video_analyzer import get_video_analyzer
-        
-        analyzer = get_video_analyzer()
-        result = analyzer.analyze_frame(frame)
+        pipeline = get_softskills_pipeline()
+        result = pipeline.process_frame_base64(request.frame_base64)
         
         return FrameAnalysisResult(
-            face_present=result.face_present,
+            face_present=result.face_detected,
             gaze_direction=result.gaze_direction,
-            head_deviation=result.head_deviation,
+            gaze_score=result.gaze_score,
+            head_yaw=result.head_yaw,
+            head_pitch=result.head_pitch,
             hands_visible=result.hands_visible,
-            num_hands=result.num_hands
+            num_hands=result.num_hands,
+            gesture_score=result.gesture_score,
+            body_detected=result.body_detected,
+            posture_score=result.posture_score,
+            is_upright=result.is_upright,
+            shoulders_level=result.shoulders_level
         )
         
-    except HTTPException:
-        raise
     except Exception as e:
+        print(f"[SoftSkills] Frame analysis error: {e}")
         raise HTTPException(status_code=500, detail=f"Frame analysis error: {str(e)}")
+
+
+# ============================================
+# WebSocket for Real-Time Analysis
+# ============================================
+
+class SessionManager:
+    """Manages active WebSocket sessions."""
+    
+    def __init__(self):
+        self.active_sessions: Dict[str, WebSocket] = {}
+    
+    async def connect(self, session_id: str, websocket: WebSocket):
+        await websocket.accept()
+        self.active_sessions[session_id] = websocket
+    
+    def disconnect(self, session_id: str):
+        if session_id in self.active_sessions:
+            del self.active_sessions[session_id]
+    
+    async def send_result(self, session_id: str, data: dict):
+        if session_id in self.active_sessions:
+            await self.active_sessions[session_id].send_json(data)
+
+
+session_manager = SessionManager()
+
+
+@router.websocket("/ws/{session_id}")
+async def websocket_realtime_analysis(websocket: WebSocket, session_id: str):
+    """
+    WebSocket endpoint for real-time soft skills analysis.
+    
+    Client sends base64-encoded frames, receives analysis results.
+    
+    Message format (client -> server):
+    {
+        "type": "frame",
+        "data": "<base64 encoded JPEG>"
+    }
+    
+    Message format (server -> client):
+    {
+        "type": "analysis",
+        "timestamp": 1234567890,
+        "face_detected": true,
+        "gaze_direction": "center",
+        "gaze_score": 85.0,
+        "hands_visible": true,
+        "gesture_score": 75.0,
+        "posture_score": 80.0,
+        "is_upright": true
+    }
+    """
+    await session_manager.connect(session_id, websocket)
+    
+    try:
+        from ...services.softskills_pipeline import get_softskills_pipeline
+        
+        pipeline = get_softskills_pipeline()
+        pipeline.start_session()
+        
+        print(f"[WebSocket] Session {session_id} connected")
+        
+        while True:
+            # Receive message
+            data = await websocket.receive_text()
+            message = json.loads(data)
+            
+            if message.get("type") == "frame":
+                # Process frame
+                frame_base64 = message.get("data", "")
+                
+                if frame_base64:
+                    result = pipeline.process_frame_base64(frame_base64)
+                    
+                    # Send result back
+                    await websocket.send_json({
+                        "type": "analysis",
+                        "timestamp": result.timestamp_ms,
+                        "face_detected": result.face_detected,
+                        "gaze_direction": result.gaze_direction,
+                        "gaze_score": round(result.gaze_score, 1),
+                        "is_looking_at_camera": result.is_looking_at_camera,
+                        "hands_visible": result.hands_visible,
+                        "num_hands": result.num_hands,
+                        "gesture_score": round(result.gesture_score, 1),
+                        "body_detected": result.body_detected,
+                        "posture_score": round(result.posture_score, 1),
+                        "is_upright": result.is_upright,
+                        "shoulders_level": result.shoulders_level
+                    })
+            
+            elif message.get("type") == "transcript":
+                # Process transcript for fluency
+                transcript = message.get("text", "")
+                duration = message.get("duration", 60.0)
+                
+                if transcript:
+                    fluency_result = analyze_fluency_with_service(transcript, duration)
+                    
+                    await websocket.send_json({
+                        "type": "fluency",
+                        "score": fluency_result.score,
+                        "wpm": fluency_result.words_per_minute,
+                        "filler_count": fluency_result.filler_word_count,
+                        "fillers": fluency_result.filler_words_used
+                    })
+            
+            elif message.get("type") == "get_summary":
+                # Get aggregated metrics
+                visual_metrics = pipeline.aggregate_visual_metrics()
+                
+                await websocket.send_json({
+                    "type": "summary",
+                    "frames_analyzed": visual_metrics.frames_analyzed,
+                    "eye_contact_score": round(visual_metrics.eye_contact_score, 1),
+                    "gaze_center_ratio": round(visual_metrics.gaze_center_ratio, 3),
+                    "gesture_score": round(visual_metrics.gesture_score, 1),
+                    "hands_visible_ratio": round(visual_metrics.hands_visible_ratio, 3),
+                    "posture_score": round(visual_metrics.posture_score, 1),
+                    "is_upright_ratio": round(visual_metrics.is_upright_ratio, 3)
+                })
+            
+            elif message.get("type") == "end_session":
+                # End session and get final scores
+                visual_metrics = pipeline.aggregate_visual_metrics()
+                
+                await websocket.send_json({
+                    "type": "session_complete",
+                    "visual_metrics": visual_metrics.to_dict()
+                })
+                break
+                
+    except WebSocketDisconnect:
+        print(f"[WebSocket] Session {session_id} disconnected")
+    except Exception as e:
+        print(f"[WebSocket] Session {session_id} error: {e}")
+    finally:
+        session_manager.disconnect(session_id)
+
+
+@router.get("/health")
+async def health_check():
+    """Check if soft skills service is healthy."""
+    try:
+        from ...services.gaze_analyzer import MEDIAPIPE_AVAILABLE
+        
+        return {
+            "status": "healthy",
+            "mediapipe_available": MEDIAPIPE_AVAILABLE,
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        return {
+            "status": "degraded",
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        }

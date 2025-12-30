@@ -33,3 +33,15 @@ venv/lib/python3.14/site-packages/pyarrow/libarrow.2200.dylib filter=lfs diff=lf
 .git/lfs/objects/fb/dc/fbdc2cb80eb9aa7a758672cbfdda32ba6300efe9b6e6c7a299ff7e736b11b92f filter=lfs diff=lfs merge=lfs -text
 /backend/ai-service/app/proctor/models/weights/shape_predictor_68_face_landmarks.dat filter=lfs diff=lfs merge=lfs -text
 /try/pdfs/Docker.dmg filter=lfs diff=lfs merge=lfs -text
+*.parquet filter=lfs diff=lfs merge=lfs -text
+*.dylib filter=lfs diff=lfs merge=lfs -text
+*.node filter=lfs diff=lfs merge=lfs -text
+*.pkl filter=lfs diff=lfs merge=lfs -text
+*.pth filter=lfs diff=lfs merge=lfs -text
+*.h5 filter=lfs diff=lfs merge=lfs -text
+*.pb filter=lfs diff=lfs merge=lfs -text
+*.onnx filter=lfs diff=lfs merge=lfs -text
+*.bin filter=lfs diff=lfs merge=lfs -text
+*.safetensors filter=lfs diff=lfs merge=lfs -text
+*.weights filter=lfs diff=lfs merge=lfs -text
+*.model filter=lfs diff=lfs merge=lfs -text

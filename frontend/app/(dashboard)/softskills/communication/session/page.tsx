@@ -19,6 +19,8 @@ import {
     ExclamationTriangleIcon
 } from '@heroicons/react/24/outline'
 import { useSpeechEngine, useSpeechRecognition } from '@/components/avatar/SpeechEngine'
+import { useSoftSkillsAnalysis, useFrameCapture } from '@/hooks/useSoftSkillsAnalysis'
+import { RealTimeScoreCard } from '@/components/softskills/RealTimeScoreCard'
 
 // Dynamic import for Avatar
 const AvatarViewer = dynamic(() => import('@/components/avatar/AvatarViewer'), {
@@ -64,11 +66,28 @@ function CommunicationSessionContent() {
     const [permissionState, setPermissionState] = useState<PermissionState>('pending')
     const [permissionError, setPermissionError] = useState<string>('')
 
-    // Simulated real-time scores
+    // Generate unique session ID
+    const sessionIdRef = useRef(`session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`)
+
+    // Real-time soft skills analysis hook
+    const {
+        isConnected: analysisConnected,
+        isAnalyzing,
+        visualMetrics,
+        fluencyMetrics,
+        framesProcessed,
+        sendFrame,
+        sendTranscript,
+        startAnalysis,
+        stopAnalysis,
+        requestSummary,
+    } = useSoftSkillsAnalysis(sessionIdRef.current)
+
+    // Real-time scores from analysis (with fallback to reasonable defaults)
     const [realtimeScores, setRealtimeScores] = useState({
-        eyeContact: 85,
-        posture: 78,
-        handGestures: 62,
+        eyeContact: 75,
+        posture: 75,
+        handGestures: 70,
         expressions: 75,
         fluency: 0,
         grammar: 0
@@ -118,26 +137,31 @@ function CommunicationSessionContent() {
         }
     }
 
-    // Simulate real-time score updates (in production, this would come from backend video analysis)
+    // Update real-time scores from backend analysis
     useEffect(() => {
-        if (isListening) {
-            scoreUpdateRef.current = setInterval(() => {
-                setRealtimeScores(prev => ({
-                    ...prev,
-                    eyeContact: Math.min(100, Math.max(50, prev.eyeContact + (Math.random() - 0.5) * 10)),
-                    posture: Math.min(100, Math.max(50, prev.posture + (Math.random() - 0.5) * 5)),
-                    handGestures: Math.min(100, Math.max(30, prev.handGestures + (Math.random() - 0.5) * 8)),
-                    expressions: Math.min(100, Math.max(40, prev.expressions + (Math.random() - 0.5) * 12))
-                }))
-            }, 1000)
+        if (visualMetrics) {
+            setRealtimeScores(prev => ({
+                ...prev,
+                eyeContact: visualMetrics.gaze_score || prev.eyeContact,
+                posture: visualMetrics.posture_score || prev.posture,
+                handGestures: visualMetrics.gesture_score || prev.handGestures,
+                expressions: 75, // Placeholder - will be replaced with expression analysis
+            }))
         }
+    }, [visualMetrics])
 
-        return () => {
-            if (scoreUpdateRef.current) {
-                clearInterval(scoreUpdateRef.current)
-            }
+    // Update fluency scores from analysis
+    useEffect(() => {
+        if (fluencyMetrics) {
+            setRealtimeScores(prev => ({
+                ...prev,
+                fluency: fluencyMetrics.score || prev.fluency,
+            }))
         }
-    }, [isListening])
+    }, [fluencyMetrics])
+
+    // Frame capture for real-time analysis
+    useFrameCapture(videoRef, sendFrame, isAnalyzing && isListening, 5)
 
     // Effect to attach stream to video element when both are available
     useEffect(() => {
@@ -197,9 +221,12 @@ function CommunicationSessionContent() {
             setTimeElapsed(prev => prev + 1)
         }, 1000)
 
+        // Start real-time analysis
+        startAnalysis()
+
         setSessionState('speaking')
         await speak(currentPrompt)
-    }, [startCamera, speak, currentPrompt])
+    }, [startCamera, speak, currentPrompt, startAnalysis])
 
     // Submit current answer and move to next prompt
     const submitAnswer = useCallback(async () => {
@@ -208,14 +235,15 @@ function CommunicationSessionContent() {
         const answer = transcript.trim()
         setAnswers(prev => [...prev, answer])
 
-        // Simulate fluency and grammar scoring based on transcript
-        const words = answer.split(' ').length
-        const fluencyScore = Math.min(100, 60 + words * 2)
-        const grammarScore = Math.min(100, 70 + Math.random() * 20)
+        // Send transcript for fluency analysis
+        if (answer && timeElapsed > 0) {
+            sendTranscript(answer, timeElapsed)
+        }
 
+        // Simple grammar score (can be enhanced with backend grammar analysis)
+        const grammarScore = Math.min(100, 70 + Math.random() * 20)
         setRealtimeScores(prev => ({
             ...prev,
-            fluency: Math.round((prev.fluency * currentPromptIndex + fluencyScore) / (currentPromptIndex + 1)),
             grammar: Math.round((prev.grammar * currentPromptIndex + grammarScore) / (currentPromptIndex + 1))
         }))
 
@@ -226,13 +254,16 @@ function CommunicationSessionContent() {
             setSessionState('speaking')
             await speak(COMMUNICATION_PROMPTS[currentPromptIndex + 1])
         } else {
+            // End session and get summary
+            stopAnalysis()
+            requestSummary()
             setSessionState('complete')
             stopCamera()
             if (timerRef.current) {
                 clearInterval(timerRef.current)
             }
         }
-    }, [transcript, currentPromptIndex, stopListening, resetTranscript, speak, stopCamera])
+    }, [transcript, currentPromptIndex, stopListening, resetTranscript, speak, stopCamera, sendTranscript, timeElapsed, stopAnalysis, requestSummary])
 
     const formatTime = (seconds: number) => {
         const mins = Math.floor(seconds / 60)
