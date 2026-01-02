@@ -1,17 +1,162 @@
 """
-Flowchart Generator Service
+Flowchart Generator Service with Gemini AI
 
-Generates Mermaid flowchart code from AI tutor responses to visualize concepts.
+Generates Mermaid flowchart code dynamically using Google Gemini API.
+Falls back to templates if API is unavailable.
 """
+import os
+import re
+import logging
 from typing import Optional
+from functools import lru_cache
 
+logger = logging.getLogger(__name__)
+
+# ============================================================================
+# Gemini API Integration
+# ============================================================================
+
+_gemini_client = None
+
+def _get_gemini_client():
+    """Lazy-load Gemini client."""
+    global _gemini_client
+    if _gemini_client is None:
+        api_key = os.getenv("GEMINI_API_KEY", "")
+        if not api_key:
+            logger.warning("[FLOWCHART] GEMINI_API_KEY not set, using templates only")
+            return None
+        
+        try:
+            from google import genai
+            _gemini_client = genai.Client(api_key=api_key)
+            logger.info("[FLOWCHART] Gemini client initialized successfully")
+        except Exception as e:
+            logger.error(f"[FLOWCHART] Failed to initialize Gemini: {e}")
+            return None
+    
+    return _gemini_client
+
+
+def _generate_with_gemini(topic: str, context: str = "") -> Optional[str]:
+    """
+    Generate a Mermaid flowchart using Gemini API.
+    
+    Args:
+        topic: The topic to generate a flowchart for
+        context: Optional additional context from the answer
+        
+    Returns:
+        Mermaid flowchart code or None if generation fails
+    """
+    client = _get_gemini_client()
+    if client is None:
+        return None
+    
+    prompt = f'''Create a Mermaid flowchart for: "{topic}"
+
+CRITICAL LABEL RULES:
+- Keep ALL node labels SHORT - maximum 20-25 characters
+- Use abbreviations if needed
+- NEVER use parentheses () in labels
+- NEVER use emojis
+- For dates: write "1789" not "in 1789"
+
+MERMAID SYNTAX:
+- Start with: graph TD
+- Use square brackets: [Short Label]
+- Use --> for arrows
+- Subgraph: subgraph ID [Title] ... end
+
+STRUCTURE:
+- 8-12 nodes total
+- Group with subgraphs: Causes, Events, Effects
+- Show cause-effect relationships
+
+STYLING:
+- Causes: fill:#fff3e0,stroke:#ff9800
+- Events: fill:#e8f5e9,stroke:#4caf50  
+- Effects: fill:#e3f2fd,stroke:#2196f3
+
+{f"CONTEXT: {context[:300]}" if context else ""}
+
+OUTPUT: Only valid Mermaid code, no markdown blocks.
+
+EXAMPLE:
+graph TD
+    subgraph Causes [Root Causes]
+        C1[Financial Crisis]
+        C2[Social Inequality]
+        C3[Political Issues]
+    end
+    
+    C1 --> T[Trigger Event]
+    C2 --> T
+    C3 --> T
+    
+    T --> E1[Key Event 1]
+    E1 --> E2[Key Event 2]
+    
+    subgraph Effects [Outcomes]
+        O1[Short-term Effect]
+        O2[Long-term Impact]
+    end
+    
+    E2 --> O1
+    E2 --> O2
+    
+    style Causes fill:#fff3e0,stroke:#ff9800,stroke-width:2px
+    style Effects fill:#e3f2fd,stroke:#2196f3,stroke-width:2px'''
+    
+    try:
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt
+        )
+        
+        # Extract the flowchart code
+        flowchart = response.text.strip()
+        
+        # Clean up: remove markdown code blocks if present
+        flowchart = re.sub(r'^```mermaid\s*', '', flowchart)
+        flowchart = re.sub(r'^```\s*', '', flowchart)
+        flowchart = re.sub(r'\s*```$', '', flowchart)
+        flowchart = flowchart.strip()
+        
+        # Sanitize: Remove emojis and problematic characters
+        # Remove all emoji characters
+        flowchart = re.sub(r'[\U0001F300-\U0001F9FF]', '', flowchart)
+        flowchart = re.sub(r'[\u2600-\u26FF]', '', flowchart)
+        flowchart = re.sub(r'[\u2700-\u27BF]', '', flowchart)
+        
+        # Fix parentheses in labels: [Text (1789)] -> [Text - 1789]
+        flowchart = re.sub(r'\[([^\]]*)\(([^)]*)\)([^\]]*)\]', r'[\1- \2\3]', flowchart)
+        
+        # Remove any remaining special characters that might break parsing
+        # Keep alphanumeric, common punctuation, arrows, brackets
+        
+        # Validate it starts with a valid Mermaid directive
+        if flowchart.startswith(('graph ', 'flowchart ', 'sequenceDiagram', 'classDiagram', 'stateDiagram')):
+            logger.info(f"[FLOWCHART] ✅ Generated Gemini flowchart for: {topic[:50]}")
+            return flowchart
+        else:
+            logger.warning(f"[FLOWCHART] Invalid Mermaid output from Gemini: {flowchart[:100]}")
+            return None
+            
+    except Exception as e:
+        logger.error(f"[FLOWCHART] Gemini API error: {e}")
+        return None
+
+
+# ============================================================================
+# Main Entry Point
+# ============================================================================
 
 def generate_concept_flowchart(question: str, answer: str, subject: Optional[str] = None) -> Optional[str]:
     """
     Generate a Mermaid flowchart to visualize the concept explained in the answer.
     
-    For now, this uses simple template-based generation based on keywords.
-    In production, this could use an LLM to generate proper flowcharts.
+    Uses Gemini AI for dynamic generation, falls back to templates if unavailable.
     
     Args:
         question: The user's question
@@ -29,7 +174,9 @@ def generate_concept_flowchart(question: str, answer: str, subject: Optional[str
         'law', 'process', 'how does', 'explain', 'steps', 'cycle',
         'principle', 'theory', 'mechanism', 'what is', 'define',
         'newton', 'force', 'motion', 'energy', 'reaction', 'photosynthesis',
-        'digestion', 'respiration', 'circuit', 'algorithm', 'function'
+        'digestion', 'respiration', 'circuit', 'algorithm', 'function',
+        'revolution', 'war', 'history', 'cause', 'effect', 'machine learning',
+        'neural network', 'data', 'programming', 'biology', 'chemistry', 'physics'
     ]
     
     should_generate = any(keyword in question_lower or keyword in answer_lower for keyword in flowchart_keywords)
@@ -37,12 +184,22 @@ def generate_concept_flowchart(question: str, answer: str, subject: Optional[str
     if not should_generate:
         return None
     
-    # Generate flowchart based on detected topic
+    # Try Gemini API first for dynamic generation
+    gemini_result = _generate_with_gemini(question, answer[:500])
+    if gemini_result:
+        return gemini_result
+    
+    # Fall back to template-based generation
+    logger.info(f"[FLOWCHART] Using template fallback for: {question[:50]}")
     return _generate_topic_flowchart(question, answer, subject)
 
 
+# ============================================================================
+# Template-based Fallback (when Gemini is unavailable)
+# ============================================================================
+
 def _generate_topic_flowchart(question: str, answer: str, subject: Optional[str]) -> str:
-    """Generate a topic-specific flowchart."""
+    """Generate a topic-specific flowchart using templates."""
     question_lower = question.lower()
     
     # Newton's Laws

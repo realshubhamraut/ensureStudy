@@ -49,9 +49,11 @@ class Document(db.Model):
             "class_id": self.class_id,
             "title": self.title,
             "filename": self.filename,
+            "s3_path": self.s3_path,  # Added for AI service indexing
             "file_size": self.file_size,
             "mime_type": self.mime_type,
             "status": self.status,
+            "uploaded_by": self.uploaded_by,  # Added for AI service indexing
             "requires_manual_review": self.requires_manual_review,
             "error_message": self.error_message,
             "version": self.version,

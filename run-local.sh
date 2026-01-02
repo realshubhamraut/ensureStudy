@@ -41,17 +41,44 @@ sleep 1
 # Start Qdrant using docker-compose (if docker is available)
 echo -e "${YELLOW}Starting Qdrant vector database...${NC}"
 if command -v docker &> /dev/null; then
-    # Start only qdrant service from docker-compose
-    docker-compose up -d qdrant 2>/dev/null || docker compose up -d qdrant 2>/dev/null || {
-        echo -e "${YELLOW}Starting Qdrant standalone...${NC}"
-        docker run -d --name ensure-study-qdrant -p 6333:6333 -p 6334:6334 qdrant/qdrant 2>/dev/null || true
-    }
-    echo -e "${GREEN}Qdrant started on http://localhost:6333${NC}"
+    # Check if Docker daemon is running
+    if ! docker info &> /dev/null; then
+        echo -e "${YELLOW}Docker daemon not running. Attempting to start Docker Desktop...${NC}"
+        open -a Docker 2>/dev/null || true
+        
+        # Wait up to 30 seconds for Docker to start
+        echo -e "${YELLOW}Waiting for Docker to start (up to 30s)...${NC}"
+        for i in {1..30}; do
+            if docker info &> /dev/null; then
+                echo -e "${GREEN}Docker is now running!${NC}"
+                break
+            fi
+            sleep 1
+            echo -n "."
+        done
+        echo ""
+        
+        if ! docker info &> /dev/null; then
+            echo -e "${RED}Docker failed to start. Please start Docker Desktop manually.${NC}"
+            echo -e "${RED}Classroom materials will NOT be available without Qdrant.${NC}"
+        fi
+    fi
     
-    # Start MongoDB for meeting transcription storage
-    echo -e "${YELLOW}Starting MongoDB...${NC}"
-    docker start mongodb 2>/dev/null || docker run -d --name mongodb -p 27017:27017 mongo:latest 2>/dev/null || true
-    echo -e "${GREEN}MongoDB started on localhost:27017${NC}"
+    # Try to start Qdrant if Docker is running
+    if docker info &> /dev/null; then
+        # Start only qdrant service from docker-compose
+        docker-compose up -d qdrant 2>/dev/null || docker compose up -d qdrant 2>/dev/null || {
+            echo -e "${YELLOW}Starting Qdrant standalone...${NC}"
+            docker start ensure-study-qdrant 2>/dev/null || \
+            docker run -d --name ensure-study-qdrant -p 6333:6333 -p 6334:6334 qdrant/qdrant 2>/dev/null || true
+        }
+        echo -e "${GREEN}Qdrant started on http://localhost:6333${NC}"
+        
+        # Start MongoDB for meeting transcription storage
+        echo -e "${YELLOW}Starting MongoDB...${NC}"
+        docker start mongodb 2>/dev/null || docker run -d --name mongodb -p 27017:27017 mongo:latest 2>/dev/null || true
+        echo -e "${GREEN}MongoDB started on localhost:27017${NC}"
+    fi
 else
     echo -e "${RED}Docker not found - Qdrant and MongoDB won't be available${NC}"
 fi
