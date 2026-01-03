@@ -1,4 +1,6 @@
 'use client'
+import { getApiBaseUrl } from '@/utils/api'
+
 
 import { useState, useEffect, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation'
@@ -32,7 +34,7 @@ interface NotesJob {
     error_message: string
 }
 
-const BACKEND_URL = 'http://localhost:8000'
+const BACKEND_URL = `${getApiBaseUrl()}`
 
 export default function DigitizeNotesPage() {
     const params = useParams()

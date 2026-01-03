@@ -1,4 +1,6 @@
 'use client'
+import { getApiBaseUrl } from '@/utils/api'
+
 
 import { ReactNode, useState, useEffect, useCallback, useRef } from 'react'
 import { useSession, signOut } from 'next-auth/react'
@@ -72,7 +74,7 @@ export default function ParentLayout({ children }: { children: ReactNode }) {
 
     const fetchLinkedChildren = async () => {
         try {
-            const res = await fetch('http://localhost:8000/api/students/linked-children', {
+            const res = await fetch(`${getApiBaseUrl()}/api/students/linked-children`, {
                 headers: {
                     'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
                 }
@@ -96,7 +98,7 @@ export default function ParentLayout({ children }: { children: ReactNode }) {
         setLinkError('')
 
         try {
-            const res = await fetch('http://localhost:8000/api/students/link-by-code', {
+            const res = await fetch(`${getApiBaseUrl()}/api/students/link-by-code`, {
                 method: 'POST',
                 headers: {
                     'Authorization': `Bearer ${localStorage.getItem('accessToken')}`,

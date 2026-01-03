@@ -1,4 +1,6 @@
 'use client'
+import { getApiBaseUrl } from '@/utils/api'
+
 
 import { useState, useEffect, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation'
@@ -171,7 +173,7 @@ export default function StudentClassroomDetailPage() {
     const fetchResults = async () => {
         setLoadingResults(true)
         try {
-            const res = await fetch('http://localhost:8000/api/evaluation/my-results', {
+            const res = await fetch(`${getApiBaseUrl()}/api/evaluation/my-results`, {
                 headers: {
                     'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
                 }
@@ -194,7 +196,7 @@ export default function StudentClassroomDetailPage() {
     const fetchClassroom = async () => {
         try {
             // First try syllabus endpoint for enrolled students
-            const res = await fetch(`http://localhost:8000/api/classroom/${classroomId}/syllabus`, {
+            const res = await fetch(`${getApiBaseUrl()}/api/classroom/${classroomId}/syllabus`, {
                 headers: {
                     'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
                 }
@@ -229,7 +231,7 @@ export default function StudentClassroomDetailPage() {
             }
 
             // Fetch materials from API
-            const materialsRes = await fetch(`http://localhost:8000/api/classroom/${classroomId}/materials`, {
+            const materialsRes = await fetch(`${getApiBaseUrl()}/api/classroom/${classroomId}/materials`, {
                 headers: {
                     'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
                 }
@@ -384,7 +386,7 @@ export default function StudentClassroomDetailPage() {
     // ===== Assignment Functions =====
     const fetchAssignments = async () => {
         try {
-            const res = await fetch(`http://localhost:8000/api/classroom/${classroomId}/assignments`, {
+            const res = await fetch(`${getApiBaseUrl()}/api/classroom/${classroomId}/assignments`, {
                 headers: {
                     'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
                 }
@@ -425,7 +427,7 @@ export default function StudentClassroomDetailPage() {
                 formData.append('file', file)
 
                 try {
-                    const uploadRes = await fetch('http://localhost:8000/api/files/upload', {
+                    const uploadRes = await fetch(`${getApiBaseUrl()}/api/files/upload`, {
                         method: 'POST',
                         headers: {
                             'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
@@ -480,8 +482,8 @@ export default function StudentClassroomDetailPage() {
         setSubmitting(true)
         try {
             const endpoint = selectedAssignment.my_submission
-                ? `http://localhost:8000/api/submission/${selectedAssignment.my_submission.id}`
-                : `http://localhost:8000/api/assignment/${selectedAssignment.id}/submit`
+                ? `${getApiBaseUrl()}/api/submission/${selectedAssignment.my_submission.id}`
+                : `${getApiBaseUrl()}/api/assignment/${selectedAssignment.id}/submit`
 
             const method = selectedAssignment.my_submission ? 'PUT' : 'POST'
 
@@ -1449,7 +1451,7 @@ export default function StudentClassroomDetailPage() {
                                         formData.append('title', documentUploadTitle)
                                         formData.append('file', documentUploadFile)
 
-                                        const res = await fetch('http://localhost:8000/api/notes/upload', {
+                                        const res = await fetch(`${getApiBaseUrl()}/api/notes/upload`, {
                                             method: 'POST',
                                             headers: {
                                                 'Authorization': `Bearer ${localStorage.getItem('accessToken')}`

@@ -1,4 +1,6 @@
 'use client'
+import { getApiBaseUrl } from '@/utils/api'
+
 
 import { useState } from 'react'
 import { signIn } from 'next-auth/react'
@@ -39,7 +41,7 @@ export default function SignInPage() {
 
         try {
             // First authenticate with backend
-            const res = await fetch('http://localhost:8000/api/auth/login', {
+            const res = await fetch(`${getApiBaseUrl()}/api/auth/login`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ email, password })

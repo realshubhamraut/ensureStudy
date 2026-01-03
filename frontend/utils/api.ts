@@ -1,9 +1,34 @@
 /**
  * API Client for ensureStudy services
+ * Automatically detects hostname for LAN access support
  */
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
-const AI_SERVICE_URL = process.env.NEXT_PUBLIC_AI_SERVICE_URL || 'http://localhost:8001'
+// Dynamic URL getters that work with LAN access
+function getApiBaseUrl(): string {
+    if (typeof window === 'undefined') {
+        return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+    }
+    const hostname = window.location.hostname
+    if (hostname === 'localhost' || hostname === '127.0.0.1') {
+        return 'http://localhost:8000'
+    }
+    return `http://${hostname}:8000`
+}
+
+function getAiServiceUrl(): string {
+    if (typeof window === 'undefined') {
+        return process.env.NEXT_PUBLIC_AI_SERVICE_URL || 'http://localhost:8001'
+    }
+    const hostname = window.location.hostname
+    if (hostname === 'localhost' || hostname === '127.0.0.1') {
+        return 'http://localhost:8001'
+    }
+    return `http://${hostname}:8001`
+}
+
+// Export both static (for backwards compatibility) and dynamic getters
+const API_URL = typeof window !== 'undefined' ? getApiBaseUrl() : 'http://localhost:8000'
+const AI_SERVICE_URL = typeof window !== 'undefined' ? getAiServiceUrl() : 'http://localhost:8001'
 
 interface RequestOptions {
     method?: 'GET' | 'POST' | 'PUT' | 'DELETE'
@@ -36,10 +61,10 @@ async function request<T>(url: string, options: RequestOptions = {}): Promise<T>
     return response.json()
 }
 
-// Auth API
+// Auth API - uses dynamic URL for LAN access
 export const authApi = {
     login: (email: string, password: string) =>
-        request(`${API_URL}/api/auth/login`, {
+        request(`${getApiBaseUrl()}/api/auth/login`, {
             method: 'POST',
             body: { email, password },
         }),
@@ -52,46 +77,47 @@ export const authApi = {
         last_name?: string
         role?: string
     }) =>
-        request(`${API_URL}/api/auth/register`, {
+        request(`${getApiBaseUrl()}/api/auth/register`, {
             method: 'POST',
             body: data,
         }),
 
     me: (token: string) =>
-        request(`${API_URL}/api/auth/me`, { token }),
+        request(`${getApiBaseUrl()}/api/auth/me`, { token }),
 }
 
-// Progress API
+// Progress API - uses dynamic URL for LAN access
 export const progressApi = {
     getProgress: (token: string, subject?: string) => {
+        const baseUrl = getApiBaseUrl()
         const url = subject
-            ? `${API_URL}/api/progress?subject=${subject}`
-            : `${API_URL}/api/progress`
+            ? `${baseUrl}/api/progress?subject=${subject}`
+            : `${baseUrl}/api/progress`
         return request(url, { token })
     },
 
     getWeakTopics: (token: string) =>
-        request(`${API_URL}/api/progress/weak-topics`, { token }),
+        request(`${getApiBaseUrl()}/api/progress/weak-topics`, { token }),
 
     getSummary: (token: string) =>
-        request(`${API_URL}/api/progress/summary`, { token }),
+        request(`${getApiBaseUrl()}/api/progress/summary`, { token }),
 }
 
-// AI Service API
+// AI Service API - uses dynamic URL for LAN access
 export const aiApi = {
     chat: (message: string, token: string, sessionId?: string) =>
-        request(`${AI_SERVICE_URL}/api/tutor/chat`, {
+        request(`${getAiServiceUrl()}/api/tutor/chat`, {
             method: 'POST',
             body: { message, session_id: sessionId },
             token,
         }),
 
     generateNotes: (topic: string, subject: string, token: string) =>
-        request(`${AI_SERVICE_URL}/api/notes/generate`, {
+        request(`${getAiServiceUrl()}/api/notes/generate`, {
             method: 'POST',
             body: { topic, subject },
             token,
         }),
 }
 
-export { API_URL, AI_SERVICE_URL }
+export { API_URL, AI_SERVICE_URL, getApiBaseUrl, getAiServiceUrl }

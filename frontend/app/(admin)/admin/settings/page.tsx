@@ -1,4 +1,6 @@
 'use client'
+import { getApiBaseUrl } from '@/utils/api'
+
 
 import { useSession } from 'next-auth/react'
 import { useState, useEffect } from 'react'
@@ -27,7 +29,7 @@ export default function SettingsPage() {
     useEffect(() => {
         const fetchOrg = async () => {
             try {
-                const res = await fetch('http://localhost:8000/api/admin/organization', {
+                const res = await fetch(`${getApiBaseUrl()}/api/admin/organization`, {
                     headers: {
                         'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
                     }
@@ -56,7 +58,7 @@ export default function SettingsPage() {
     const handleSave = async () => {
         setSaving(true)
         try {
-            const res = await fetch('http://localhost:8000/api/admin/organization', {
+            const res = await fetch(`${getApiBaseUrl()}/api/admin/organization`, {
                 method: 'PUT',
                 headers: {
                     'Authorization': `Bearer ${localStorage.getItem('accessToken')}`,
@@ -81,7 +83,7 @@ export default function SettingsPage() {
         if (!confirm('Are you sure? Existing registration links will stop working.')) return
 
         try {
-            const res = await fetch('http://localhost:8000/api/admin/organization/regenerate-token', {
+            const res = await fetch(`${getApiBaseUrl()}/api/admin/organization/regenerate-token`, {
                 method: 'POST',
                 headers: {
                     'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
@@ -268,7 +270,7 @@ export default function SettingsPage() {
                                 if (!confirm(confirmMsg)) return
 
                                 try {
-                                    const res = await fetch('http://localhost:8000/api/admin/admission/toggle', {
+                                    const res = await fetch(`${getApiBaseUrl()}/api/admin/admission/toggle`, {
                                         method: 'POST',
                                         headers: {
                                             'Authorization': `Bearer ${localStorage.getItem('accessToken')}`,

@@ -1,4 +1,6 @@
 'use client'
+import { getApiBaseUrl } from '@/utils/api'
+
 
 import { useState, useEffect, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation'
@@ -191,7 +193,7 @@ export default function TeacherClassroomDetailPage() {
 
     const fetchClassroom = async () => {
         try {
-            const res = await fetch(`http://localhost:8000/api/classroom/${classroomId}`, {
+            const res = await fetch(`${getApiBaseUrl()}/api/classroom/${classroomId}`, {
                 headers: {
                     'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
                 }
@@ -202,7 +204,7 @@ export default function TeacherClassroomDetailPage() {
                 setStudents(data.students || [])
 
                 // Fetch materials from API
-                const materialsRes = await fetch(`http://localhost:8000/api/classroom/${classroomId}/materials`, {
+                const materialsRes = await fetch(`${getApiBaseUrl()}/api/classroom/${classroomId}/materials`, {
                     headers: {
                         'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
                     }
@@ -253,7 +255,7 @@ export default function TeacherClassroomDetailPage() {
             formData.append('classroom_id', classroomId)
 
             // Upload to file storage
-            const uploadRes = await fetch('http://localhost:8000/api/files/upload', {
+            const uploadRes = await fetch(`${getApiBaseUrl()}/api/files/upload`, {
                 method: 'POST',
                 headers: {
                     'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
@@ -271,7 +273,7 @@ export default function TeacherClassroomDetailPage() {
             }
 
             // Update classroom with syllabus URL
-            const res = await fetch(`http://localhost:8000/api/classroom/${classroomId}/syllabus`, {
+            const res = await fetch(`${getApiBaseUrl()}/api/classroom/${classroomId}/syllabus`, {
                 method: 'PUT',
                 headers: {
                     'Authorization': `Bearer ${localStorage.getItem('accessToken')}`,
@@ -301,7 +303,7 @@ export default function TeacherClassroomDetailPage() {
     const deleteSyllabus = async () => {
         if (!confirm('Are you sure you want to remove the syllabus?')) return
         try {
-            const res = await fetch(`http://localhost:8000/api/classroom/${classroomId}/syllabus`, {
+            const res = await fetch(`${getApiBaseUrl()}/api/classroom/${classroomId}/syllabus`, {
                 method: 'DELETE',
                 headers: {
                     'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
@@ -408,7 +410,7 @@ export default function TeacherClassroomDetailPage() {
                 const formData = new FormData()
                 formData.append('file', file)
 
-                const uploadRes = await fetch('http://localhost:8000/api/files/upload', {
+                const uploadRes = await fetch(`${getApiBaseUrl()}/api/files/upload`, {
                     method: 'POST',
                     headers: {
                         'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
@@ -424,7 +426,7 @@ export default function TeacherClassroomDetailPage() {
                 const uploadData = await uploadRes.json()
 
                 // Step 2: Save material record to classroom
-                const materialRes = await fetch(`http://localhost:8000/api/classroom/${classroomId}/materials`, {
+                const materialRes = await fetch(`${getApiBaseUrl()}/api/classroom/${classroomId}/materials`, {
                     method: 'POST',
                     headers: {
                         'Authorization': `Bearer ${localStorage.getItem('accessToken')}`,
@@ -470,7 +472,7 @@ export default function TeacherClassroomDetailPage() {
     const toggleActive = async () => {
         if (!classroom) return
         try {
-            const res = await fetch(`http://localhost:8000/api/classroom/${classroomId}`, {
+            const res = await fetch(`${getApiBaseUrl()}/api/classroom/${classroomId}`, {
                 method: 'PUT',
                 headers: {
                     'Authorization': `Bearer ${localStorage.getItem('accessToken')}`,
@@ -502,7 +504,7 @@ export default function TeacherClassroomDetailPage() {
     // ===== Assignment Functions =====
     const fetchAssignments = async () => {
         try {
-            const res = await fetch(`http://localhost:8000/api/classroom/${classroomId}/assignments`, {
+            const res = await fetch(`${getApiBaseUrl()}/api/classroom/${classroomId}/assignments`, {
                 headers: {
                     'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
                 }
@@ -543,7 +545,7 @@ export default function TeacherClassroomDetailPage() {
                 formData.append('file', file)
 
                 try {
-                    const uploadRes = await fetch('http://localhost:8000/api/files/upload', {
+                    const uploadRes = await fetch(`${getApiBaseUrl()}/api/files/upload`, {
                         method: 'POST',
                         headers: {
                             'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
@@ -624,7 +626,7 @@ export default function TeacherClassroomDetailPage() {
 
             console.log('Creating assignment with data:', assignmentData)
 
-            const res = await fetch(`http://localhost:8000/api/classroom/${classroomId}/assignments`, {
+            const res = await fetch(`${getApiBaseUrl()}/api/classroom/${classroomId}/assignments`, {
                 method: 'POST',
                 headers: {
                     'Authorization': `Bearer ${localStorage.getItem('accessToken')}`,
@@ -664,7 +666,7 @@ export default function TeacherClassroomDetailPage() {
         if (!confirm('Delete this assignment?')) return
 
         try {
-            const res = await fetch(`http://localhost:8000/api/assignment/${assignmentId}`, {
+            const res = await fetch(`${getApiBaseUrl()}/api/assignment/${assignmentId}`, {
                 method: 'DELETE',
                 headers: {
                     'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
@@ -683,7 +685,7 @@ export default function TeacherClassroomDetailPage() {
     // Fetch submissions for an assignment
     const fetchSubmissions = async (assignmentId: string) => {
         try {
-            const res = await fetch(`http://localhost:8000/api/assignment/${assignmentId}/submissions`, {
+            const res = await fetch(`${getApiBaseUrl()}/api/assignment/${assignmentId}/submissions`, {
                 headers: {
                     'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
                 }
@@ -723,7 +725,7 @@ export default function TeacherClassroomDetailPage() {
 
         setSavingGrade(true)
         try {
-            const res = await fetch(`http://localhost:8000/api/submission/${selectedSubmission.id}/grade`, {
+            const res = await fetch(`${getApiBaseUrl()}/api/submission/${selectedSubmission.id}/grade`, {
                 method: 'PUT',
                 headers: {
                     'Authorization': `Bearer ${localStorage.getItem('accessToken')}`,

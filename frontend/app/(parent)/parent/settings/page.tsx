@@ -1,4 +1,6 @@
 'use client'
+import { getApiBaseUrl } from '@/utils/api'
+
 
 import { useSession } from 'next-auth/react'
 import { useState, useEffect } from 'react'
@@ -60,7 +62,7 @@ export default function ParentSettingsPage() {
 
     const fetchLinkedChildren = async () => {
         try {
-            const res = await fetch('http://localhost:8000/api/students/linked-children', {
+            const res = await fetch(`${getApiBaseUrl()}/api/students/linked-children`, {
                 headers: {
                     'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
                 }
@@ -84,7 +86,7 @@ export default function ParentSettingsPage() {
         setLinkError('')
 
         try {
-            const res = await fetch('http://localhost:8000/api/students/link-by-code', {
+            const res = await fetch(`${getApiBaseUrl()}/api/students/link-by-code`, {
                 method: 'POST',
                 headers: {
                     'Authorization': `Bearer ${localStorage.getItem('accessToken')}`,
@@ -134,7 +136,7 @@ export default function ParentSettingsPage() {
 
         setLoading(true)
         try {
-            const res = await fetch('http://localhost:8000/api/auth/change-password', {
+            const res = await fetch(`${getApiBaseUrl()}/api/auth/change-password`, {
                 method: 'POST',
                 headers: {
                     'Authorization': `Bearer ${localStorage.getItem('accessToken')}`,

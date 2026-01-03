@@ -1,4 +1,6 @@
 'use client'
+import { getApiBaseUrl } from '@/utils/api'
+
 
 import { useState, useEffect } from 'react'
 import {
@@ -53,7 +55,7 @@ export default function TeacherStudentsPage() {
 
     const fetchStudents = async () => {
         try {
-            const res = await fetch('http://localhost:8000/api/teacher/students', {
+            const res = await fetch(`${getApiBaseUrl()}/api/teacher/students`, {
                 headers: {
                     'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
                 }
@@ -87,7 +89,7 @@ export default function TeacherStudentsPage() {
         if (!editingStudent) return
 
         try {
-            const res = await fetch(`http://localhost:8000/api/teacher/students/${editingStudent.id}`, {
+            const res = await fetch(`${getApiBaseUrl()}/api/teacher/students/${editingStudent.id}`, {
                 method: 'PUT',
                 headers: {
                     'Authorization': `Bearer ${localStorage.getItem('accessToken')}`,

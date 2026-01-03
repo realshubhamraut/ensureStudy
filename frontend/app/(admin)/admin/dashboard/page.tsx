@@ -1,4 +1,6 @@
 'use client'
+import { getApiBaseUrl } from '@/utils/api'
+
 
 import { useSession } from 'next-auth/react'
 import { useState, useEffect } from 'react'
@@ -30,7 +32,7 @@ export default function AdminDashboard() {
     useEffect(() => {
         const fetchDashboard = async () => {
             try {
-                const res = await fetch('http://localhost:8000/api/admin/dashboard', {
+                const res = await fetch(`${getApiBaseUrl()}/api/admin/dashboard`, {
                     headers: {
                         'Authorization': `Bearer ${(session as any)?.accessToken}`
                     }

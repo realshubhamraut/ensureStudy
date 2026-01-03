@@ -1,4 +1,6 @@
 'use client'
+import { getApiBaseUrl } from '@/utils/api'
+
 
 import { useSession } from 'next-auth/react'
 import { useState, useEffect } from 'react'
@@ -27,7 +29,7 @@ export default function SubjectsPage() {
     useEffect(() => {
         const fetchSubjects = async () => {
             try {
-                const res = await fetch('http://localhost:8000/api/curriculum/subjects', {
+                const res = await fetch(`${getApiBaseUrl()}/api/curriculum/subjects`, {
                     headers: {
                         'Authorization': `Bearer ${(session as any)?.accessToken}`
                     }

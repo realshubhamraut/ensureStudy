@@ -169,7 +169,7 @@ export default function AvatarViewer({ avatarId, isSpeaking = false, onReady }: 
             )}
 
             {/* Avatar name badge */}
-            <div className="absolute top-4 left-4 bg-white/80 backdrop-blur-sm px-3 py-1 rounded-full">
+            <div className="absolute top-4 left-4 bg-white px-3 py-1 rounded-full shadow-sm">
                 <span className="text-sm font-medium text-gray-700">{config.name}</span>
             </div>
         </div>

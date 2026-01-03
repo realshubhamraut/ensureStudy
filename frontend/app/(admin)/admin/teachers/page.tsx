@@ -1,4 +1,6 @@
 'use client'
+import { getApiBaseUrl } from '@/utils/api'
+
 
 import { useSession } from 'next-auth/react'
 import { useState, useEffect } from 'react'
@@ -37,7 +39,7 @@ export default function TeachersPage() {
         const fetchData = async () => {
             try {
                 // Fetch teachers
-                const res = await fetch('http://localhost:8000/api/admin/teachers', {
+                const res = await fetch(`${getApiBaseUrl()}/api/admin/teachers`, {
                     headers: {
                         'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
                     }
@@ -48,7 +50,7 @@ export default function TeachersPage() {
                 }
 
                 // Fetch organization for access token
-                const dashRes = await fetch('http://localhost:8000/api/admin/dashboard', {
+                const dashRes = await fetch(`${getApiBaseUrl()}/api/admin/dashboard`, {
                     headers: {
                         'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
                     }
@@ -69,7 +71,7 @@ export default function TeachersPage() {
 
     const fetchTeacherDetails = async (teacherId: string) => {
         try {
-            const res = await fetch(`http://localhost:8000/api/admin/teachers/${teacherId}`, {
+            const res = await fetch(`${getApiBaseUrl()}/api/admin/teachers/${teacherId}`, {
                 headers: {
                     'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
                 }
@@ -93,7 +95,7 @@ export default function TeachersPage() {
         if (!confirm('Are you sure you want to remove this teacher?')) return
 
         try {
-            const res = await fetch(`http://localhost:8000/api/admin/teachers/${teacherId}`, {
+            const res = await fetch(`${getApiBaseUrl()}/api/admin/teachers/${teacherId}`, {
                 method: 'DELETE',
                 headers: {
                     'Authorization': `Bearer ${localStorage.getItem('accessToken')}`

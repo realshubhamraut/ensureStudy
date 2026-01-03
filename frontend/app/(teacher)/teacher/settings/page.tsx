@@ -1,4 +1,6 @@
 'use client'
+import { getApiBaseUrl } from '@/utils/api'
+
 
 import { useSession } from 'next-auth/react'
 import { useState, useEffect } from 'react'
@@ -65,7 +67,7 @@ export default function TeacherSettingsPage() {
 
         setLoading(true)
         try {
-            const res = await fetch('http://localhost:8000/api/auth/change-password', {
+            const res = await fetch(`${getApiBaseUrl()}/api/auth/change-password`, {
                 method: 'POST',
                 headers: {
                     'Authorization': `Bearer ${localStorage.getItem('accessToken')}`,

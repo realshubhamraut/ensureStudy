@@ -1,4 +1,6 @@
 'use client'
+import { getApiBaseUrl } from '@/utils/api'
+
 
 import { useSession } from 'next-auth/react'
 import { useState, useEffect } from 'react'
@@ -54,7 +56,7 @@ export default function StudentsPage() {
     useEffect(() => {
         const fetchStudents = async () => {
             try {
-                const res = await fetch('http://localhost:8000/api/admin/students', {
+                const res = await fetch(`${getApiBaseUrl()}/api/admin/students`, {
                     headers: {
                         'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
                     }
@@ -65,7 +67,7 @@ export default function StudentsPage() {
                 }
 
                 // Fetch license info
-                const dashRes = await fetch('http://localhost:8000/api/admin/dashboard', {
+                const dashRes = await fetch(`${getApiBaseUrl()}/api/admin/dashboard`, {
                     headers: {
                         'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
                     }
@@ -88,7 +90,7 @@ export default function StudentsPage() {
 
     const fetchStudentDetails = async (studentId: string) => {
         try {
-            const res = await fetch(`http://localhost:8000/api/admin/students/${studentId}`, {
+            const res = await fetch(`${getApiBaseUrl()}/api/admin/students/${studentId}`, {
                 headers: {
                     'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
                 }
@@ -106,7 +108,7 @@ export default function StudentsPage() {
         if (!confirm('Are you sure you want to remove this student? This will free up 1 license.')) return
 
         try {
-            const res = await fetch(`http://localhost:8000/api/admin/students/${studentId}`, {
+            const res = await fetch(`${getApiBaseUrl()}/api/admin/students/${studentId}`, {
                 method: 'DELETE',
                 headers: {
                     'Authorization': `Bearer ${localStorage.getItem('accessToken')}`

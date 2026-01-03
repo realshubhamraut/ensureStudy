@@ -1,4 +1,6 @@
 'use client'
+import { getApiBaseUrl } from '@/utils/api'
+
 
 import { useSession } from 'next-auth/react'
 import { useState, useEffect } from 'react'
@@ -32,7 +34,7 @@ export default function BillingPage() {
         const fetchData = async () => {
             try {
                 // Fetch dashboard for license info
-                const dashRes = await fetch('http://localhost:8000/api/admin/dashboard', {
+                const dashRes = await fetch(`${getApiBaseUrl()}/api/admin/dashboard`, {
                     headers: {
                         'Authorization': `Bearer ${(session as any)?.accessToken}`
                     }
@@ -44,7 +46,7 @@ export default function BillingPage() {
                 }
 
                 // Fetch purchase history
-                const histRes = await fetch('http://localhost:8000/api/admin/licenses/history', {
+                const histRes = await fetch(`${getApiBaseUrl()}/api/admin/licenses/history`, {
                     headers: {
                         'Authorization': `Bearer ${(session as any)?.accessToken}`
                     }
@@ -69,7 +71,7 @@ export default function BillingPage() {
         setPurchasing(true)
         try {
             // Step 1: Initiate purchase
-            const initRes = await fetch('http://localhost:8000/api/admin/licenses/purchase', {
+            const initRes = await fetch(`${getApiBaseUrl()}/api/admin/licenses/purchase`, {
                 method: 'POST',
                 headers: {
                     'Authorization': `Bearer ${(session as any)?.accessToken}`,
@@ -86,7 +88,7 @@ export default function BillingPage() {
 
             // Step 2: In production, open Razorpay checkout here
             // For demo, we'll simulate payment confirmation
-            const confirmRes = await fetch('http://localhost:8000/api/admin/licenses/confirm', {
+            const confirmRes = await fetch(`${getApiBaseUrl()}/api/admin/licenses/confirm`, {
                 method: 'POST',
                 headers: {
                     'Authorization': `Bearer ${(session as any)?.accessToken}`,

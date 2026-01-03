@@ -27,7 +27,7 @@ interface MarkdownRendererProps {
  */
 export default function MarkdownRenderer({ content, className = '' }: MarkdownRendererProps) {
     return (
-        <div className={`markdown-content font-sans ${className}`}>
+        <div className={`markdown-content ${className}`}>
             <ReactMarkdown
                 remarkPlugins={[remarkMath, remarkGfm]}
                 rehypePlugins={[rehypeKatex, rehypeHighlight]}

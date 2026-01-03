@@ -79,7 +79,7 @@ export function MindmapViewer({ code, title }: MindmapViewerProps) {
         <div className="flex-1 flex flex-col bg-gradient-to-br from-slate-50 to-slate-100 overflow-hidden relative">
             {/* Header */}
             {title && (
-                <div className="p-3 border-b border-slate-200 bg-white/50 backdrop-blur-sm">
+                <div className="p-3 border-b border-slate-200 bg-white">
                     <h3 className="text-sm font-medium text-slate-700">{title}</h3>
                 </div>
             )}
@@ -110,7 +110,7 @@ export function MindmapViewer({ code, title }: MindmapViewerProps) {
             </div>
 
             {/* Zoom Controls */}
-            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-2 bg-white/90 backdrop-blur-sm rounded-full px-4 py-2 shadow-lg border border-slate-200">
+            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-2 bg-white rounded-full px-4 py-2 shadow-lg border border-slate-200">
                 <button
                     onClick={() => setZoom(z => Math.max(25, z - 25))}
                     className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-slate-100 text-slate-600 transition-colors"

@@ -1,4 +1,6 @@
 'use client'
+import { getApiBaseUrl, getAiServiceUrl } from '@/utils/api'
+
 
 import { useState, useEffect, useRef } from 'react'
 import {
@@ -234,7 +236,7 @@ export default function AITutorPage() {
     useEffect(() => {
         const fetchClassrooms = async () => {
             try {
-                const res = await fetch('http://localhost:8000/api/classroom/my-classrooms', {
+                const res = await fetch(`${getApiBaseUrl()}/api/classroom/my-classrooms`, {
                     headers: {
                         'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
                     }
@@ -491,7 +493,7 @@ export default function AITutorPage() {
                 content: m.content
             }))
 
-            const res = await fetch('http://localhost:8001/api/ai-tutor/query', {
+            const res = await fetch('${getAiServiceUrl()}/api/ai-tutor/query', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -695,7 +697,7 @@ export default function AITutorPage() {
                     const controller = new AbortController()
                     const timeoutId = setTimeout(() => controller.abort(), 30000)  // 30s for web crawling
 
-                    const webResponse = await fetch('http://localhost:8001/api/resources/web', {
+                    const webResponse = await fetch('${getAiServiceUrl()}/api/resources/web', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({

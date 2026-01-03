@@ -1,4 +1,6 @@
 'use client'
+import { getApiBaseUrl } from '@/utils/api'
+
 
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
@@ -51,7 +53,7 @@ export default function StudentClassroomsPage() {
 
     const fetchClassrooms = async () => {
         try {
-            const res = await fetch('http://localhost:8000/api/classroom/my-classrooms', {
+            const res = await fetch(`${getApiBaseUrl()}/api/classroom/my-classrooms`, {
                 headers: {
                     'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
                 }
@@ -72,7 +74,7 @@ export default function StudentClassroomsPage() {
 
         setJoining(true)
         try {
-            const res = await fetch('http://localhost:8000/api/classroom/join', {
+            const res = await fetch(`${getApiBaseUrl()}/api/classroom/join`, {
                 method: 'POST',
                 headers: {
                     'Authorization': `Bearer ${localStorage.getItem('accessToken')}`,

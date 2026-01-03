@@ -1,4 +1,6 @@
 'use client'
+import { getApiBaseUrl } from '@/utils/api'
+
 
 import { useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
@@ -58,7 +60,7 @@ export default function SignUpPage() {
             return
         }
         try {
-            const res = await fetch('http://localhost:8000/api/auth/validate-token', {
+            const res = await fetch(`${getApiBaseUrl()}/api/auth/validate-token`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ access_token: token })
@@ -109,7 +111,7 @@ export default function SignUpPage() {
                 body.profile = { grade_level: gradeLevel, board, target_exams: targetExams }
             }
 
-            const res = await fetch('http://localhost:8000/api/auth/register', {
+            const res = await fetch(`${getApiBaseUrl()}/api/auth/register`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(body)

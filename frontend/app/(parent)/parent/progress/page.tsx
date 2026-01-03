@@ -1,4 +1,6 @@
 'use client'
+import { getApiBaseUrl } from '@/utils/api'
+
 
 import { useState, useEffect } from 'react'
 import {
@@ -25,7 +27,7 @@ export default function ParentProgressPage() {
 
     const fetchLinkedChildren = async () => {
         try {
-            const res = await fetch('http://localhost:8000/api/students/linked-children', {
+            const res = await fetch(`${getApiBaseUrl()}/api/students/linked-children`, {
                 headers: {
                     'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
                 }

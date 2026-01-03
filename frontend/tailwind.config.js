@@ -49,6 +49,7 @@ module.exports = {
             fontFamily: {
                 sans: ['var(--font-inter)', 'Inter', 'system-ui', 'sans-serif'],
                 arimo: ['var(--font-arimo)', 'Arimo', 'sans-serif'],
+                'roboto-slab': ['var(--font-roboto-slab)', 'Roboto Slab', 'serif'],
                 mono: ['JetBrains Mono', 'monospace'],
             },
             animation: {

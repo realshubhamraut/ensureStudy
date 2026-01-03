@@ -1,5 +1,7 @@
 
 'use client'
+import { getApiBaseUrl, getAiServiceUrl } from '@/utils/api'
+
 
 import { useState, useRef, useEffect } from 'react'
 import {
@@ -228,7 +230,7 @@ export default function TeacherEvaluationPage() {
     const fetchExamSessions = async () => {
         setLoadingSessions(true)
         try {
-            const res = await fetch('http://localhost:8000/api/evaluation/exam-sessions', {
+            const res = await fetch(`${getApiBaseUrl()}/api/evaluation/exam-sessions`, {
                 headers: { 'Authorization': `Bearer ${localStorage.getItem('accessToken')}` }
             })
             if (res.ok) {
@@ -245,7 +247,7 @@ export default function TeacherEvaluationPage() {
     const fetchStudents = async () => {
         setLoadingStudents(true)
         try {
-            const res = await fetch('http://localhost:8000/api/evaluation/students', {
+            const res = await fetch(`${getApiBaseUrl()}/api/evaluation/students`, {
                 headers: { 'Authorization': `Bearer ${localStorage.getItem('accessToken')}` }
             })
             if (res.ok) {
@@ -261,7 +263,7 @@ export default function TeacherEvaluationPage() {
     // API: Create exam session in database
     const createExamSessionAPI = async (session: ExamSession): Promise<ExamSession | null> => {
         try {
-            const res = await fetch('http://localhost:8000/api/evaluation/exam-session', {
+            const res = await fetch(`${getApiBaseUrl()}/api/evaluation/exam-session`, {
                 method: 'POST',
                 headers: {
                     'Authorization': `Bearer ${localStorage.getItem('accessToken')}`,
@@ -292,7 +294,7 @@ export default function TeacherEvaluationPage() {
         if (!currentExamSession || !selectedStudent) return
 
         try {
-            const res = await fetch('http://localhost:8000/api/evaluation/student-evaluation', {
+            const res = await fetch(`${getApiBaseUrl()}/api/evaluation/student-evaluation`, {
                 method: 'POST',
                 headers: {
                     'Authorization': `Bearer ${localStorage.getItem('accessToken')}`,
@@ -319,7 +321,7 @@ export default function TeacherEvaluationPage() {
     // API: Declare results
     const declareResultsAPI = async (sessionId: string) => {
         try {
-            const res = await fetch(`http://localhost:8000/api/evaluation/exam/${sessionId}/declare-results`, {
+            const res = await fetch(`${getApiBaseUrl()}/api/evaluation/exam/${sessionId}/declare-results`, {
                 method: 'POST',
                 headers: { 'Authorization': `Bearer ${localStorage.getItem('accessToken')}` }
             })
@@ -345,7 +347,7 @@ export default function TeacherEvaluationPage() {
             return
         }
         try {
-            const res = await fetch(`http://localhost:8000/api/evaluation/exam/${sessionId}/rollback-results`, {
+            const res = await fetch(`${getApiBaseUrl()}/api/evaluation/exam/${sessionId}/rollback-results`, {
                 method: 'POST',
                 headers: { 'Authorization': `Bearer ${localStorage.getItem('accessToken')}` }
             })
@@ -369,7 +371,7 @@ export default function TeacherEvaluationPage() {
     const fetchExamDetail = async (sessionId: string) => {
         setLoadingExamDetail(true)
         try {
-            const res = await fetch(`http://localhost:8000/api/evaluation/exam-session/${sessionId}`, {
+            const res = await fetch(`${getApiBaseUrl()}/api/evaluation/exam-session/${sessionId}`, {
                 headers: { 'Authorization': `Bearer ${localStorage.getItem('accessToken')}` }
             })
             if (res.ok) {
@@ -386,7 +388,7 @@ export default function TeacherEvaluationPage() {
     // API: Update student score
     const updateStudentScore = async (evaluationId: string, studentId: string, newScore: number) => {
         try {
-            const res = await fetch('http://localhost:8000/api/evaluation/student-evaluation', {
+            const res = await fetch(`${getApiBaseUrl()}/api/evaluation/student-evaluation`, {
                 method: 'POST',
                 headers: {
                     'Authorization': `Bearer ${localStorage.getItem('accessToken')}`,
@@ -422,7 +424,7 @@ export default function TeacherEvaluationPage() {
         // 1. Fetch the complete session data with question paper
         setLoadingExamDetail(true)
         try {
-            const res = await fetch(`http://localhost:8000/api/evaluation/exam-session/${session.id}`, {
+            const res = await fetch(`${getApiBaseUrl()}/api/evaluation/exam-session/${session.id}`, {
                 headers: { 'Authorization': `Bearer ${localStorage.getItem('accessToken')}` }
             })
             if (res.ok) {
@@ -506,7 +508,7 @@ export default function TeacherEvaluationPage() {
 
             try {
                 // Call AI to evaluate this question
-                const response = await fetch('http://localhost:8001/api/ai-tutor/query', {
+                const response = await fetch('${getAiServiceUrl()}/api/ai-tutor/query', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -765,7 +767,7 @@ Section C - Long Answer
         setAiReviewMode(true)
 
         try {
-            const response = await fetch('http://localhost:8001/api/ai-tutor/query', {
+            const response = await fetch('${getAiServiceUrl()}/api/ai-tutor/query', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -1791,7 +1793,7 @@ Section B
                                         const q = updatedQuestions[i]
                                         try {
                                             // Generate expected answer
-                                            const answerRes = await fetch('http://localhost:8001/api/ai-tutor/query', {
+                                            const answerRes = await fetch('${getAiServiceUrl()}/api/ai-tutor/query', {
                                                 method: 'POST',
                                                 headers: { 'Content-Type': 'application/json' },
                                                 body: JSON.stringify({
@@ -1806,7 +1808,7 @@ Section B
                                             }
 
                                             // Generate keywords
-                                            const keywordsRes = await fetch('http://localhost:8001/api/ai-tutor/query', {
+                                            const keywordsRes = await fetch('${getAiServiceUrl()}/api/ai-tutor/query', {
                                                 method: 'POST',
                                                 headers: { 'Content-Type': 'application/json' },
                                                 body: JSON.stringify({
@@ -2031,7 +2033,7 @@ Section B
                                             onClick={async () => {
                                                 setGeneratingAnswer(true)
                                                 try {
-                                                    const res = await fetch('http://localhost:8001/api/ai-tutor/query', {
+                                                    const res = await fetch('${getAiServiceUrl()}/api/ai-tutor/query', {
                                                         method: 'POST',
                                                         headers: { 'Content-Type': 'application/json' },
                                                         body: JSON.stringify({
@@ -2094,7 +2096,7 @@ Section B
                                             onClick={async () => {
                                                 setGeneratingKeywords(true)
                                                 try {
-                                                    const res = await fetch('http://localhost:8001/api/ai-tutor/query', {
+                                                    const res = await fetch('${getAiServiceUrl()}/api/ai-tutor/query', {
                                                         method: 'POST',
                                                         headers: { 'Content-Type': 'application/json' },
                                                         body: JSON.stringify({

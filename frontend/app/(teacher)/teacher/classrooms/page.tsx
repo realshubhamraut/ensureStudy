@@ -1,8 +1,9 @@
 'use client'
+
 import { getApiBaseUrl } from '@/utils/api'
 
-
 import { useState, useEffect } from 'react'
+import { useSession } from 'next-auth/react'
 import Link from 'next/link'
 import {
     PlusIcon,
@@ -24,7 +25,8 @@ interface Classroom {
     student_count: number
 }
 
-export default function TeacherDashboardPage() {
+export default function TeacherClassroomsPage() {
+    const { data: session } = useSession()
     const [classrooms, setClassrooms] = useState<Classroom[]>([])
     const [loading, setLoading] = useState(true)
     const [showCreateModal, setShowCreateModal] = useState(false)
@@ -36,20 +38,23 @@ export default function TeacherDashboardPage() {
         subject: ''
     })
 
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || `${getApiBaseUrl()}'
+
     useEffect(() => {
         fetchClassrooms()
-    }, [])
+    }, [session?.accessToken])
 
     const fetchClassrooms = async () => {
+        if (!session?.accessToken) return
         try {
-            const res = await fetch(`${getApiBaseUrl()}/api/classroom`, {
+            const res = await fetch(`${apiUrl}/api/classroom`, {
                 headers: {
-                    'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
+                    'Authorization': `Bearer ${session.accessToken}`
                 }
             })
             if (res.ok) {
                 const data = await res.json()
-                setClassrooms(data.classrooms)
+                setClassrooms(data.classrooms || [])
             }
         } catch (error) {
             console.error('Failed to fetch classrooms:', error)
@@ -66,10 +71,10 @@ export default function TeacherDashboardPage() {
 
         setCreating(true)
         try {
-            const res = await fetch(`${getApiBaseUrl()}/api/classroom`, {
+            const res = await fetch(`${apiUrl}/api/classroom`, {
                 method: 'POST',
                 headers: {
-                    'Authorization': `Bearer ${localStorage.getItem('accessToken')}`,
+                    'Authorization': `Bearer ${session?.accessToken}`,
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify(formData)
@@ -97,7 +102,7 @@ export default function TeacherDashboardPage() {
     if (loading) {
         return (
             <div className="flex items-center justify-center h-64">
-                <div className="spinner"></div>
+                <ArrowPathIcon className="w-8 h-8 animate-spin text-purple-600" />
             </div>
         )
     }
@@ -145,8 +150,8 @@ export default function TeacherDashboardPage() {
                                     <AcademicCapIcon className="w-6 h-6 text-white" />
                                 </div>
                                 <span className={`px-2 py-1 rounded-full text-xs font-medium ${classroom.is_active
-                                        ? 'bg-green-100 text-green-700'
-                                        : 'bg-gray-100 text-gray-700'
+                                    ? 'bg-green-100 text-green-700'
+                                    : 'bg-gray-100 text-gray-700'
                                     }`}>
                                     {classroom.is_active ? 'Active' : 'Inactive'}
                                 </span>
