@@ -5,23 +5,36 @@
 
 // Dynamic URL getters that work with LAN access
 function getApiBaseUrl(): string {
+    // Server-side: use env var
     if (typeof window === 'undefined') {
         return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
     }
-    const hostname = window.location.hostname
-    if (hostname === 'localhost' || hostname === '127.0.0.1') {
-        return 'http://localhost:8000'
+    // Client-side: check env var first, then use hostname detection
+    if (process.env.NEXT_PUBLIC_API_URL) {
+        return process.env.NEXT_PUBLIC_API_URL
     }
+    const hostname = window.location.hostname
+    const port = window.location.port
+    // If on port 4000 (run-local.sh), use API on port 9000
+    if (port === '4000') {
+        return `http://${hostname}:9000`
+    }
+    // Otherwise use port 8000 (run-lan.sh or default)
     return `http://${hostname}:8000`
 }
 
 function getAiServiceUrl(): string {
     if (typeof window === 'undefined') {
-        return process.env.NEXT_PUBLIC_AI_SERVICE_URL || 'http://localhost:8001'
+        return process.env.NEXT_PUBLIC_AI_URL || 'http://localhost:8001'
+    }
+    if (process.env.NEXT_PUBLIC_AI_URL) {
+        return process.env.NEXT_PUBLIC_AI_URL
     }
     const hostname = window.location.hostname
-    if (hostname === 'localhost' || hostname === '127.0.0.1') {
-        return 'http://localhost:8001'
+    const port = window.location.port
+    // If on port 4000 (run-local.sh), use AI on port 9001
+    if (port === '4000') {
+        return `http://${hostname}:9001`
     }
     return `http://${hostname}:8001`
 }

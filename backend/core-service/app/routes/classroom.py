@@ -441,6 +441,20 @@ def upload_material(classroom_id):
             # Don't fail upload if indexing trigger fails
             print(f"[CLASSROOM] Warning: Failed to trigger indexing: {e}")
     
+    # Create notifications for all enrolled students
+    try:
+        from app.models.notification import notify_classroom_members
+        notify_classroom_members(
+            classroom_id=classroom_id,
+            notification_type="material",
+            title=f"New material in {classroom.name}",
+            message=f"New material uploaded: {material.name}",
+            action_url=f"/classrooms/{classroom_id}",
+            source_id=material.id
+        )
+    except Exception as e:
+        print(f"Failed to send notifications: {e}")
+    
     return jsonify({
         "material": material.to_dict(),
         "message": "Material uploaded successfully"
@@ -541,3 +555,114 @@ def update_material_status(material_id):
         "material": material.to_dict(),
         "message": "Status updated"
     }), 200
+
+
+# ==================== Announcements: Stream Posts ====================
+
+@classroom_bp.route("/<classroom_id>/announcements", methods=["POST"])
+@teacher_required
+def create_announcement(classroom_id):
+    """Teacher posts an announcement to classroom stream"""
+    from app.models.announcement import Announcement
+    from app.models.notification import notify_classroom_members
+    user = request.current_user
+    
+    classroom = Classroom.query.filter_by(id=classroom_id, teacher_id=user.id).first()
+    
+    if not classroom:
+        return jsonify({"error": "Classroom not found"}), 404
+    
+    data = request.get_json()
+    message = data.get("message", "").strip()
+    
+    if not message:
+        return jsonify({"error": "Message is required"}), 400
+    
+    announcement = Announcement(
+        classroom_id=classroom_id,
+        teacher_id=user.id,
+        message=message
+    )
+    
+    db.session.add(announcement)
+    db.session.commit()
+    
+    # Create notifications for all enrolled students
+    try:
+        notify_classroom_members(
+            classroom_id=classroom_id,
+            notification_type="announcement",
+            title=f"New announcement in {classroom.name}",
+            message=message[:100] + "..." if len(message) > 100 else message,
+            action_url=f"/classrooms/{classroom_id}",
+            source_id=announcement.id
+        )
+    except Exception as e:
+        print(f"Failed to send notifications: {e}")
+    
+    return jsonify({
+        "announcement": announcement.to_dict(),
+        "message": "Announcement posted"
+    }), 201
+
+
+@classroom_bp.route("/<classroom_id>/announcements", methods=["GET"])
+def list_announcements(classroom_id):
+    """Get announcements for a classroom (teacher or enrolled student)"""
+    from app.models.announcement import Announcement
+    user = get_current_user()
+    
+    if not user:
+        return jsonify({"error": "Authentication required"}), 401
+    
+    classroom = Classroom.query.get(classroom_id)
+    
+    if not classroom:
+        return jsonify({"error": "Classroom not found"}), 404
+    
+    # Check access
+    is_teacher = classroom.teacher_id == user.id
+    is_enrolled = StudentClassroom.query.filter_by(
+        student_id=user.id,
+        classroom_id=classroom.id,
+        is_active=True
+    ).first() is not None
+    
+    if not (is_teacher or is_enrolled):
+        return jsonify({"error": "Access denied"}), 403
+    
+    announcements = Announcement.query.filter_by(
+        classroom_id=classroom_id
+    ).order_by(Announcement.created_at.desc()).all()
+    
+    return jsonify({
+        "announcements": [a.to_dict() for a in announcements],
+        "count": len(announcements)
+    }), 200
+
+
+@classroom_bp.route("/<classroom_id>/announcements/<announcement_id>", methods=["DELETE"])
+@teacher_required
+def delete_announcement(classroom_id, announcement_id):
+    """Teacher deletes an announcement"""
+    from app.models.announcement import Announcement
+    user = request.current_user
+    
+    # Verify classroom ownership
+    classroom = Classroom.query.filter_by(id=classroom_id, teacher_id=user.id).first()
+    
+    if not classroom:
+        return jsonify({"error": "Classroom not found"}), 404
+    
+    announcement = Announcement.query.filter_by(
+        id=announcement_id,
+        classroom_id=classroom_id
+    ).first()
+    
+    if not announcement:
+        return jsonify({"error": "Announcement not found"}), 404
+    
+    db.session.delete(announcement)
+    db.session.commit()
+    
+    return jsonify({"message": "Announcement deleted"}), 200

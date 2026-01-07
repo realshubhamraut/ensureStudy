@@ -71,8 +71,9 @@ def upload_file():
         file_path = os.path.join(UPLOAD_DIR, unique_filename)
         file.save(file_path)
         
-        # Generate URL for the file
-        file_url = f"http://localhost:8000/api/files/{unique_filename}"
+        # Generate URL for the file - use request host for dynamic URL
+        base_url = request.host_url.rstrip('/')
+        file_url = f"{base_url}/api/files/{unique_filename}"
         
         return jsonify({
             'message': 'File uploaded successfully',

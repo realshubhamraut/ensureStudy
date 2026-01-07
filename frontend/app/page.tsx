@@ -16,13 +16,21 @@ export default function Home() {
         <main className="min-h-screen bg-[#FDFBF7] relative noise-bg">
             {/* Grain texture overlay - GPU accelerated */}
             <div
-                className="fixed inset-0 pointer-events-none opacity-[0.15]"
+                className="fixed inset-0 pointer-events-none opacity-[0.15] z-0"
                 style={{
                     backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 400 400' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='1.5' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E")`,
                     transform: 'translateZ(0)',
                     backfaceVisibility: 'hidden',
                 }}
             />
+
+            {/* Full-screen blurred gradient background */}
+            <div className="fixed inset-0 pointer-events-none overflow-hidden z-0">
+                <div className="absolute -top-40 right-0 w-[800px] h-[800px] bg-gradient-to-br from-indigo-400/30 via-violet-400/20 to-purple-400/30 rounded-full blur-3xl" />
+                <div className="absolute top-1/4 -left-40 w-[700px] h-[700px] bg-gradient-to-tr from-amber-300/25 via-orange-300/20 to-yellow-300/25 rounded-full blur-3xl" />
+                <div className="absolute bottom-0 right-1/4 w-[600px] h-[600px] bg-gradient-to-tl from-emerald-300/20 via-teal-300/15 to-cyan-300/20 rounded-full blur-3xl" />
+                <div className="absolute top-1/2 left-1/3 w-[500px] h-[500px] bg-gradient-to-r from-rose-300/15 via-pink-300/10 to-fuchsia-300/15 rounded-full blur-3xl" />
+            </div>
 
             {/* Navigation - Sticky Header */}
             <nav className="fixed top-0 left-0 right-0 z-50 bg-[#FDFBF7]">
@@ -92,10 +100,6 @@ export default function Home() {
                         </Link>
                     </div>
                 </div>
-
-                {/* Decorative elements */}
-                <div className="absolute top-20 right-20 w-72 h-72 bg-amber-100/50 rounded-full" />
-                <div className="absolute bottom-10 right-40 w-48 h-48 bg-indigo-100/40 rounded-full" />
             </section>
 
 
@@ -154,12 +158,8 @@ export default function Home() {
             <div className="relative z-10 w-full h-px bg-gray-300" />
 
             {/* CTA Section + Footer - Full Width */}
-            <section className="relative z-10 py-16 bg-white overflow-hidden">
-                {/* Decorative elements - no blur for performance */}
-                <div className="absolute top-10 right-20 w-64 h-64 bg-indigo-50 rounded-full" />
-                <div className="absolute -bottom-20 left-20 w-72 h-72 bg-amber-50 rounded-full" />
-
-                <div className="max-w-6xl mx-auto px-8 relative">
+            <section className="relative z-10 py-16 bg-white/80 backdrop-blur-sm overflow-hidden">
+                <div className="max-w-6xl mx-auto px-8">
                     <div className="max-w-2xl">
                         <h2 className="text-3xl font-bold text-gray-900 mb-4">
                             Ready to transform your learning?

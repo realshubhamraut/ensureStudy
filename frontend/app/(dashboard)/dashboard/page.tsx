@@ -35,9 +35,11 @@ interface Notification {
     created_at: string
 }
 
-// Format relative time
+// Format relative time - handles UTC timestamps from backend
 function formatRelativeTime(dateString: string): string {
-    const date = new Date(dateString)
+    // Backend returns UTC time - append Z if not present to parse as UTC
+    const utcDateString = dateString.endsWith('Z') ? dateString : dateString + 'Z'
+    const date = new Date(utcDateString)
     const now = new Date()
     const diffMs = now.getTime() - date.getTime()
     const diffMins = Math.floor(diffMs / 60000)

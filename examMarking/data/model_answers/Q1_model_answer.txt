@@ -1,0 +1,10 @@
+Binary Search Tree (BST) is a hierarchical data structure where each node has at most two children: left and right. The fundamental property of a BST is that for any node, all values in its left subtree are smaller than the node's value, and all values in its right subtree are greater. This ordered property makes BST efficient for searching operations.
+
+Insertion Operation: To insert a new value, start at the root and compare the value with the current node. If the value is smaller, move to the left child; if larger, move to the right child. Continue until finding an empty position. This operation has O(log n) average time complexity in a balanced tree.
+
+Deletion Operation: Deleting a node has three cases:
+1. Node with no children: Simply remove the node
+2. Node with one child: Replace the node with its child
+3. Node with two children: Find the inorder successor (smallest node in right subtree) or predecessor, replace the node's value, and delete the successor/predecessor
+
+BST traversal methods include inorder (gives sorted sequence), preorder, and postorder. The efficiency of BST operations depends on the tree's height, making balanced trees crucial for optimal performance.

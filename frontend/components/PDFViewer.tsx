@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import {
     ArrowDownTrayIcon,
     XMarkIcon,
@@ -18,13 +18,21 @@ export default function PDFViewer({ pdfUrl, title, onClose }: PDFViewerProps) {
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState<string | null>(null)
 
+    // Fix URL if it points to wrong port - dynamically use current API host
+    const correctedUrl = useMemo(() => {
+        if (!pdfUrl) return pdfUrl
+        // Replace localhost:8000 or localhost:5000 with the correct API URL
+        const apiUrl = process.env.NEXT_PUBLIC_API_URL || `http://${window.location.hostname}:9000`
+        return pdfUrl.replace(/http:\/\/localhost:(8000|5000)/g, apiUrl)
+    }, [pdfUrl])
+
     // Check if URL is valid
-    const isValidUrl = pdfUrl && pdfUrl !== '#' && pdfUrl.length > 1
+    const isValidUrl = correctedUrl && correctedUrl !== '#' && correctedUrl.length > 1
 
     const handleDownload = () => {
         if (!isValidUrl) return
         const link = document.createElement('a')
-        link.href = pdfUrl
+        link.href = correctedUrl
         link.download = title ? `${title}.pdf` : 'document.pdf'
         link.target = '_blank'
         link.click()
@@ -32,7 +40,7 @@ export default function PDFViewer({ pdfUrl, title, onClose }: PDFViewerProps) {
 
     const handleOpenInNewTab = () => {
         if (!isValidUrl) return
-        window.open(pdfUrl, '_blank')
+        window.open(correctedUrl, '_blank')
     }
 
     // Show placeholder for invalid URLs (mock data)
@@ -133,7 +141,7 @@ export default function PDFViewer({ pdfUrl, title, onClose }: PDFViewerProps) {
 
                 {/* Use object tag for native PDF rendering - works better than iframe */}
                 <object
-                    data={pdfUrl}
+                    data={correctedUrl}
                     type="application/pdf"
                     className="w-full h-full"
                     onLoad={() => setLoading(false)}
@@ -144,7 +152,7 @@ export default function PDFViewer({ pdfUrl, title, onClose }: PDFViewerProps) {
                 >
                     {/* Fallback for browsers that don't support object PDF */}
                     <iframe
-                        src={pdfUrl}
+                        src={correctedUrl}
                         className="w-full h-full border-0"
                         onLoad={() => setLoading(false)}
                         title={title || 'PDF Document'}

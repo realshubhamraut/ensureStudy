@@ -1,0 +1,123 @@
+{
+  "questions": {
+    "Q1": {
+      "question_text": "Explain Binary Search Trees with insertion and deletion operations.",
+      "topic": "Data Structures",
+      "max_marks": 10,
+      "keywords": [
+        "binary", "search", "tree", "node", "left", "right", "insertion", 
+        "deletion", "BST", "sorted", "traversal", "parent", "child"
+      ],
+      "concepts": {
+        "BST Structure": {
+          "keywords": ["binary", "tree", "node", "left", "right", "parent", "child"],
+          "weight": 1.0,
+          "critical": true
+        },
+        "BST Property": {
+          "keywords": ["sorted", "order", "left smaller", "right greater"],
+          "weight": 1.0,
+          "critical": true
+        },
+        "Insertion Operation": {
+          "keywords": ["insertion", "insert", "add", "recursive", "iterative"],
+          "weight": 0.8,
+          "critical": false
+        },
+        "Deletion Operation": {
+          "keywords": ["deletion", "delete", "remove", "successor", "predecessor"],
+          "weight": 0.8,
+          "critical": false
+        }
+      }
+    },
+    "Q2": {
+      "question_text": "Describe database normalization from 1NF to 3NF with examples.",
+      "topic": "DBMS",
+      "max_marks": 10,
+      "keywords": [
+        "normalization", "1NF", "2NF", "3NF", "atomic", "functional",
+        "dependency", "primary key", "redundancy", "anomaly"
+      ],
+      "concepts": {
+        "Purpose of Normalization": {
+          "keywords": ["redundancy", "anomaly", "consistency", "integrity"],
+          "weight": 0.9,
+          "critical": true
+        },
+        "First Normal Form": {
+          "keywords": ["1NF", "atomic", "indivisible", "repeating groups"],
+          "weight": 1.0,
+          "critical": true
+        },
+        "Second Normal Form": {
+          "keywords": ["2NF", "partial dependency", "prime attribute", "candidate key"],
+          "weight": 1.0,
+          "critical": true
+        },
+        "Third Normal Form": {
+          "keywords": ["3NF", "transitive dependency", "non-prime"],
+          "weight": 1.0,
+          "critical": true
+        }
+      }
+    },
+    "Q3": {
+      "question_text": "Explain CPU scheduling algorithms: FCFS, SJF, and Round Robin.",
+      "topic": "Operating Systems",
+      "max_marks": 10,
+      "keywords": [
+        "scheduling", "FCFS", "SJF", "round robin", "CPU", "process",
+        "queue", "burst time", "waiting time", "turnaround", "preemptive"
+      ],
+      "concepts": {
+        "FCFS Algorithm": {
+          "keywords": ["FCFS", "first come first serve", "queue", "non-preemptive"],
+          "weight": 1.0,
+          "critical": true
+        },
+        "SJF Algorithm": {
+          "keywords": ["SJF", "shortest job first", "burst time", "optimal"],
+          "weight": 1.0,
+          "critical": true
+        },
+        "Round Robin Algorithm": {
+          "keywords": ["round robin", "time quantum", "preemptive", "circular queue"],
+          "weight": 1.0,
+          "critical": true
+        },
+        "Performance Metrics": {
+          "keywords": ["waiting time", "turnaround", "response time", "throughput"],
+          "weight": 0.7,
+          "critical": false
+        }
+      }
+    }
+  },
+  "topics": {
+    "Data Structures": {
+      "concepts": {
+        "BST Structure": {},
+        "BST Property": {},
+        "Insertion Operation": {},
+        "Deletion Operation": {}
+      }
+    },
+    "DBMS": {
+      "concepts": {
+        "Purpose of Normalization": {},
+        "First Normal Form": {},
+        "Second Normal Form": {},
+        "Third Normal Form": {}
+      }
+    },
+    "Operating Systems": {
+      "concepts": {
+        "FCFS Algorithm": {},
+        "SJF Algorithm": {},
+        "Round Robin Algorithm": {},
+        "Performance Metrics": {}
+      }
+    }
+  }
+}

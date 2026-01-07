@@ -358,16 +358,32 @@ export default function TeacherClassroomDetailPage() {
         }
     }
 
-    const postAnnouncement = () => {
+    const postAnnouncement = async () => {
         if (!newAnnouncement.trim()) return
-        const announcement: Announcement = {
-            id: Date.now().toString(),
-            message: newAnnouncement,
-            created_at: new Date().toISOString()
+
+        try {
+            const res = await fetch(`${getApiBaseUrl()}/api/classroom/${classroomId}/announcements`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${localStorage.getItem('accessToken')}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ message: newAnnouncement })
+            })
+
+            if (!res.ok) {
+                const error = await res.json()
+                alert(`Failed to post announcement: ${error.error || 'Unknown error'}`)
+                return
+            }
+
+            const data = await res.json()
+            setAnnouncements([data.announcement, ...announcements])
+            setNewAnnouncement('')
+        } catch (error) {
+            console.error('Failed to post announcement:', error)
+            alert('Failed to post announcement. Please try again.')
         }
-        setAnnouncements([announcement, ...announcements])
-        setNewAnnouncement('')
-        alert('Announcement posted!')
     }
 
     const startMeeting = async () => {
@@ -476,10 +492,6 @@ export default function TeacherClassroomDetailPage() {
     }
 
     const confirmUpload = async () => {
-        if (!uploadSubject) {
-            alert('Please select a subject for the materials')
-            return
-        }
         setUploading(true)
         setShowUploadModal(false)
 
@@ -517,8 +529,7 @@ export default function TeacherClassroomDetailPage() {
                         name: file.name,
                         url: uploadData.url,
                         type: file.type,
-                        size: file.size,
-                        subject: uploadSubject
+                        size: file.size
                     })
                 })
 
@@ -1050,10 +1061,7 @@ export default function TeacherClassroomDetailPage() {
                                         {getFileIcon(m.type)}
                                         <div>
                                             <p className="font-medium text-gray-900">{m.name}</p>
-                                            <div className="flex items-center gap-2 mt-0.5">
-                                                <span className="text-xs bg-primary-100 text-primary-700 px-2 py-0.5 rounded-full">{m.subject}</span>
-                                                <span className="text-xs text-gray-500">{formatSize(m.size)}</span>
-                                            </div>
+                                            <span className="text-xs text-gray-500">{formatSize(m.size)}</span>
                                         </div>
                                     </div>
                                     <div className="flex items-center gap-1">
@@ -1473,25 +1481,6 @@ export default function TeacherClassroomDetailPage() {
                                     <p key={i} className="text-sm text-gray-700 truncate">{file.name}</p>
                                 ))}
                             </div>
-                        </div>
-
-                        <div className="mb-4">
-                            <label className="block text-sm font-medium text-gray-700 mb-2">
-                                Select Subject Tag *
-                            </label>
-                            <select
-                                value={uploadSubject}
-                                onChange={(e) => setUploadSubject(e.target.value)}
-                                className="input-field"
-                            >
-                                <option value="">Choose a subject...</option>
-                                {subjects.map((s) => (
-                                    <option key={s} value={s}>{s}</option>
-                                ))}
-                            </select>
-                            <p className="text-xs text-gray-500 mt-1">
-                                This helps students filter materials by subject
-                            </p>
                         </div>
 
                         <div className="flex gap-3">

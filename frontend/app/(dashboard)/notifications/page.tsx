@@ -148,7 +148,9 @@ export default function NotificationsPage() {
     }
 
     function formatTime(dateStr: string) {
-        const date = new Date(dateStr)
+        // Backend returns UTC time - append Z if not present to parse as UTC
+        const utcDateStr = dateStr.endsWith('Z') ? dateStr : dateStr + 'Z'
+        const date = new Date(utcDateStr)
         const now = new Date()
         const diffMs = now.getTime() - date.getTime()
         const diffMins = Math.floor(diffMs / 60000)
