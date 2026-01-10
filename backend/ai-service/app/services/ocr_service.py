@@ -358,8 +358,8 @@ class OCRService:
         # Horizontal projection
         horizontal_proj = np.sum(binary, axis=1)
         
-        # IMPROVED: Use 15% threshold (was 10%) to reduce noise
-        threshold = np.max(horizontal_proj) * 0.15
+        # IMPROVED: Use 5% threshold (was 15%) to capture lighter text
+        threshold = np.max(horizontal_proj) * 0.05
         in_line = False
         line_regions = []
         start = 0
@@ -392,14 +392,16 @@ class OCRService:
             extent_ratio = np.sum(horiz_extent) / width
             
             # Skip lines that don't span enough width (likely decorations)
-            if extent_ratio < 0.20:
+            # Relaxed to 5% (was 20%) to catch short text
+            if extent_ratio < 0.05:
                 continue
             
-            # Skip lines with poor aspect ratio (width should be > 3x height)
+            # Skip lines with poor aspect ratio (width should be > 1.5x height)
+            # Relaxed from 3x to catch blocky text
             line_height = end - start
             line_width = np.sum(horiz_extent)
             aspect_ratio = line_width / line_height if line_height > 0 else 0
-            if aspect_ratio < 3:
+            if aspect_ratio < 1.5:
                 continue
             
             filtered_regions.append((start, end))

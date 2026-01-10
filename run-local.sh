@@ -96,6 +96,7 @@ export OPENAI_API_KEY="${OPENAI_API_KEY:-sk-test-key}"
 export PYTHONUNBUFFERED=1
 export AI_SERVICE_URL="http://localhost:$AI_PORT"
 export CORE_SERVICE_URL="http://localhost:$CORE_PORT"
+export HUGGINGFACE_API_KEY="${HUGGINGFACE_API_KEY:-}"  # Set this for olmOCR-7B support
 
 # Date for log files
 DATE=$(date +%Y-%m-%d)
