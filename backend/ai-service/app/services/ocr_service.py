@@ -348,8 +348,9 @@ class OCRService:
         return cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
     
     def _detect_lines(self, image: np.ndarray) -> List[np.ndarray]:
-        """Detect individual text lines in image"""
+        """Detect individual text lines in image with improved filtering"""
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if len(image.shape) == 3 else image
+        height, width = gray.shape
         
         # Threshold
         _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
@@ -357,8 +358,8 @@ class OCRService:
         # Horizontal projection
         horizontal_proj = np.sum(binary, axis=1)
         
-        # Find line boundaries
-        threshold = np.max(horizontal_proj) * 0.1
+        # IMPROVED: Use 15% threshold (was 10%) to reduce noise
+        threshold = np.max(horizontal_proj) * 0.15
         in_line = False
         line_regions = []
         start = 0
@@ -383,9 +384,29 @@ class OCRService:
             else:
                 merged_regions.append(region)
         
+        # IMPROVED: Filter by aspect ratio and horizontal extent
+        filtered_regions = []
+        for start, end in merged_regions:
+            line_binary = binary[start:end, :]
+            horiz_extent = np.sum(line_binary, axis=0) > 0
+            extent_ratio = np.sum(horiz_extent) / width
+            
+            # Skip lines that don't span enough width (likely decorations)
+            if extent_ratio < 0.20:
+                continue
+            
+            # Skip lines with poor aspect ratio (width should be > 3x height)
+            line_height = end - start
+            line_width = np.sum(horiz_extent)
+            aspect_ratio = line_width / line_height if line_height > 0 else 0
+            if aspect_ratio < 3:
+                continue
+            
+            filtered_regions.append((start, end))
+        
         # Extract line images
         line_images = []
-        for start, end in merged_regions:
+        for start, end in filtered_regions:
             line_img = image[start:end, :]
             if line_img.size > 0:
                 line_images.append(line_img)

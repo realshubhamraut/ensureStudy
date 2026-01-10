@@ -398,7 +398,8 @@ class NotesProcessingAgent:
                             horizontal_proj = np.sum(binary, axis=1)
                             
                             # Find line boundaries using projection profile
-                            threshold = np.max(horizontal_proj) * 0.05  # 5% of max = text present
+                            # IMPROVED: Use 15% threshold (was 5%) to reduce false positives from noise
+                            threshold = np.max(horizontal_proj) * 0.15  # 15% of max = actual text content
                             in_line = False
                             line_regions = []
                             start = 0
@@ -428,13 +429,38 @@ class NotesProcessingAgent:
                                 else:
                                     merged_regions.append(region)
                             
-                            logger.info(f"Page {i+1}: Detected {len(merged_regions)} text lines")
+                            # IMPROVED: Filter lines by horizontal extent and aspect ratio
+                            # to skip decorative elements (circled headers, underlines, etc.)
+                            width_px, height_px = img.size
+                            filtered_regions = []
+                            for line_start, line_end in merged_regions:
+                                line_binary = binary[line_start:line_end, :]
+                                horiz_extent = np.sum(line_binary, axis=0) > 0
+                                extent_ratio = np.sum(horiz_extent) / width_px
+                                
+                                # Skip lines that don't span at least 20% of width
+                                if extent_ratio < 0.20:
+                                    logger.debug(f"Page {i+1}: Skipping line y={line_start}-{line_end}, extent={extent_ratio:.2f}")
+                                    continue
+                                
+                                # Skip lines with aspect ratio < 3 (likely decorations, not text)
+                                line_height = line_end - line_start
+                                line_width = np.sum(horiz_extent)
+                                aspect_ratio = line_width / line_height if line_height > 0 else 0
+                                if aspect_ratio < 3:
+                                    logger.debug(f"Page {i+1}: Skipping line y={line_start}-{line_end}, aspect={aspect_ratio:.2f}")
+                                    continue
+                                
+                                filtered_regions.append((line_start, line_end))
+                            
+                            logger.info(f"Page {i+1}: Detected {len(merged_regions)} lines, {len(filtered_regions)} after filtering")
                             
                             # Process each detected line with TrOCR
                             all_text = []
+                            all_line_confidences = []
                             width, height = img.size
                             
-                            for line_start, line_end in merged_regions:
+                            for line_start, line_end in filtered_regions:
                                 # Crop the detected line
                                 line_img = img.crop((0, line_start, width, line_end))
                                 
@@ -443,23 +469,36 @@ class NotesProcessingAgent:
                                 if np.mean(line_np) > 250:  # Nearly white = blank
                                     continue
                                 
-                                # Process with TrOCR
+                                # Process with TrOCR - now with confidence scoring
                                 pixel_values = trocr_processor(images=line_img, return_tensors="pt").pixel_values
                                 
                                 with torch.no_grad():
-                                    generated_ids = trocr_model.generate(
+                                    # IMPROVED: Get generation scores for confidence calculation
+                                    outputs = trocr_model.generate(
                                         pixel_values, 
                                         max_length=256,  # Allow longer output
                                         num_beams=4,     # Beam search for better quality
-                                        early_stopping=True
+                                        early_stopping=True,
+                                        return_dict_in_generate=True,
+                                        output_scores=True
                                     )
                                 
-                                line_text = trocr_processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
+                                line_text = trocr_processor.batch_decode(outputs.sequences, skip_special_tokens=True)[0]
                                 if line_text.strip():
                                     all_text.append(line_text.strip())
+                                    
+                                    # IMPROVED: Compute actual confidence from decoder scores
+                                    if outputs.scores:
+                                        line_probs = [torch.softmax(s, dim=-1).max().item() for s in outputs.scores]
+                                        line_conf = sum(line_probs) / len(line_probs) if line_probs else 0.5
+                                        all_line_confidences.append(line_conf)
                             
                             extracted_text = '\n'.join(all_text)
-                            confidence = 0.85  # TrOCR typically has high accuracy on handwriting
+                            # IMPROVED: Use actual computed confidence instead of hardcoded 0.85
+                            if all_line_confidences:
+                                confidence = sum(all_line_confidences) / len(all_line_confidences)
+                            else:
+                                confidence = 0.5  # Default when no lines detected
                             
                             logger.info(f"Page {i+1}: TrOCR extracted {len(extracted_text)} chars from {len(merged_regions)} lines")
                         except Exception as ocr_error:
@@ -494,6 +533,16 @@ class NotesProcessingAgent:
                 # The enhanced images are stored relative to source_path
                 enhanced_url = f"/api/notes/images/{state['job_id']}/enhanced/page_{i+1:03d}.png"
                 
+                # IMPROVED: Quality gating based on confidence
+                if confidence < 0.60:
+                    page_status = "needs_review"
+                elif confidence < 0.75:
+                    page_status = "low_confidence" 
+                else:
+                    page_status = "ocr_done"
+                
+                logger.info(f"Page {i+1}: confidence={confidence:.2f}, status={page_status}")
+                
                 # Save page to database via internal API
                 async with httpx.AsyncClient() as client:
                     await client.post(
@@ -504,7 +553,7 @@ class NotesProcessingAgent:
                             "enhanced_image_url": enhanced_url,
                             "extracted_text": extracted_text,
                             "confidence_score": confidence,
-                            "status": "ocr_done"
+                            "status": page_status
                         },
                         headers={"X-Internal-API-Key": self.internal_api_key},
                         timeout=10.0

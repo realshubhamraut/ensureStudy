@@ -180,7 +180,7 @@ def _get_document_info(doc_id: str) -> Optional[Dict[str, Any]]:
     try:
         import httpx
         
-        core_service_url = os.getenv('CORE_SERVICE_URL', 'http://localhost:8000')
+        core_service_url = os.getenv('CORE_SERVICE_URL', 'http://localhost:9000')
         response = httpx.get(
             f"{core_service_url}/api/internal/documents/{doc_id}",
             timeout=10.0
@@ -205,7 +205,7 @@ def _update_document_status(
     try:
         import httpx
         
-        core_service_url = os.getenv('CORE_SERVICE_URL', 'http://localhost:8000')
+        core_service_url = os.getenv('CORE_SERVICE_URL', 'http://localhost:9000')
         httpx.patch(
             f"{core_service_url}/api/internal/documents/{doc_id}/status",
             json={
@@ -225,7 +225,7 @@ def _save_page_result(doc_id: str, page_number: int, ocr_result: Dict[str, Any])
     try:
         import httpx
         
-        core_service_url = os.getenv('CORE_SERVICE_URL', 'http://localhost:8000')
+        core_service_url = os.getenv('CORE_SERVICE_URL', 'http://localhost:9000')
         httpx.post(
             f"{core_service_url}/api/internal/documents/{doc_id}/pages",
             json={
@@ -276,7 +276,7 @@ def _create_quality_report(
     try:
         import httpx
         
-        core_service_url = os.getenv('CORE_SERVICE_URL', 'http://localhost:8000')
+        core_service_url = os.getenv('CORE_SERVICE_URL', 'http://localhost:9000')
         httpx.post(
             f"{core_service_url}/api/internal/documents/{doc_id}/quality-report",
             json=report,

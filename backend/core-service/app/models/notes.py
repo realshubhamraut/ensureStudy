@@ -106,14 +106,15 @@ class DigitizedNotePage(db.Model):
     # OCR results
     extracted_text = db.Column(db.Text)
     confidence_score = db.Column(db.Float)  # 0-1 OCR confidence
+    ocr_lines = db.Column(db.JSON, default=list)  # Line-level OCR with bboxes: [{"text": "...", "bbox": [x,y,w,h], "confidence": 0.9}]
     
     # Image quality metrics
     brightness = db.Column(db.Float)
     contrast = db.Column(db.Float)
     sharpness = db.Column(db.Float)
     
-    # Processing status
-    status = db.Column(db.String(20), default='pending')  # pending, enhanced, ocr_done, embedded
+    # Processing status: pending, enhanced, ocr_done (>=0.75), low_confidence (0.60-0.75), needs_review (<0.60), embedded
+    status = db.Column(db.String(20), default='pending')
     
     # Timestamps
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -122,7 +123,7 @@ class DigitizedNotePage(db.Model):
     # Relationships
     embeddings = db.relationship("NoteEmbedding", backref="page", cascade="all, delete-orphan")
     
-    def to_dict(self, include_text=True):
+    def to_dict(self, include_text=True, include_ocr_lines=False):
         data = {
             "id": self.id,
             "job_id": self.job_id,
@@ -138,6 +139,9 @@ class DigitizedNotePage(db.Model):
         
         if include_text:
             data["extracted_text"] = self.extracted_text
+        
+        if include_ocr_lines:
+            data["ocr_lines"] = self.ocr_lines or []
         
         return data
 

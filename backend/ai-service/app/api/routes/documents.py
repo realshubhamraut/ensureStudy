@@ -120,7 +120,7 @@ async def upload_material(
         
         # Create document record via Core Service
         import httpx
-        core_url = os.getenv('CORE_SERVICE_URL', 'http://localhost:8000')
+        core_url = os.getenv('CORE_SERVICE_URL', 'http://localhost:9000')
         
         doc_data = {
             'id': doc_id,
@@ -191,7 +191,7 @@ async def get_document_status(class_id: str, doc_id: str):
     """
     try:
         import httpx
-        core_url = os.getenv('CORE_SERVICE_URL', 'http://localhost:8000')
+        core_url = os.getenv('CORE_SERVICE_URL', 'http://localhost:9000')
         
         async with httpx.AsyncClient() as client:
             response = await client.get(
@@ -245,7 +245,7 @@ async def get_document_sidebar(
     """
     try:
         import httpx
-        core_url = os.getenv('CORE_SERVICE_URL', 'http://localhost:8000')
+        core_url = os.getenv('CORE_SERVICE_URL', 'http://localhost:9000')
         
         # Get document info
         async with httpx.AsyncClient() as client:
@@ -351,7 +351,7 @@ async def _get_document_chunks(doc_id: str, top_k: int) -> List[SidebarMatch]:
     """Get first N chunks from document."""
     try:
         import httpx
-        core_url = os.getenv('CORE_SERVICE_URL', 'http://localhost:8000')
+        core_url = os.getenv('CORE_SERVICE_URL', 'http://localhost:9000')
         
         async with httpx.AsyncClient() as client:
             response = await client.get(

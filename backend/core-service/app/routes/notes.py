@@ -826,3 +826,115 @@ def add_page_internal():
     except Exception as e:
         db.session.rollback()
         return jsonify({"error": str(e)}), 500
+
+
+# ==================== Human Correction ====================
+
+@notes_bp.route("/pages/<job_id>/<int:page_number>/correct", methods=["POST"])
+@student_required
+def correct_page_text(user, job_id, page_number):
+    """
+    Human correction endpoint for OCR results.
+    
+    Accepts corrected text and optionally updates embeddings.
+    
+    Request body:
+    {
+        "text": "Corrected full text",
+        "ocr_lines": [{"text": "...", "bbox": [x,y,w,h], "confidence": 1.0}, ...],  // optional
+        "reembed": true  // optional, trigger re-embedding
+    }
+    """
+    try:
+        # Verify job ownership
+        job = NoteProcessingJob.query.filter_by(id=job_id, student_id=user.id).first()
+        if not job:
+            return jsonify({"error": "Job not found"}), 404
+        
+        # Get page
+        page = DigitizedNotePage.query.filter_by(
+            job_id=job_id,
+            page_number=page_number
+        ).first()
+        
+        if not page:
+            return jsonify({"error": "Page not found"}), 404
+        
+        data = request.get_json()
+        corrected_text = data.get("text")
+        corrected_lines = data.get("ocr_lines")
+        should_reembed = data.get("reembed", False)
+        
+        if not corrected_text:
+            return jsonify({"error": "text field is required"}), 400
+        
+        # Store original for audit
+        original_text = page.extracted_text
+        
+        # Update page
+        page.extracted_text = corrected_text
+        page.status = "corrected"  # Mark as human-corrected
+        page.confidence_score = 1.0  # Human correction = 100% confidence
+        
+        # Update ocr_lines if provided
+        if corrected_lines:
+            page.ocr_lines = corrected_lines
+        
+        db.session.commit()
+        
+        # Trigger re-embedding if requested
+        if should_reembed:
+            try:
+                requests.post(
+                    f"{AI_SERVICE_URL}/api/notes/reembed",
+                    json={
+                        "job_id": job_id,
+                        "page_id": page.id,
+                        "text": corrected_text
+                    },
+                    timeout=10
+                )
+            except Exception as e:
+                print(f"Could not trigger re-embedding: {e}")
+        
+        return jsonify({
+            "success": True,
+            "page": page.to_dict(),
+            "original_text_length": len(original_text) if original_text else 0,
+            "corrected_text_length": len(corrected_text),
+            "reembed_triggered": should_reembed
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+
+@notes_bp.route("/pages/<job_id>/<int:page_number>/ocr-lines", methods=["GET"])
+@student_required
+def get_page_ocr_lines(user, job_id, page_number):
+    """Get OCR lines with bounding boxes for a specific page (for correction UI)."""
+    try:
+        job = NoteProcessingJob.query.filter_by(id=job_id, student_id=user.id).first()
+        if not job:
+            return jsonify({"error": "Job not found"}), 404
+        
+        page = DigitizedNotePage.query.filter_by(
+            job_id=job_id,
+            page_number=page_number
+        ).first()
+        
+        if not page:
+            return jsonify({"error": "Page not found"}), 404
+        
+        return jsonify({
+            "page_id": page.id,
+            "page_number": page.page_number,
+            "extracted_text": page.extracted_text,
+            "ocr_lines": page.ocr_lines or [],
+            "confidence_score": page.confidence_score,
+            "status": page.status
+        })
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500

@@ -95,6 +95,7 @@ export JWT_SECRET="${JWT_SECRET:-local-dev-jwt-secret-key-32chars}"
 export OPENAI_API_KEY="${OPENAI_API_KEY:-sk-test-key}"
 export PYTHONUNBUFFERED=1
 export AI_SERVICE_URL="http://localhost:$AI_PORT"
+export CORE_SERVICE_URL="http://localhost:$CORE_PORT"
 
 # Date for log files
 DATE=$(date +%Y-%m-%d)

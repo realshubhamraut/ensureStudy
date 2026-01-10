@@ -191,6 +191,66 @@ async def delete_embeddings(job_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+class ReembedRequest(BaseModel):
+    """Request to re-embed corrected text"""
+    job_id: str
+    page_id: str 
+    text: str
+    student_id: Optional[str] = None
+    classroom_id: Optional[str] = None
+
+
+@router.post("/reembed")
+async def reembed_page(request: ReembedRequest):
+    """
+    Re-embed a page after human correction.
+    
+    Deletes old embeddings for the page and creates new ones.
+    """
+    try:
+        from app.services.notes_embedding import NotesEmbeddingService
+        
+        embedding_service = NotesEmbeddingService()
+        
+        # Delete old embeddings for this page
+        # Note: This assumes we can filter by page_id in our vector store
+        logger.info(f"Re-embedding page {request.page_id} for job {request.job_id}")
+        
+        # Create new chunks from corrected text
+        chunks = embedding_service.chunk_text(
+            text=request.text,
+            page_id=request.page_id,
+            job_id=request.job_id,
+            metadata={"corrected": True}
+        )
+        
+        if not chunks:
+            return {
+                "success": True,
+                "message": "No chunks generated (text too short)",
+                "indexed_count": 0
+            }
+        
+        # Index new chunks
+        indexed = embedding_service.index_chunks(
+            chunks=chunks,
+            student_id=request.student_id or "",
+            classroom_id=request.classroom_id or ""
+        )
+        
+        return {
+            "success": True,
+            "job_id": request.job_id,
+            "page_id": request.page_id,
+            "indexed_count": len(indexed),
+            "chunk_count": len(chunks)
+        }
+        
+    except Exception as e:
+        logger.error(f"Re-embed error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/health")
 async def health_check():
     """Check if notes processing services are available"""
@@ -261,7 +321,7 @@ async def _run_processing_pipeline(
             import httpx
             import os
             
-            core_url = os.getenv("CORE_SERVICE_URL", "http://localhost:8000")
+            core_url = os.getenv("CORE_SERVICE_URL", "http://localhost:9000")
             api_key = os.getenv("INTERNAL_API_KEY", "dev-internal-key")
             
             async with httpx.AsyncClient() as client:

@@ -497,7 +497,7 @@ class DocumentProcessingAgent:
     def __init__(self, core_service_url: str = None):
         self.graph = build_document_processing_graph()
         self.core_service_url = core_service_url or os.getenv(
-            "CORE_SERVICE_URL", "http://localhost:8000"
+            "CORE_SERVICE_URL", "http://localhost:9000"
         )
         self.internal_api_key = os.getenv("INTERNAL_API_KEY", "dev-internal-key")
         logger.info("Initialized DocumentProcessingAgent with LangGraph")
