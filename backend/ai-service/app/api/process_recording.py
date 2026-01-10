@@ -33,16 +33,28 @@ class ProcessingStatus(BaseModel):
     transcript_available: bool = False
 
 
-async def update_recording_status(recording_id: str, status: str, has_transcript: bool = False):
-    """Update recording status in core service"""
+async def update_recording_status(
+    recording_id: str, 
+    status: str, 
+    has_transcript: bool = False,
+    transcript_text: str = None,
+    summary: str = None
+):
+    """Update recording status and transcript in core service"""
     try:
+        data = {
+            "status": status,
+            "has_transcript": has_transcript
+        }
+        if transcript_text:
+            data["transcript_text"] = transcript_text
+        if summary:
+            data["summary"] = summary
+            
         async with httpx.AsyncClient() as client:
             await client.patch(
                 f"{CORE_SERVICE_URL}/api/recordings/{recording_id}/status",
-                json={
-                    "status": status,
-                    "has_transcript": has_transcript
-                },
+                json=data,
                 timeout=10.0
             )
     except Exception as e:
@@ -75,27 +87,34 @@ async def process_recording_task(
         
         print(f"Transcription complete: {transcript.word_count} words")
         
-        # Step 2: Generate embeddings for vector search
+        # Step 2: Generate embeddings for vector search (AI tutor retrieval)
         try:
-            chunks_embedded = meeting_embedding_service.embed_transcript(
+            chunks_embedded = await meeting_embedding_service.embed_transcript(
                 recording_id=recording_id,
                 meeting_id=meeting_id,
                 classroom_id=classroom_id,
-                transcript_text=transcript.full_text,
                 segments=[{
                     'id': seg.id,
                     'start': seg.start,
                     'end': seg.end,
                     'text': seg.text,
-                    'speaker_id': seg.speaker_id
-                } for seg in transcript.segments]
+                    'speaker_id': seg.speaker_id,
+                    'speaker_name': seg.speaker_name or f'Speaker {seg.speaker_id + 1}'
+                } for seg in transcript.segments],
+                meeting_title=f"Meeting {meeting_id[:8]}"  # Short title for context
             )
             print(f"Embedded {chunks_embedded} chunks to Qdrant")
         except Exception as e:
             print(f"Embedding failed (non-fatal): {e}")
         
-        # Step 3: Update status to ready
-        await update_recording_status(recording_id, "ready", has_transcript=True)
+        # Step 3: Update status to ready with transcript text
+        await update_recording_status(
+            recording_id, 
+            "ready", 
+            has_transcript=True,
+            transcript_text=transcript.full_text,
+            summary=transcript.summary if hasattr(transcript, 'summary') else None
+        )
         
         print(f"Recording {recording_id} processing complete!")
         

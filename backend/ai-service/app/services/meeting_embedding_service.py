@@ -2,6 +2,8 @@
 Meeting Embedding Service
 Generates vector embeddings for meeting transcripts and stores in Qdrant
 Enables semantic search across all meeting content
+
+Uses Sentence-Transformers (FREE, LOCAL) - same as AI tutor retrieval
 """
 import os
 import asyncio
@@ -15,16 +17,28 @@ from qdrant_client.models import (
     Distance, VectorParams, PointStruct,
     Filter, FieldCondition, MatchValue
 )
-import openai
+from sentence_transformers import SentenceTransformer
 
 # Configuration
 QDRANT_HOST = os.getenv('QDRANT_HOST', 'localhost')
 QDRANT_PORT = int(os.getenv('QDRANT_PORT', 6333))
 COLLECTION_NAME = 'meeting_transcripts'
-EMBEDDING_MODEL = os.getenv('EMBEDDING_MODEL', 'text-embedding-3-small')
-EMBEDDING_DIMENSIONS = 1536  # For text-embedding-3-small
+# Use same model as AI tutor retrieval for consistency
+EMBEDDING_MODEL = os.getenv('EMBEDDING_MODEL', 'sentence-transformers/all-mpnet-base-v2')
+EMBEDDING_DIMENSIONS = 768  # For sentence-transformers/all-mpnet-base-v2
 
-openai.api_key = os.getenv('OPENAI_API_KEY')
+# Lazy-loaded embedding model (shared)
+_embedding_model: Optional[SentenceTransformer] = None
+
+
+def get_embedding_model() -> SentenceTransformer:
+    """Lazy-load Sentence-Transformers model (FREE, LOCAL)"""
+    global _embedding_model
+    if _embedding_model is None:
+        model_name = EMBEDDING_MODEL.replace('sentence-transformers/', '')
+        print(f"[MeetingEmbedding] Loading model: {model_name}")
+        _embedding_model = SentenceTransformer(model_name)
+    return _embedding_model
 
 
 @dataclass
@@ -45,6 +59,9 @@ class TranscriptChunk:
 class MeetingEmbeddingService:
     """
     Service for generating and storing meeting transcript embeddings
+    
+    Uses Sentence-Transformers (FREE, LOCAL) for embeddings.
+    Same model as AI tutor retrieval for consistent semantic search.
     
     Chunks transcripts by:
     - Speaker changes
@@ -70,7 +87,7 @@ class MeetingEmbeddingService:
         return self._client
     
     def _ensure_collection(self):
-        """Ensure Qdrant collection exists"""
+        """Ensure Qdrant collection exists with correct dimensions"""
         if self._client is None:
             return
             
@@ -82,22 +99,22 @@ class MeetingEmbeddingService:
                 self._client.create_collection(
                     collection_name=COLLECTION_NAME,
                     vectors_config=VectorParams(
-                        size=EMBEDDING_DIMENSIONS,
+                        size=EMBEDDING_DIMENSIONS,  # 768 for sentence-transformers
                         distance=Distance.COSINE
                     )
                 )
-                print(f"Created collection: {COLLECTION_NAME}")
+                print(f"Created collection: {COLLECTION_NAME} (dim={EMBEDDING_DIMENSIONS})")
         except Exception as e:
             print(f"Warning: Could not ensure Qdrant collection - {e}")
     
     async def generate_embedding(self, text: str) -> List[float]:
-        """Generate embedding for text using OpenAI"""
-        response = await asyncio.to_thread(
-            openai.embeddings.create,
-            model=EMBEDDING_MODEL,
-            input=text
-        )
-        return response.data[0].embedding
+        """Generate embedding using Sentence-Transformers (FREE, LOCAL)"""
+        def _embed():
+            model = get_embedding_model()
+            embedding = model.encode(text, normalize_embeddings=True)
+            return embedding.tolist()
+        
+        return await asyncio.to_thread(_embed)
     
     def chunk_transcript(
         self,

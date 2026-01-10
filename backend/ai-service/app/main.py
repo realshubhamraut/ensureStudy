@@ -12,6 +12,7 @@ from .api.routes.mock_interview import router as mock_interview_router
 from .api.routes.softskills import router as softskills_router
 from .api.routes.web_ingest import router as web_ingest_router
 from .api.routes.indexing import router as indexing_router
+from .api.routes.grading import router as grading_router
 from .api.notes import router as notes_router
 from .api.meetings import router as meetings_router
 from .api.meeting_qa import router as meeting_qa_router
@@ -38,7 +39,6 @@ app = FastAPI(
 async def log_requests(request: Request, call_next):
     """Log all incoming requests with timing."""
     start = time.time()
-    
     # Log request
     method = request.method
     path = request.url.path
@@ -84,6 +84,7 @@ app.include_router(process_recording_router)
 app.include_router(proctor_router)
 app.include_router(web_ingest_router)
 app.include_router(indexing_router)
+app.include_router(grading_router)
 
 
 @app.on_event("startup")

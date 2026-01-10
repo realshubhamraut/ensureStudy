@@ -77,3 +77,23 @@ deepface>=0.0.79              # Face verification (optional, graceful fallback)
 # pyaudio>=0.2.14             # Uncomment if audio detection needed
 
 websockets>=12.0
+
+# ==================== Transcription ====================
+
+# OpenAI Whisper (FREE, LOCAL, no API key needed)
+# Downloads model automatically on first use (~140MB for base model)
+openai-whisper>=20231117
+
+# Speaker Diarization (identifies who is speaking)
+simple-diarizer>=0.0.15       # Simple speaker diarization
+pydub>=0.25.1                 # Audio processing for fallback diarization
+
+# ==================== PDF Processing & OCR ====================
+
+# PDF text extraction (FREE, LOCAL)
+pymupdf>=1.23.0               # PyMuPDF for PDF parsing
+
+# OCR for handwritten submissions (FREE, requires tesseract system install)
+# Install tesseract: brew install tesseract
+pytesseract>=0.3.10           # Python wrapper for Tesseract OCR
+Pillow>=10.0.0                # Image processing for OCR

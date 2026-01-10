@@ -72,9 +72,10 @@ def upload_chunk():
             print(f"[Recording] Error: Meeting {meeting_id} not found")
             return jsonify({'error': 'Meeting not found'}), 404
         
-        # Allow any participant to record (not just host)
-        # if meeting.host_id != request.current_user.id:
-        #     return jsonify({'error': 'Only host can upload recording'}), 403
+        # Only host (teacher) can record
+        if meeting.host_id != request.current_user.id:
+            print(f"[Recording] Error: User {request.current_user.id} is not host {meeting.host_id}")
+            return jsonify({'error': 'Only the host can record meetings'}), 403
         
         if 'chunk' not in request.files:
             print("[Recording] Error: No chunk file provided")
@@ -126,9 +127,10 @@ def finalize_recording():
             print(f"[Recording] Error: Meeting {meeting_id} not found")
             return jsonify({'error': 'Meeting not found'}), 404
         
-        # Allow any participant to finalize (not just host)
-        # if meeting.host_id != request.current_user.id:
-        #     return jsonify({'error': 'Only host can finalize recording'}), 403
+        # Only host (teacher) can finalize recording
+        if meeting.host_id != request.current_user.id:
+            print(f"[Recording] Error: User {request.current_user.id} is not host {meeting.host_id}")
+            return jsonify({'error': 'Only the host can finalize recordings'}), 403
         
         # Merge chunks
         chunk_dir = os.path.join(CHUNKS_DIR, meeting_id)
@@ -391,6 +393,10 @@ def update_recording_status(recording_id):
             recording.key_topics = json.dumps(data['key_topics'])
         if 'summary_brief' in data:
             recording.summary_brief = data['summary_brief']
+        if 'transcript_text' in data:
+            recording.transcript_text = data['transcript_text']
+        if 'summary' in data:
+            recording.summary_brief = data['summary']
         if 'is_indexed' in data:
             recording.is_indexed = data['is_indexed']
         if 'indexed_at' in data:

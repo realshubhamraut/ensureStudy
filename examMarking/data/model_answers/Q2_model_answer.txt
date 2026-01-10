@@ -1,9 +1,0 @@
-Database normalization is a systematic process of organizing data to minimize redundancy and dependency anomalies. It ensures data integrity and consistency.
-
-First Normal Form (1NF): A table is in 1NF if all attributes contain only atomic (indivisible) values and there are no repeating groups. Each cell should contain a single value, not a list or set. For example, instead of storing multiple phone numbers in one column, create separate rows for each phone number.
-
-Second Normal Form (2NF): A table is in 2NF if it is in 1NF and all non-prime attributes are fully functionally dependent on the entire primary key, not just part of it. This eliminates partial dependencies. In a table with composite primary key (StudentID, CourseID), student name should not depend only on StudentID.
-
-Third Normal Form (3NF): A table is in 3NF if it is in 2NF and no non-prime attribute is transitively dependent on the primary key. This means non-key attributes should depend only on the primary key, not on other non-key attributes. For example, if a table has EmployeeID, DepartmentID, and DepartmentName, the DepartmentName should be moved to a separate Department table to avoid transitive dependency.
-
-Normalization reduces data redundancy, prevents update anomalies, and improves data integrity.

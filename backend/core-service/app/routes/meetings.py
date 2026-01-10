@@ -235,16 +235,32 @@ def join_meeting(meeting_id):
         db.session.commit()
         participant = existing
     else:
-        # Add new participant
-        participant = MeetingParticipant(
-            meeting_id=meeting_id,
-            user_id=user_id,
-            role='attendee',
-            joined_at=datetime.utcnow(),
-            device_type=data.get('device_type', 'desktop')
-        )
-        db.session.add(participant)
-        db.session.commit()
+        # Add new participant - handle race condition with try-except
+        try:
+            participant = MeetingParticipant(
+                meeting_id=meeting_id,
+                user_id=user_id,
+                role='attendee',
+                joined_at=datetime.utcnow(),
+                device_type=data.get('device_type', 'desktop')
+            )
+            db.session.add(participant)
+            db.session.commit()
+        except Exception as e:
+            # Race condition - another request already added this participant
+            db.session.rollback()
+            existing = MeetingParticipant.query.filter_by(
+                meeting_id=meeting_id,
+                user_id=user_id
+            ).first()
+            if existing:
+                existing.joined_at = datetime.utcnow()
+                existing.left_at = None
+                db.session.commit()
+                participant = existing
+            else:
+                # Something else went wrong
+                return jsonify({"error": "Failed to join meeting"}), 500
     
     # Publish Kafka analytics event
     if KAFKA_ENABLED:

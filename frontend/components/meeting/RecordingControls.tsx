@@ -5,7 +5,6 @@ import {
     StopCircleIcon,
     PauseCircleIcon,
     PlayCircleIcon,
-    SignalIcon,
     ExclamationCircleIcon,
     CheckCircleIcon
 } from '@heroicons/react/24/solid'
@@ -20,8 +19,8 @@ interface RecordingControlsProps {
 }
 
 /**
- * Recording controls component for meeting room
- * Shows record button for host, recording status for all
+ * Recording controls - Only hosts (teachers) can record
+ * Students see a read-only indicator when recording is in progress
  */
 export function RecordingControls({
     meetingId,
@@ -46,42 +45,21 @@ export function RecordingControls({
         onRecordingComplete
     })
 
-    // Always show recording controls in meeting (for now - host check can be strict if needed)
-    // Show recording indicator if actively recording, otherwise show controls
-    if (!isHost && !isRecording && status !== 'uploading' && status !== 'processing') {
-        // Still show a record button for non-hosts to at least screen record their own view
-        return (
-            <button
-                onClick={startRecording}
-                className="flex items-center gap-2 px-3 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg text-sm transition-colors"
-                title="Record your screen"
-            >
-                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                    <circle cx="10" cy="10" r="5" />
-                </svg>
-                <span>Record</span>
-            </button>
-        )
+    // For non-hosts (students): only show status if recording is active
+    if (!isHost) {
+        if (status === 'recording') {
+            return (
+                <div className="flex items-center gap-2 px-3 py-2 bg-red-600 text-white rounded-lg text-sm">
+                    <span className="w-2 h-2 bg-white rounded-full animate-pulse" />
+                    <span>REC</span>
+                </div>
+            )
+        }
+        // Students don't see anything when not recording
+        return null
     }
 
-    if (!isHost && isRecording) {
-        return (
-            <div className="flex items-center gap-2 px-3 py-2 bg-red-600/90 text-white rounded-lg text-sm">
-                <SignalIcon className="w-4 h-4 animate-pulse" />
-                <span>Recording</span>
-                <span className="font-mono">{formattedDuration}</span>
-                <button
-                    onClick={stopRecording}
-                    className="ml-2 p-1 bg-red-700 hover:bg-red-800 rounded"
-                    title="Stop recording"
-                >
-                    <StopCircleIcon className="w-4 h-4" />
-                </button>
-            </div>
-        )
-    }
-
-    // Host controls
+    // For hosts (teachers): show full recording controls
     return (
         <div className="flex items-center gap-2">
             {/* Recording status badge */}
@@ -98,7 +76,7 @@ export function RecordingControls({
                         <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
                     </svg>
-                    <span>Uploading...</span>
+                    <span>Saving...</span>
                 </div>
             )}
 
@@ -116,15 +94,15 @@ export function RecordingControls({
                 </div>
             )}
 
-            {/* Control buttons */}
-            {!isRecording && status !== 'uploading' && status !== 'processing' && (
+            {/* Record button - only for hosts */}
+            {!isRecording && status !== 'uploading' && status !== 'processing' && status !== 'complete' && (
                 <button
                     onClick={startRecording}
                     className={clsx(
                         'flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors',
                         'bg-red-600 hover:bg-red-700 text-white'
                     )}
-                    title="Start Recording"
+                    title="Record Meeting"
                 >
                     <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
                         <circle cx="10" cy="10" r="6" />

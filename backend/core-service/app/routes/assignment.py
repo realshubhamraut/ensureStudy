@@ -376,6 +376,46 @@ def submit_assignment(assignment_id):
         
         db.session.commit()
         
+        # Trigger AI auto-grading if PDFs are available
+        try:
+            import os
+            import requests
+            
+            ai_service_url = os.getenv('AI_SERVICE_URL', 'http://localhost:9001')
+            
+            # Get teacher's assignment PDF
+            teacher_pdfs = [att.url for att in assignment.attachments if att.filename and att.filename.endswith('.pdf')]
+            student_pdfs = [f.url for f in submission.files if f.filename and f.filename.endswith('.pdf')]
+            
+            if teacher_pdfs and student_pdfs:
+                print(f"[AutoGrade] Triggering AI grading for submission {submission.id}")
+                
+                # Update status to grading
+                submission.status = 'grading'
+                db.session.commit()
+                
+                # Fire-and-forget request to AI service
+                requests.post(
+                    f"{ai_service_url}/api/grade/submission",
+                    json={
+                        'assignment_id': assignment_id,
+                        'submission_id': submission.id,
+                        'teacher_pdf_url': teacher_pdfs[0],
+                        'student_pdf_urls': student_pdfs,
+                        'max_points': assignment.points or 100,
+                        'classroom_id': assignment.classroom_id,
+                        'student_id': current_user.id
+                    },
+                    timeout=5  # Short timeout - we don't wait for grading to complete
+                )
+                print(f"[AutoGrade] Grading request sent for submission {submission.id}")
+            else:
+                print(f"[AutoGrade] No PDFs available for auto-grading (teacher: {len(teacher_pdfs)}, student: {len(student_pdfs)})")
+                
+        except Exception as e:
+            # Don't fail the submission if grading trigger fails
+            print(f"[AutoGrade] Trigger failed (non-blocking): {e}")
+        
         return jsonify({
             'message': 'Assignment submitted successfully',
             'submission': submission.to_dict(include_files=True)

@@ -78,9 +78,15 @@ class Submission(db.Model):
     assignment_id = db.Column(db.String(36), db.ForeignKey('assignments.id'), nullable=False)
     student_id = db.Column(db.String(36), db.ForeignKey('users.id'), nullable=False)
     submitted_at = db.Column(db.DateTime, default=datetime.utcnow)
-    status = db.Column(db.String(20), default='submitted')  # submitted, graded, returned
+    status = db.Column(db.String(20), default='submitted')  # submitted, grading, graded, returned, failed_grading
     grade = db.Column(db.Integer)
     feedback = db.Column(db.Text)
+    
+    # AI Grading fields
+    ai_graded = db.Column(db.Boolean, default=False)        # Whether AI graded this submission
+    ai_confidence = db.Column(db.Float)                      # AI confidence score (0.0-1.0)
+    graded_at = db.Column(db.DateTime)                       # When grading completed
+    detailed_feedback = db.Column(db.JSON)                   # Detailed per-question feedback
     
     # Relationships
     student = db.relationship('User', backref='submissions')
@@ -94,7 +100,12 @@ class Submission(db.Model):
             'submitted_at': self.submitted_at.isoformat() if self.submitted_at else None,
             'status': self.status,
             'grade': self.grade,
-            'feedback': self.feedback
+            'feedback': self.feedback,
+            # AI grading fields
+            'ai_graded': self.ai_graded or False,
+            'ai_confidence': self.ai_confidence,
+            'graded_at': self.graded_at.isoformat() if self.graded_at else None,
+            'detailed_feedback': self.detailed_feedback
         }
         
         if include_student and self.student:

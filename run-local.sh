@@ -47,8 +47,13 @@ if command -v docker &> /dev/null; then
         docker run -d --name ensure-study-qdrant -p 6333:6333 -p 6334:6334 qdrant/qdrant 2>/dev/null || true
     }
     echo -e "${GREEN}Qdrant started on http://localhost:6333${NC}"
+    
+    # Start MongoDB for meeting transcription storage
+    echo -e "${YELLOW}Starting MongoDB...${NC}"
+    docker start mongodb 2>/dev/null || docker run -d --name mongodb -p 27017:27017 mongo:latest 2>/dev/null || true
+    echo -e "${GREEN}MongoDB started on localhost:27017${NC}"
 else
-    echo -e "${RED}Docker not found - Qdrant won't be available${NC}"
+    echo -e "${RED}Docker not found - Qdrant and MongoDB won't be available${NC}"
 fi
 
 # Check if venv exists
@@ -89,6 +94,7 @@ export FLASK_DEBUG=1
 export JWT_SECRET="${JWT_SECRET:-local-dev-jwt-secret-key-32chars}"
 export OPENAI_API_KEY="${OPENAI_API_KEY:-sk-test-key}"
 export PYTHONUNBUFFERED=1
+export AI_SERVICE_URL="http://localhost:$AI_PORT"
 
 # Date for log files
 DATE=$(date +%Y-%m-%d)

@@ -27,7 +27,7 @@ router = APIRouter(prefix="/api/meetings", tags=["meetings"])
 # Configuration
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-MONGODB_URI = os.getenv("MONGODB_URI", "mongodb://ensure_study:mongodb_password_123@localhost:27017/ensure_study_meetings")
+MONGODB_URI = os.getenv("MONGODB_URI", "mongodb://localhost:27017/ensure_study_meetings")
 QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
 QDRANT_PORT = int(os.getenv("QDRANT_PORT", "6333"))
 

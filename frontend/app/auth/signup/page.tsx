@@ -121,7 +121,20 @@ export default function SignUpPage() {
 
             if (!res.ok) throw new Error(data.error || 'Registration failed')
 
+            // Store token and user info
             localStorage.setItem('accessToken', data.access_token)
+
+            // Store user info for role-based features (like recording)
+            if (data.user) {
+                localStorage.setItem('userId', data.user.id)
+                localStorage.setItem('userRole', data.user.role || selectedRole)
+                localStorage.setItem('userName', data.user.name || `${firstName} ${lastName}`.trim() || username)
+                console.log('[Auth] Stored user info:', { userId: data.user.id, role: data.user.role || selectedRole })
+            } else {
+                localStorage.setItem('userRole', selectedRole)
+                localStorage.setItem('userName', `${firstName} ${lastName}`.trim() || username)
+                console.log('[Auth] No user in response, using selected role:', selectedRole)
+            }
 
             switch (selectedRole) {
                 case 'admin': router.push('/admin/dashboard'); break

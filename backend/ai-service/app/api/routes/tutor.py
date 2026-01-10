@@ -125,7 +125,10 @@ async def process_tutor_query(request: TutorQueryRequest) -> TutorQueryResponse:
         
         # Also search classroom materials if classroom_id is provided
         classroom_chunks = []
+        transcript_chunks = []
+        
         if request.classroom_id:
+            # Search classroom materials (PDFs, docs, etc.)
             try:
                 from ...services.material_indexer import get_material_indexer
                 indexer = get_material_indexer()
@@ -150,12 +153,27 @@ async def process_tutor_query(request: TutorQueryRequest) -> TutorQueryResponse:
                 print(f"[TUTOR] Found {len(classroom_chunks)} classroom material chunks")
             except Exception as e:
                 print(f"[TUTOR] Classroom material search failed: {e}")
+            
+            # Search meeting transcripts (what the teacher said in class!)
+            try:
+                from ...services.retrieval import search_meeting_transcripts
+                transcript_results = search_meeting_transcripts(
+                    query=request.question,
+                    classroom_id=request.classroom_id,
+                    top_k=5,
+                    threshold=0.4
+                )
+                transcript_chunks = transcript_results
+                print(f"[TUTOR] Found {len(transcript_chunks)} meeting transcript chunks")
+            except Exception as e:
+                print(f"[TUTOR] Meeting transcript search failed: {e}")
         
-        # Merge and sort by score (classroom materials get priority boost)
-        if classroom_chunks:
-            for chunk in classroom_chunks:
+        # Merge and sort by score (classroom materials and transcripts get priority boost)
+        all_classroom_content = classroom_chunks + transcript_chunks
+        if all_classroom_content:
+            for chunk in all_classroom_content:
                 chunk.similarity_score = min(chunk.similarity_score + 0.1, 1.0)  # Boost
-            chunks = sorted(chunks + classroom_chunks, key=lambda c: c.similarity_score, reverse=True)
+            chunks = sorted(chunks + all_classroom_content, key=lambda c: c.similarity_score, reverse=True)
         
         retrieval_time = int((time.time() - retrieval_start) * 1000)
         

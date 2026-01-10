@@ -3,6 +3,7 @@ import { getApiBaseUrl } from '@/utils/api'
 
 
 import { useState, useEffect, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import {
@@ -71,10 +72,30 @@ interface Assignment {
     attachments?: { id: string; type: 'file' | 'link'; url: string; filename?: string }[]
     my_submission?: {
         id: string
-        status: 'submitted' | 'graded'
+        status: 'submitted' | 'grading' | 'graded' | 'failed_grading'
         grade: number | null
         feedback: string | null
         files?: { id: string; url: string; filename: string; type: 'file' | 'link' }[]
+        // AI Grading fields
+        ai_graded?: boolean
+        ai_confidence?: number
+        graded_at?: string
+        detailed_feedback?: {
+            total_grade: number
+            max_points: number
+            percentage: number
+            overall_feedback: string
+            question_grades: {
+                question_number: number
+                question_text: string
+                student_answer: string
+                points_earned: number
+                max_points: number
+                percentage: number
+                feedback: string
+                confidence: number
+            }[]
+        }
     }
 }
 
@@ -112,7 +133,7 @@ interface Classroom {
     has_syllabus?: boolean
 }
 
-type TabType = 'stream' | 'materials' | 'meet' | 'recordings' | 'assignments' | 'results'
+type TabType = 'stream' | 'materials' | 'sessions' | 'assignments' | 'results'
 type DateFilter = 'all' | 'today' | 'yesterday' | 'week' | 'custom'
 
 export default function StudentClassroomDetailPage() {
@@ -129,6 +150,13 @@ export default function StudentClassroomDetailPage() {
     const [dateFilter, setDateFilter] = useState<DateFilter>('all')
     const [customDate, setCustomDate] = useState('')
     const [showDatePicker, setShowDatePicker] = useState(false)
+    const [meetingView, setMeetingView] = useState<'upcoming' | 'past'>('past')
+    const [mounted, setMounted] = useState(false)
+
+    // For rendering modals with portal (to fix scroll issues)
+    useEffect(() => {
+        setMounted(true)
+    }, [])
 
     // Transcript and AI Chat state
     const [showTranscriptModal, setShowTranscriptModal] = useState(false)
@@ -154,6 +182,7 @@ export default function StudentClassroomDetailPage() {
     const [submissionFiles, setSubmissionFiles] = useState<{ url: string; filename: string; type: 'file' | 'link' }[]>([])
     const [submissionLinkInput, setSubmissionLinkInput] = useState('')
     const [submitting, setSubmitting] = useState(false)
+    const [showDetailedFeedbackModal, setShowDetailedFeedbackModal] = useState(false)
     const submissionFileRef = useRef<HTMLInputElement>(null)
 
     // Exam Results states
@@ -315,6 +344,8 @@ export default function StudentClassroomDetailPage() {
     const openTranscript = (meeting: Meeting) => {
         setSelectedMeeting(meeting)
         setShowTranscriptModal(true)
+        // Scroll to top so modal is visible
+        window.scrollTo({ top: 0, behavior: 'smooth' })
     }
 
     // Open AI chat modal
@@ -616,8 +647,7 @@ export default function StudentClassroomDetailPage() {
                 {[
                     { id: 'stream', label: 'Stream', icon: MegaphoneIcon },
                     { id: 'materials', label: 'Materials', icon: FolderIcon },
-                    { id: 'meet', label: 'Meetings', icon: VideoCameraIcon },
-                    { id: 'recordings', label: 'Recordings', icon: FilmIcon },
+                    { id: 'sessions', label: 'Class Sessions', icon: VideoCameraIcon },
                     { id: 'assignments', label: `Assignments (${assignments.length})`, icon: AcademicCapIcon },
                     { id: 'results', label: `Results${examResults.length > 0 ? ` (${examResults.length})` : ''}`, icon: CheckCircleIcon },
                 ].map(tab => (
@@ -791,124 +821,251 @@ export default function StudentClassroomDetailPage() {
                 </div>
             )}
 
-            {/* Meet Tab */}
-            {activeTab === 'meet' && (
-                <div className="space-y-4">
-                    <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
-                        <VideoCameraIcon className="w-5 h-5 text-gray-400" />
-                        Class Meetings
-                    </h2>
+            {/* Class Sessions Tab (Combined Meetings + Recordings) */}
+            {activeTab === 'sessions' && (
+                <div className="space-y-6">
+                    {/* Meetings Section with Filters */}
+                    <div>
+                        {/* Header with Filters */}
+                        <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
+                            <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                                <VideoCameraIcon className="w-5 h-5 text-gray-400" />
+                                Meetings
+                            </h2>
 
-                    {meetings.length === 0 ? (
-                        <div className="text-center py-12 bg-gray-50 rounded-xl">
-                            <VideoCameraIcon className="w-12 h-12 text-gray-400 mx-auto mb-3" />
-                            <p className="text-gray-500">No meetings scheduled</p>
-                        </div>
-                    ) : (
-                        <div className="space-y-3">
-                            {meetings.map(m => (
-                                <div key={m.id} className="card">
-                                    <div className="flex items-center justify-between">
-                                        <div className="flex items-center gap-4 flex-1">
-                                            <div className={`p-3 rounded-xl ${m.status === 'live' ? 'bg-red-100' :
-                                                m.status === 'ended' ? 'bg-green-100' : 'bg-gray-100'
-                                                }`}>
-                                                <VideoCameraIcon className={`w-6 h-6 ${m.status === 'live' ? 'text-red-600' :
-                                                    m.status === 'ended' ? 'text-green-600' : 'text-gray-500'
-                                                    }`} />
-                                            </div>
-                                            <div className="flex-1">
-                                                <div className="flex items-center justify-between gap-2">
-                                                    <p className="font-medium text-gray-900">{m.title}</p>
-                                                    {m.scheduled_at && (
-                                                        <div className="flex items-center gap-1 text-xs text-gray-400 shrink-0">
-                                                            <CalendarIcon className="w-3.5 h-3.5" />
-                                                            <span>{new Date(m.scheduled_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
-                                                        </div>
-                                                    )}
-                                                </div>
-                                                <p className="text-sm text-gray-500">
-                                                    {m.status === 'live' && <span className="text-red-600 font-medium">● Live Now</span>}
-                                                    {m.status === 'scheduled' && `Starts: ${new Date(m.scheduled_at!).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`}
-                                                    {m.status === 'ended' && (
-                                                        <span className="text-green-600">
-                                                            Recording Available • {m.duration_minutes} min
-                                                        </span>
-                                                    )}
-                                                </p>
-                                            </div>
-                                        </div>
-                                        {m.status === 'live' && (
-                                            <button
-                                                onClick={() => router.push(`/meet/${m.id}`)}
-                                                className="btn-primary text-sm flex items-center gap-2"
-                                            >
-                                                <PlayIcon className="w-4 h-4" />
-                                                Join
-                                            </button>
-                                        )}
-                                    </div>
-
-                                    {/* Recording and Transcript for Ended Meetings */}
-                                    {m.status === 'ended' && m.recording_url && (
-                                        <div className="mt-4 pt-4 border-t border-gray-100">
-                                            <div className="grid md:grid-cols-2 gap-4">
-                                                {/* Recording */}
-                                                <div className="bg-gray-50 rounded-lg p-4">
-                                                    <div className="flex items-center gap-2 mb-2">
-                                                        <VideoCameraIcon className="w-5 h-5 text-primary-600" />
-                                                        <span className="font-medium text-gray-900">Recording</span>
-                                                    </div>
-                                                    <a
-                                                        href={m.recording_url}
-                                                        target="_blank"
-                                                        className="text-sm text-primary-600 hover:underline flex items-center gap-1"
-                                                    >
-                                                        <PlayIcon className="w-4 h-4" />
-                                                        Watch Recording ({m.duration_minutes} min)
-                                                    </a>
-                                                </div>
-
-                                                {/* Transcript Preview */}
-                                                {m.transcript && (
-                                                    <div className="bg-gray-50 rounded-lg p-4">
-                                                        <div className="flex items-center gap-2 mb-2">
-                                                            <DocumentTextIcon className="w-5 h-5 text-primary-600" />
-                                                            <span className="font-medium text-gray-900">Summary</span>
-                                                        </div>
-                                                        <p className="text-sm text-gray-600 line-clamp-2">{m.transcript}</p>
-                                                    </div>
-                                                )}
-                                            </div>
-
-                                            {/* Action Buttons */}
-                                            <div className="flex gap-3 mt-4">
-                                                <button
-                                                    onClick={() => openTranscript(m)}
-                                                    className="flex-1 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-200 transition-colors flex items-center justify-center gap-2"
-                                                >
-                                                    <DocumentTextIcon className="w-4 h-4" />
-                                                    Full Transcript
-                                                </button>
-                                                <button
-                                                    onClick={() => openAIChat(m)}
-                                                    className="flex-1 px-4 py-2 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-lg text-sm font-medium hover:opacity-90 transition-colors flex items-center justify-center gap-2"
-                                                >
-                                                    <span>✨</span>
-                                                    Ask Questions (AI)
-                                                </button>
-                                            </div>
-                                        </div>
-                                    )}
+                            {/* Filter Controls */}
+                            <div className="flex items-center gap-3">
+                                {/* Upcoming / Past Toggle */}
+                                <div className="flex bg-gray-100 rounded-lg p-0.5">
+                                    <button
+                                        onClick={() => setMeetingView('upcoming')}
+                                        className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${meetingView === 'upcoming'
+                                            ? 'bg-white text-gray-900 shadow-sm'
+                                            : 'text-gray-500 hover:text-gray-700'
+                                            }`}
+                                    >
+                                        Upcoming
+                                    </button>
+                                    <button
+                                        onClick={() => setMeetingView('past')}
+                                        className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${meetingView === 'past'
+                                            ? 'bg-white text-gray-900 shadow-sm'
+                                            : 'text-gray-500 hover:text-gray-700'
+                                            }`}
+                                    >
+                                        Past Recordings
+                                    </button>
                                 </div>
-                            ))}
+
+                                {/* Date Filter */}
+                                <div className="relative">
+                                    <select
+                                        value={dateFilter}
+                                        onChange={(e) => setDateFilter(e.target.value as DateFilter)}
+                                        className="appearance-none bg-white border border-gray-200 rounded-lg px-3 py-1.5 pr-8 text-xs text-gray-700 cursor-pointer hover:border-gray-300 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                                    >
+                                        <option value="all">All Dates</option>
+                                        <option value="today">Today</option>
+                                        <option value="yesterday">Yesterday</option>
+                                        <option value="week">This Week</option>
+                                        <option value="custom">Custom Date</option>
+                                    </select>
+                                    <CalendarIcon className="w-3.5 h-3.5 text-gray-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                                </div>
+
+                                {/* Custom Date Picker */}
+                                {dateFilter === 'custom' && (
+                                    <input
+                                        type="date"
+                                        value={customDate}
+                                        onChange={(e) => setCustomDate(e.target.value)}
+                                        className="bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-xs text-gray-700 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                                    />
+                                )}
+                            </div>
                         </div>
-                    )}
+
+                        {meetings.length === 0 ? (
+                            <div className="text-center py-12 bg-gray-50 rounded-xl">
+                                <VideoCameraIcon className="w-12 h-12 text-gray-400 mx-auto mb-3" />
+                                <p className="text-gray-500">No meetings scheduled</p>
+                            </div>
+                        ) : (() => {
+                            // Filter meetings based on view and date
+                            const filteredMeetings = meetings.filter(m => {
+                                // Filter by upcoming/past
+                                if (meetingView === 'upcoming') {
+                                    if (m.status !== 'live' && m.status !== 'scheduled') return false
+                                } else {
+                                    if (m.status !== 'ended') return false
+                                }
+
+                                // Filter by date
+                                if (dateFilter !== 'all') {
+                                    const meetingDate = new Date(m.scheduled_at || m.ended_at || '')
+                                    const today = new Date()
+                                    today.setHours(0, 0, 0, 0)
+
+                                    if (dateFilter === 'today') {
+                                        const meetingDateOnly = new Date(meetingDate)
+                                        meetingDateOnly.setHours(0, 0, 0, 0)
+                                        if (meetingDateOnly.getTime() !== today.getTime()) return false
+                                    } else if (dateFilter === 'yesterday') {
+                                        const yesterday = new Date(today)
+                                        yesterday.setDate(yesterday.getDate() - 1)
+                                        const meetingDateOnly = new Date(meetingDate)
+                                        meetingDateOnly.setHours(0, 0, 0, 0)
+                                        if (meetingDateOnly.getTime() !== yesterday.getTime()) return false
+                                    } else if (dateFilter === 'week') {
+                                        const weekAgo = new Date(today)
+                                        weekAgo.setDate(weekAgo.getDate() - 7)
+                                        if (meetingDate < weekAgo) return false
+                                    } else if (dateFilter === 'custom' && customDate) {
+                                        const customDateObj = new Date(customDate)
+                                        customDateObj.setHours(0, 0, 0, 0)
+                                        const meetingDateOnly = new Date(meetingDate)
+                                        meetingDateOnly.setHours(0, 0, 0, 0)
+                                        if (meetingDateOnly.getTime() !== customDateObj.getTime()) return false
+                                    }
+                                }
+                                return true
+                            })
+
+                            if (filteredMeetings.length === 0) {
+                                return (
+                                    <div className="text-center py-12 bg-gray-50 rounded-xl">
+                                        <VideoCameraIcon className="w-12 h-12 text-gray-400 mx-auto mb-3" />
+                                        <p className="text-gray-500">
+                                            {meetingView === 'upcoming' ? 'No upcoming meetings' : 'No past recordings found'}
+                                        </p>
+                                    </div>
+                                )
+                            }
+
+                            return (
+                                <div className="space-y-4">
+                                    {filteredMeetings.map(m => (
+                                        <div key={m.id} className="bg-white rounded-xl border border-gray-200 overflow-hidden hover:shadow-md transition-all">
+                                            {/* For Live/Scheduled - show header */}
+                                            {m.status !== 'ended' && (
+                                                <div className="flex items-center justify-between p-4">
+                                                    <div className="flex items-center gap-3 flex-1 min-w-0">
+                                                        <div className={`p-2.5 rounded-lg shrink-0 ${m.status === 'live' ? 'bg-red-100' : 'bg-gray-100'}`}>
+                                                            <VideoCameraIcon className={`w-5 h-5 ${m.status === 'live' ? 'text-red-600' : 'text-gray-500'}`} />
+                                                        </div>
+                                                        <div className="flex-1 min-w-0">
+                                                            <h3 className="font-medium text-gray-900 truncate">{m.title}</h3>
+                                                            <p className="text-sm">
+                                                                {m.status === 'live' && <span className="text-red-600 font-medium">● Live Now</span>}
+                                                                {m.status === 'scheduled' && <span className="text-gray-500">Starts: {new Date(m.scheduled_at!).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}</span>}
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                    {m.status === 'live' && (
+                                                        <button
+                                                            onClick={() => router.push(`/meet/${m.id}`)}
+                                                            className="btn-primary text-sm flex items-center gap-2 shrink-0"
+                                                        >
+                                                            <PlayIcon className="w-4 h-4" />
+                                                            Join
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            )}
+
+                                            {/* For Ended meetings - optimized single row layout */}
+                                            {m.status === 'ended' && m.recording_url && (
+                                                <div className="flex h-28">
+                                                    {/* Video Thumbnail */}
+                                                    <div
+                                                        className="relative w-44 shrink-0 bg-gray-900 cursor-pointer group"
+                                                        onClick={() => window.open(m.recording_url!, '_blank')}
+                                                    >
+                                                        <video
+                                                            src={m.recording_url}
+                                                            className="w-full h-full object-cover"
+                                                            muted
+                                                            preload="metadata"
+                                                            onLoadedMetadata={(e) => {
+                                                                (e.target as HTMLVideoElement).currentTime = 1
+                                                            }}
+                                                        />
+                                                        <div className="absolute inset-0 bg-black/30 flex items-center justify-center group-hover:bg-black/40 transition-colors">
+                                                            <div className="w-12 h-12 bg-white/95 rounded-full flex items-center justify-center shadow-lg group-hover:scale-105 transition-transform">
+                                                                <PlayIcon className="w-6 h-6 text-gray-800 ml-0.5" />
+                                                            </div>
+                                                        </div>
+                                                        <div className="absolute bottom-2 right-2 bg-black/80 text-white text-xs font-medium px-1.5 py-0.5 rounded">
+                                                            {m.duration_minutes}:00
+                                                        </div>
+                                                    </div>
+
+                                                    {/* Title next to video */}
+                                                    <div className="w-48 p-3 border-r border-gray-100 flex flex-col justify-center shrink-0">
+                                                        <h3 className="font-semibold text-gray-900 text-sm line-clamp-2 mb-2">{m.title}</h3>
+                                                        <a
+                                                            href={m.recording_url}
+                                                            target="_blank"
+                                                            className="text-xs text-primary-600 hover:underline flex items-center gap-1"
+                                                        >
+                                                            <PlayIcon className="w-3 h-3" />
+                                                            Watch Recording
+                                                        </a>
+                                                    </div>
+
+                                                    {/* Summary section */}
+                                                    <div className="flex-1 p-3 flex flex-col justify-center min-w-0">
+                                                        <div className="flex items-center gap-1 text-xs text-purple-600 mb-1">
+                                                            <SparklesIcon className="w-3.5 h-3.5" />
+                                                            <span className="font-medium">Summary</span>
+                                                        </div>
+                                                        <p className="text-xs text-gray-600 line-clamp-3">
+                                                            {m.transcript || 'AI summary will appear here after processing...'}
+                                                        </p>
+                                                    </div>
+
+                                                    {/* Right side: Stacked buttons (Transcript on top, AI on bottom) */}
+                                                    <div className="w-40 shrink-0 flex flex-col border-l border-gray-200">
+                                                        <button
+                                                            onClick={() => openTranscript(m)}
+                                                            className="flex-1 bg-gray-50 hover:bg-gray-100 text-gray-600 flex items-center justify-center gap-2 transition-colors border-b border-gray-200 px-3"
+                                                        >
+                                                            <DocumentTextIcon className="w-4 h-4 text-gray-500" />
+                                                            <span className="text-xs font-medium">Transcript</span>
+                                                        </button>
+                                                        <button
+                                                            onClick={() => openAIChat(m)}
+                                                            className="flex-1 bg-purple-50 hover:bg-purple-100 text-purple-700 flex items-center justify-center gap-2 transition-colors px-3"
+                                                        >
+                                                            <SparklesIcon className="w-4 h-4 text-purple-500" />
+                                                            <span className="text-xs font-medium">Ask AI</span>
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    ))}
+                                </div>
+                            )
+                        })()}
+                    </div>
+
+                    {/* Past Recordings Section */}
+                    <div className="mt-8 pt-8 border-t border-gray-200">
+                        <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2 mb-4">
+                            <FilmIcon className="w-5 h-5 text-gray-400" />
+                            Past Recordings
+                        </h2>
+                        <RecordingsList
+                            classroomId={classroomId}
+                            accessToken={typeof window !== 'undefined' ? localStorage.getItem('accessToken') || '' : ''}
+                        />
+                    </div>
                 </div>
             )}
 
-            {/* Full Transcript Modal */}
-            {showTranscriptModal && selectedMeeting && (
+            {/* Full Transcript Modal - rendered via portal to body */}
+            {showTranscriptModal && selectedMeeting && mounted && createPortal(
                 <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
                     <div className="bg-white rounded-2xl shadow-xl max-w-2xl w-full max-h-[80vh] overflow-hidden">
                         <div className="p-6 border-b border-gray-200 flex items-center justify-between">
@@ -944,11 +1101,12 @@ export default function StudentClassroomDetailPage() {
                             </div>
                         </div>
                     </div>
-                </div>
+                </div>,
+                document.body
             )}
 
-            {/* AI Chat Sidebar (Right Side) */}
-            {showAIChatModal && selectedMeeting && (
+            {/* AI Chat Sidebar (Right Side) - rendered via portal to body */}
+            {showAIChatModal && selectedMeeting && mounted && createPortal(
                 <>
                     {/* Backdrop */}
                     <div
@@ -1054,7 +1212,8 @@ export default function StudentClassroomDetailPage() {
                             animation: slide-in-right 0.3s ease-out;
                         }
                     `}</style>
-                </>
+                </>,
+                document.body
             )}
 
             {/* Assignments Tab */}
@@ -1134,14 +1293,16 @@ export default function StudentClassroomDetailPage() {
                                                                 <CheckCircleIcon className="w-4 h-4" />
                                                                 Graded: {assignment.my_submission?.grade}/{assignment.points} points
                                                             </span>
-                                                            {assignment.my_submission?.feedback && (
-                                                                <span className="text-sm text-gray-600">• {assignment.my_submission.feedback}</span>
+                                                            {assignment.my_submission?.ai_graded && (
+                                                                <span className="text-xs bg-purple-100 text-purple-700 px-2 py-1 rounded-full">
+                                                                    AI Graded {assignment.my_submission?.ai_confidence ? `(${Math.round(assignment.my_submission.ai_confidence * 100)}% confidence)` : ''}
+                                                                </span>
                                                             )}
                                                         </>
                                                     ) : isSubmitted ? (
                                                         <span className="text-sm bg-blue-100 text-blue-700 px-3 py-1 rounded-full flex items-center gap-1">
                                                             <CheckCircleIcon className="w-4 h-4" />
-                                                            Submitted
+                                                            {assignment.my_submission?.status === 'grading' ? 'Grading in progress...' : 'Submitted'}
                                                         </span>
                                                     ) : (
                                                         <span className={`text-sm px-3 py-1 rounded-full ${isOverdue ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-700'}`}>
@@ -1149,6 +1310,54 @@ export default function StudentClassroomDetailPage() {
                                                         </span>
                                                     )}
                                                 </div>
+
+                                                {/* Submitted Files & Feedback */}
+                                                {isSubmitted && assignment.my_submission && (
+                                                    <div className="ml-14 mt-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
+                                                        {/* Submitted Files */}
+                                                        {assignment.my_submission.files && assignment.my_submission.files.length > 0 && (
+                                                            <div className="mb-3">
+                                                                <p className="text-xs text-gray-500 mb-2 font-medium">Your Submitted Work:</p>
+                                                                <div className="flex flex-wrap gap-2">
+                                                                    {assignment.my_submission.files.map((file: { id: string; url: string; filename: string }, idx: number) => (
+                                                                        <a
+                                                                            key={idx}
+                                                                            href={file.url}
+                                                                            target="_blank"
+                                                                            rel="noopener noreferrer"
+                                                                            className="text-sm text-blue-600 hover:underline flex items-center gap-1 bg-white px-3 py-2 rounded border border-gray-200 hover:bg-blue-50 transition-colors"
+                                                                        >
+                                                                            <DocumentTextIcon className="w-4 h-4" />
+                                                                            {file.filename || 'Submission'}
+                                                                        </a>
+                                                                    ))}
+                                                                </div>
+                                                            </div>
+                                                        )}
+
+                                                        {/* Feedback */}
+                                                        {isGraded && assignment.my_submission.feedback && (
+                                                            <div className="mt-2 pt-2 border-t border-gray-200">
+                                                                <p className="text-xs text-gray-500 mb-1 font-medium">Feedback:</p>
+                                                                <p className="text-sm text-gray-700">{assignment.my_submission.feedback}</p>
+                                                            </div>
+                                                        )}
+
+                                                        {/* Detailed Feedback Button */}
+                                                        {isGraded && assignment.my_submission.detailed_feedback && (
+                                                            <button
+                                                                onClick={() => {
+                                                                    setSelectedAssignment(assignment)
+                                                                    setShowDetailedFeedbackModal(true)
+                                                                }}
+                                                                className="mt-2 text-sm text-primary-600 hover:text-primary-700 flex items-center gap-1"
+                                                            >
+                                                                <EyeIcon className="w-4 h-4" />
+                                                                View Detailed Feedback
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                )}
                                             </div>
 
                                             {/* Action Button */}
@@ -1166,20 +1375,6 @@ export default function StudentClassroomDetailPage() {
                             })}
                         </div>
                     )}
-                </div>
-            )}
-
-            {/* Recordings Tab */}
-            {activeTab === 'recordings' && (
-                <div className="space-y-4">
-                    <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
-                        <FilmIcon className="w-5 h-5 text-gray-400" />
-                        Class Recordings
-                    </h2>
-                    <RecordingsList
-                        classroomId={classroomId}
-                        accessToken={typeof window !== 'undefined' ? localStorage.getItem('accessToken') || '' : ''}
-                    />
                 </div>
             )}
 
@@ -1389,6 +1584,100 @@ export default function StudentClassroomDetailPage() {
                                         {selectedAssignment.my_submission ? 'Update Submission' : 'Submit Assignment'}
                                     </>
                                 )}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Detailed Feedback Modal */}
+            {showDetailedFeedbackModal && selectedAssignment?.my_submission?.detailed_feedback && (
+                <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+                    <div className="bg-white rounded-xl max-w-3xl w-full max-h-[90vh] overflow-hidden shadow-2xl">
+                        <div className="p-6 border-b border-gray-100 flex items-center justify-between">
+                            <div>
+                                <h3 className="text-lg font-semibold text-gray-900">Detailed Feedback</h3>
+                                <p className="text-sm text-gray-500">{selectedAssignment.title}</p>
+                            </div>
+                            <button
+                                onClick={() => setShowDetailedFeedbackModal(false)}
+                                className="p-2 hover:bg-gray-100 rounded-full"
+                            >
+                                <XMarkIcon className="w-5 h-5" />
+                            </button>
+                        </div>
+
+                        <div className="p-6 overflow-y-auto max-h-[60vh]">
+                            {/* Overall Grade Summary */}
+                            <div className="mb-6 p-4 bg-gradient-to-r from-primary-50 to-blue-50 rounded-xl">
+                                <div className="flex items-center justify-between">
+                                    <div>
+                                        <p className="text-sm text-gray-600">Total Score</p>
+                                        <p className="text-3xl font-bold text-primary-700">
+                                            {selectedAssignment.my_submission.detailed_feedback.total_grade || selectedAssignment.my_submission.grade}
+                                            <span className="text-lg text-gray-500">/{selectedAssignment.my_submission.detailed_feedback.max_points || selectedAssignment.points}</span>
+                                        </p>
+                                    </div>
+                                    <div className="text-right">
+                                        <p className="text-sm text-gray-600">Percentage</p>
+                                        <p className="text-2xl font-semibold text-gray-700">
+                                            {Math.round(selectedAssignment.my_submission.detailed_feedback.percentage || 0)}%
+                                        </p>
+                                    </div>
+                                    {selectedAssignment.my_submission.ai_confidence && (
+                                        <div className="text-right">
+                                            <p className="text-sm text-gray-600">AI Confidence</p>
+                                            <p className={`text-lg font-semibold ${selectedAssignment.my_submission.ai_confidence >= 0.7 ? 'text-green-600' : selectedAssignment.my_submission.ai_confidence >= 0.5 ? 'text-yellow-600' : 'text-red-600'}`}>
+                                                {Math.round(selectedAssignment.my_submission.ai_confidence * 100)}%
+                                            </p>
+                                        </div>
+                                    )}
+                                </div>
+                                <p className="mt-3 text-gray-700">{selectedAssignment.my_submission.detailed_feedback.overall_feedback || selectedAssignment.my_submission.feedback}</p>
+                            </div>
+
+                            {/* Per-Question Grades */}
+                            {selectedAssignment.my_submission.detailed_feedback.question_grades && (
+                                <div className="space-y-3">
+                                    <h4 className="font-medium text-gray-900">Question-by-Question Breakdown</h4>
+                                    {selectedAssignment.my_submission.detailed_feedback.question_grades.map((qg: {
+                                        question_number: number;
+                                        question_text: string;
+                                        student_answer: string;
+                                        points_earned: number;
+                                        max_points: number;
+                                        percentage: number;
+                                        feedback: string;
+                                        confidence: number;
+                                    }, idx: number) => (
+                                        <div key={idx} className="p-4 border border-gray-200 rounded-lg bg-gray-50">
+                                            <div className="flex items-start justify-between mb-2">
+                                                <span className="font-medium text-gray-900">Q{qg.question_number}</span>
+                                                <span className={`px-2 py-1 rounded text-sm font-medium ${qg.percentage >= 75 ? 'bg-green-100 text-green-700' :
+                                                    qg.percentage >= 50 ? 'bg-yellow-100 text-yellow-700' :
+                                                        qg.percentage >= 25 ? 'bg-orange-100 text-orange-700' :
+                                                            'bg-red-100 text-red-700'
+                                                    }`}>
+                                                    {qg.points_earned.toFixed(1)}/{qg.max_points.toFixed(1)}
+                                                </span>
+                                            </div>
+                                            <p className="text-sm text-gray-700 mb-2">{qg.question_text}</p>
+                                            <p className="text-xs text-gray-500 mb-2">
+                                                <strong>Your Answer:</strong> {qg.student_answer || '[No answer provided]'}
+                                            </p>
+                                            <p className="text-sm text-primary-700 italic">{qg.feedback}</p>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="p-4 border-t border-gray-100 flex justify-end">
+                            <button
+                                onClick={() => setShowDetailedFeedbackModal(false)}
+                                className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700"
+                            >
+                                Close
                             </button>
                         </div>
                     </div>

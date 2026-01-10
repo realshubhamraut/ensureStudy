@@ -61,6 +61,7 @@ def create_app(config_name=None):
     from app.routes.teacher_assistant import teacher_assistant_bp
     from app.routes.meetings import meetings_bp
     from app.routes.recordings import recordings_bp
+    from app.routes.grading_callback import grading_bp
     
     app.register_blueprint(auth_bp)
     app.register_blueprint(users_bp)
@@ -81,6 +82,7 @@ def create_app(config_name=None):
     app.register_blueprint(teacher_assistant_bp)
     app.register_blueprint(meetings_bp)
     app.register_blueprint(recordings_bp)
+    app.register_blueprint(grading_bp)
     
     # Import models for table creation
     from app.models.organization import Organization, LicensePurchase

@@ -162,6 +162,7 @@ class MeetingRecording(db.Model):
     # Transcript reference (stored in MongoDB)
     transcript_id = db.Column(db.String(36))
     has_transcript = db.Column(db.Boolean, default=False)
+    transcript_text = db.Column(db.Text)  # Full transcript text
     
     # Summary (brief version stored here, full in MongoDB)
     summary_brief = db.Column(db.Text)
@@ -186,6 +187,7 @@ class MeetingRecording(db.Model):
             "error_message": self.error_message,
             "transcript_id": self.transcript_id,
             "has_transcript": self.has_transcript,
+            "transcript_text": self.transcript_text,
             "summary_brief": self.summary_brief,
             "created_at": self.created_at.isoformat() if self.created_at else None
         }

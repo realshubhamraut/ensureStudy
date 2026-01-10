@@ -17,7 +17,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel
 
 # MongoDB configuration
-MONGO_URI = os.getenv('MONGO_URI', 'mongodb://ensure_study:mongodb_password_123@localhost:27017')
+MONGO_URI = os.getenv('MONGO_URI', 'mongodb://localhost:27017')
 MONGO_DB = os.getenv('MONGO_DB', 'ensure_study_meetings')
 
 # OpenAI configuration
@@ -102,28 +102,46 @@ class TranscriptionService:
     async def extract_audio(self, video_path: str) -> str:
         """
         Extract audio from video file using ffmpeg
-        Returns path to extracted audio file
+        Returns path to extracted audio file (WAV for better quality)
         """
-        audio_path = tempfile.mktemp(suffix='.mp3')
+        # Use WAV for lossless audio - better for transcription
+        audio_path = tempfile.mktemp(suffix='.wav')
         
-        process = await asyncio.create_subprocess_exec(
-            'ffmpeg', '-i', video_path,
-            '-vn',  # No video
-            '-acodec', 'libmp3lame',
-            '-ar', '16000',  # 16kHz for Whisper
-            '-ac', '1',  # Mono
-            '-y',  # Overwrite
-            audio_path,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
+        print(f"[Transcription] Extracting audio from {video_path}")
         
-        await process.communicate()
-        
-        if process.returncode != 0:
-            raise RuntimeError(f"ffmpeg failed with code {process.returncode}")
-        
-        return audio_path
+        try:
+            process = await asyncio.create_subprocess_exec(
+                'ffmpeg', '-i', video_path,
+                '-vn',  # No video
+                '-acodec', 'pcm_s16le',  # WAV format (lossless)
+                '-ar', '16000',  # 16kHz for Whisper
+                '-ac', '1',  # Mono
+                '-y',  # Overwrite
+                audio_path,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            
+            stdout, stderr = await process.communicate()
+            
+            if process.returncode != 0:
+                print(f"[Transcription] ffmpeg stderr: {stderr.decode()[:500]}")
+                raise RuntimeError(f"ffmpeg failed with code {process.returncode}")
+            
+            # Verify the file was created and has content
+            if not os.path.exists(audio_path):
+                raise RuntimeError("Audio extraction failed - no output file")
+            
+            file_size = os.path.getsize(audio_path)
+            print(f"[Transcription] Extracted audio: {file_size / 1024:.1f} KB")
+            
+            if file_size < 1000:  # Less than 1KB is suspicious
+                raise RuntimeError(f"Audio file too small ({file_size} bytes) - may be corrupted")
+            
+            return audio_path
+            
+        except FileNotFoundError:
+            raise RuntimeError("ffmpeg not found. Install with: brew install ffmpeg")
     
     async def transcribe_with_whisper(
         self,
@@ -131,41 +149,10 @@ class TranscriptionService:
         language: str = 'en'
     ) -> Dict[str, Any]:
         """
-        Transcribe audio using OpenAI Whisper API with local fallback
-        Returns segments with timestamps
+        Transcribe audio using local Whisper model (free, no API key needed)
+        Downloads model automatically on first use
         """
-        # Try OpenAI API first
-        if openai.api_key:
-            try:
-                with open(audio_path, 'rb') as audio_file:
-                    response = await asyncio.to_thread(
-                        openai.audio.transcriptions.create,
-                        model="whisper-1",
-                        file=audio_file,
-                        language=language,
-                        response_format="verbose_json",
-                        timestamp_granularities=["segment"]
-                    )
-                
-                return {
-                    'text': response.text,
-                    'segments': [
-                        {
-                            'id': i,
-                            'start': seg.start,
-                            'end': seg.end,
-                            'text': seg.text.strip(),
-                            'avg_logprob': getattr(seg, 'avg_logprob', 0.0)
-                        }
-                        for i, seg in enumerate(response.segments or [])
-                    ],
-                    'duration': response.duration if hasattr(response, 'duration') else 0,
-                    'language': response.language if hasattr(response, 'language') else language
-                }
-            except Exception as e:
-                print(f"OpenAI API failed, falling back to local Whisper: {e}")
-        
-        # Fallback to local Whisper model
+        # Use local Whisper directly - no OpenAI API needed
         return await self._transcribe_local_whisper(audio_path, language)
     
     async def _transcribe_local_whisper(
@@ -176,12 +163,18 @@ class TranscriptionService:
         """
         Transcribe using local Whisper model (openai-whisper package)
         Install with: pip install openai-whisper
+        
+        Model sizes (download on first use):
+        - tiny: 39M params, fastest, lowest quality
+        - base: 74M params, fast, decent quality
+        - small: 244M params, balanced (RECOMMENDED)
+        - medium: 769M params, good quality, slower
+        - large: 1550M params, best quality, very slow
         """
         try:
             import whisper
         except ImportError:
             print("Local whisper not installed. Install with: pip install openai-whisper")
-            # Return empty result if whisper not available
             return {
                 'text': '[Transcription unavailable - Whisper not installed]',
                 'segments': [],
@@ -189,10 +182,27 @@ class TranscriptionService:
                 'language': language
             }
         
+        # Use MEDIUM model for best accuracy (downloads ~1.5GB)
+        # Takes longer but produces best results
+        WHISPER_MODEL = os.getenv('WHISPER_MODEL', 'medium')
+        
         def run_whisper():
-            # Load model (base is good balance of speed/accuracy)
-            model = whisper.load_model("base")
-            result = model.transcribe(audio_path, language=language)
+            print(f"[Transcription] Loading Whisper model: {WHISPER_MODEL}")
+            model = whisper.load_model(WHISPER_MODEL)
+            
+            print(f"[Transcription] Transcribing audio file: {audio_path}")
+            result = model.transcribe(
+                audio_path, 
+                language=language,
+                # Best quality settings
+                temperature=0.0,  # More deterministic output
+                best_of=5,  # Try multiple times and pick best
+                beam_size=5,  # Beam search for better accuracy
+                condition_on_previous_text=True,  # Context awareness
+                verbose=False
+            )
+            
+            print(f"[Transcription] Complete: {len(result.get('text', ''))} chars, {len(result.get('segments', []))} segments")
             return result
         
         result = await asyncio.to_thread(run_whisper)
@@ -220,19 +230,64 @@ class TranscriptionService:
         num_speakers: Optional[int] = None
     ) -> List[Dict[str, Any]]:
         """
-        Run speaker diarization to identify who is speaking when
-        
-        Note: This is a placeholder - in production, use pyannote.audio
-        For now, we'll do simple silence-based splitting
+        Run speaker diarization to identify who is speaking when.
+        Uses simple_diarizer for local, free diarization.
         """
-        # TODO: Integrate pyannote.audio for proper speaker diarization
-        # pip install pyannote.audio
-        # from pyannote.audio import Pipeline
-        # pipeline = Pipeline.from_pretrained("pyannote/speaker-diarization")
-        # diarization = pipeline(audio_path)
+        try:
+            from simple_diarizer.diarizer import Diarizer
+            from simple_diarizer.utils import combined_waveplot
+            
+            print(f"[Diarization] Starting speaker diarization for {audio_path}")
+            
+            # Run diarization in a thread to not block
+            def do_diarize():
+                diar = Diarizer(
+                    embed_model='xvec',  # or 'ecapa' for better accuracy but slower
+                )
+                # Cluster speakers
+                segments = diar.diarize(
+                    audio_path,
+                    num_speakers=num_speakers,  # None = auto-detect
+                    threshold=0.5
+                )
+                return segments
+            
+            segments = await asyncio.to_thread(do_diarize)
+            
+            # Convert to our format
+            diarization_segments = []
+            for i, seg in enumerate(segments):
+                # Extract speaker ID from label (e.g., "SPEAKER_00" -> 0)
+                speaker_label = seg.get('label', 'SPEAKER_00')
+                speaker_id = int(speaker_label.replace('SPEAKER_', '')) if 'SPEAKER_' in speaker_label else i
+                
+                diarization_segments.append({
+                    'start': seg['start'],
+                    'end': seg['end'],
+                    'speaker_id': speaker_id
+                })
+            
+            print(f"[Diarization] Found {len(set(s['speaker_id'] for s in diarization_segments))} speakers, {len(diarization_segments)} segments")
+            return diarization_segments
+            
+        except ImportError:
+            print("[Diarization] simple_diarizer not installed. Install with: pip install simple-diarizer")
+            return self._fallback_diarization(audio_path)
+        except Exception as e:
+            print(f"[Diarization] Failed: {e}, using fallback")
+            return self._fallback_diarization(audio_path)
+    
+    def _fallback_diarization(self, audio_path: str) -> List[Dict[str, Any]]:
+        """
+        Simple fallback diarization.
+        Since pydub requires audioop which is removed in Python 3.13+,
+        we return empty and let the transcript use Whisper segments directly.
+        The align function will assign all to speaker 0.
         
-        # Placeholder: assign all segments to speaker 0 (host)
-        # This will be replaced with actual diarization
+        For multi-speaker detection, use simple_diarizer or pyannote.
+        """
+        print("[Diarization Fallback] Using single-speaker mode (install simple-diarizer for multi-speaker)")
+        # Return empty - all segments will be assigned to Speaker 1
         return []
     
     def align_speakers_with_transcript(
@@ -297,10 +352,63 @@ class TranscriptionService:
         
         return list(speaker_stats.values())
     
+    def _generate_formatted_transcript(
+        self,
+        segments: List[TranscriptSegment]
+    ) -> str:
+        """
+        Generate formatted transcript text with speaker labels.
+        Groups consecutive segments by same speaker.
+        
+        Example output:
+        Speaker 1: Hello everyone, welcome to the class.
+        
+        Speaker 2: Thank you, good to be here.
+        
+        Speaker 1: Today we'll cover...
+        """
+        if not segments:
+            return ""
+        
+        formatted_parts = []
+        current_speaker = None
+        current_text = []
+        
+        for seg in segments:
+            speaker_label = seg.speaker_name or f"Speaker {seg.speaker_id + 1}"
+            
+            if seg.speaker_id != current_speaker:
+                # Save previous speaker's text
+                if current_text and current_speaker is not None:
+                    prev_label = segments[0].speaker_name if current_speaker == 0 and segments[0].speaker_name else f"Speaker {current_speaker + 1}"
+                    # Find the actual label for current_speaker
+                    for s in segments:
+                        if s.speaker_id == current_speaker:
+                            prev_label = s.speaker_name or f"Speaker {current_speaker + 1}"
+                            break
+                    formatted_parts.append(f"{prev_label}: {' '.join(current_text)}")
+                
+                current_speaker = seg.speaker_id
+                current_text = [seg.text.strip()]
+            else:
+                current_text.append(seg.text.strip())
+        
+        # Don't forget the last speaker's text
+        if current_text and current_speaker is not None:
+            speaker_label = segments[-1].speaker_name or f"Speaker {current_speaker + 1}"
+            for s in segments:
+                if s.speaker_id == current_speaker:
+                    speaker_label = s.speaker_name or f"Speaker {current_speaker + 1}"
+                    break
+            formatted_parts.append(f"{speaker_label}: {' '.join(current_text)}")
+        
+        return "\n\n".join(formatted_parts)
+    
     async def generate_summary(self, full_text: str) -> str:
-        """Generate a summary of the meeting using GPT-4 with simple fallback"""
-        # Try OpenAI first
-        if openai.api_key:
+        """Generate a summary of the meeting using extractive summary"""
+        # Skip OpenAI if using test key or no key
+        api_key = openai.api_key or ""
+        if api_key and not api_key.startswith("sk-test") and len(api_key) > 20:
             try:
                 response = await asyncio.to_thread(
                     openai.chat.completions.create,
@@ -321,7 +429,7 @@ class TranscriptionService:
             except Exception as e:
                 print(f"GPT-4 summary failed, using simple fallback: {e}")
         
-        # Simple fallback - first 500 chars summary
+        # Use simple extractive summary (no API needed)
         return self._simple_summary(full_text)
     
     def _simple_summary(self, full_text: str) -> str:
@@ -340,27 +448,67 @@ class TranscriptionService:
     
     async def extract_key_topics(self, full_text: str) -> List[str]:
         """Extract key topics from the transcript"""
-        try:
-            response = await asyncio.to_thread(
-                openai.chat.completions.create,
-                model="gpt-4",
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "Extract 3-7 key topics from this meeting transcript. Return only a JSON array of topic strings, nothing else."
-                    },
-                    {
-                        "role": "user",
-                        "content": full_text[:8000]
-                    }
-                ],
-                max_tokens=200
-            )
-            topics = json.loads(response.choices[0].message.content)
-            return topics if isinstance(topics, list) else []
-        except Exception as e:
-            print(f"Topic extraction failed: {e}")
+        # Skip OpenAI if using test key or no key
+        api_key = openai.api_key or ""
+        if api_key and not api_key.startswith("sk-test") and len(api_key) > 20:
+            try:
+                response = await asyncio.to_thread(
+                    openai.chat.completions.create,
+                    model="gpt-4",
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": "Extract 3-7 key topics from this meeting transcript. Return only a JSON array of topic strings, nothing else."
+                        },
+                        {
+                            "role": "user",
+                            "content": full_text[:8000]
+                        }
+                    ],
+                    max_tokens=200
+                )
+                topics = json.loads(response.choices[0].message.content)
+                return topics if isinstance(topics, list) else []
+            except Exception as e:
+                print(f"Topic extraction failed: {e}")
+        
+        # Simple keyword-based topic extraction (no API needed)
+        return self._extract_simple_topics(full_text)
+    
+    def _extract_simple_topics(self, text: str) -> List[str]:
+        """Extract topics using simple keyword frequency"""
+        if not text:
             return []
+        
+        # Common stop words to filter
+        stop_words = {'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been', 
+                      'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will',
+                      'would', 'could', 'should', 'may', 'might', 'must', 'can',
+                      'to', 'of', 'in', 'for', 'on', 'with', 'at', 'by', 'from',
+                      'as', 'into', 'through', 'during', 'before', 'after', 'above',
+                      'below', 'between', 'under', 'again', 'further', 'then', 'once',
+                      'here', 'there', 'when', 'where', 'why', 'how', 'all', 'each',
+                      'few', 'more', 'most', 'other', 'some', 'such', 'no', 'nor',
+                      'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very',
+                      'just', 'and', 'but', 'or', 'if', 'because', 'about', 'this',
+                      'that', 'these', 'those', 'am', 'i', 'you', 'he', 'she', 'it',
+                      'we', 'they', 'what', 'which', 'who', 'whom', 'speaker', 'um',
+                      'uh', 'like', 'know', 'think', 'yeah', 'okay', 'right', 'well'}
+        
+        # Count word frequency
+        words = text.lower().split()
+        word_counts = {}
+        for word in words:
+            # Clean word
+            clean_word = ''.join(c for c in word if c.isalnum())
+            if clean_word and len(clean_word) > 3 and clean_word not in stop_words:
+                word_counts[clean_word] = word_counts.get(clean_word, 0) + 1
+        
+        # Get top 5 most frequent meaningful words
+        sorted_words = sorted(word_counts.items(), key=lambda x: x[1], reverse=True)
+        topics = [word.capitalize() for word, count in sorted_words[:5] if count > 1]
+        
+        return topics if topics else ["General Discussion"]
     
     async def transcribe_meeting(
         self,
@@ -415,10 +563,12 @@ class TranscriptionService:
             # Step 5: Calculate speaker stats
             speakers = self.calculate_speaker_stats(aligned_segments)
             
-            # Step 6: Generate summary and extract topics
-            full_text = whisper_result['text']
-            summary = await self.generate_summary(full_text)
-            key_topics = await self.extract_key_topics(full_text)
+            # Step 6: Generate full text WITH speaker labels
+            full_text = self._generate_formatted_transcript(aligned_segments)
+            
+            # Step 7: Generate summary and extract topics
+            summary = await self.generate_summary(whisper_result['text'])  # Use original for summary
+            key_topics = await self.extract_key_topics(whisper_result['text'])
             
             # Create transcript object
             transcript = MeetingTranscript(
@@ -432,7 +582,7 @@ class TranscriptionService:
                 full_text=full_text,
                 summary=summary,
                 key_topics=key_topics,
-                word_count=len(full_text.split())
+                word_count=len(whisper_result['text'].split())
             )
             
             # Step 7: Store in MongoDB

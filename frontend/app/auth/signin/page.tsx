@@ -53,8 +53,24 @@ export default function SignInPage() {
                 throw new Error(data.error || 'Login failed')
             }
 
-            // Store token
+            // Store token and user info
             localStorage.setItem('accessToken', data.access_token)
+
+            // Store user info for role-based features (like recording)
+            if (data.user) {
+                localStorage.setItem('userId', data.user.id)
+                localStorage.setItem('userRole', data.user.role || selectedRole)
+                localStorage.setItem('userName', data.user.name || email.split('@')[0])
+                console.log('[Auth] Stored user info:', {
+                    userId: data.user.id,
+                    role: data.user.role || selectedRole,
+                    name: data.user.name
+                })
+            } else {
+                // Fallback: use selected role
+                localStorage.setItem('userRole', selectedRole)
+                console.log('[Auth] No user in response, using selected role:', selectedRole)
+            }
 
             // Sign in with NextAuth
             const result = await signIn('credentials', {
@@ -108,8 +124,8 @@ export default function SignInPage() {
                                 key={role.id}
                                 onClick={() => setSelectedRole(role.id)}
                                 className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-lg text-sm font-medium transition-all ${selectedRole === role.id
-                                        ? 'bg-white text-primary-600 shadow-sm'
-                                        : 'text-gray-500 hover:text-gray-700'
+                                    ? 'bg-white text-primary-600 shadow-sm'
+                                    : 'text-gray-500 hover:text-gray-700'
                                     }`}
                             >
                                 <role.icon className="w-4 h-4" />

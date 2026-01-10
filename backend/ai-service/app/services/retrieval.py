@@ -155,6 +155,104 @@ def semantic_search(
 
 
 # ============================================================================
+# Meeting Transcript Search (for AI Tutor)
+# ============================================================================
+
+def search_meeting_transcripts(
+    query: str,
+    classroom_id: str,
+    meeting_ids: Optional[List[str]] = None,
+    top_k: int = 5,
+    threshold: float = 0.5
+) -> List[RetrievedChunk]:
+    """
+    Search meeting transcripts for semantically similar content.
+    
+    Used by AI Tutor to include class lecture context in responses.
+    
+    Args:
+        query: The student's question
+        classroom_id: Filter by classroom (required)
+        meeting_ids: Optional list of specific meetings to search
+        top_k: Number of results (default: 5)
+        threshold: Minimum similarity score (default: 0.5)
+        
+    Returns:
+        List of RetrievedChunk with transcript content and speaker info
+    """
+    # Generate query embedding
+    query_embedding = generate_embedding(query)
+    
+    # Build filter for classroom and optionally specific meetings
+    must_conditions = [
+        FieldCondition(
+            key="classroom_id",
+            match=MatchValue(value=classroom_id)
+        )
+    ]
+    
+    if meeting_ids:
+        # Add meeting filter if specific meetings requested
+        must_conditions.append(
+            FieldCondition(
+                key="meeting_id",
+                match=MatchValue(value=meeting_ids[0])  # Qdrant doesn't support IN by default
+            )
+        )
+    
+    search_filter = Filter(must=must_conditions)
+    
+    # Query Qdrant meeting_transcripts collection
+    client = get_qdrant_client()
+    
+    try:
+        results = client.search(
+            collection_name="meeting_transcripts",  # Different collection!
+            query_vector=query_embedding,
+            query_filter=search_filter,
+            limit=top_k,
+            score_threshold=threshold
+        )
+    except Exception as e:
+        print(f"[MeetingSearch] Error searching transcripts: {e}")
+        return []
+    
+    # Convert to RetrievedChunk with transcript-specific metadata
+    chunks = []
+    for result in results:
+        payload = result.payload
+        
+        # Build speaker info string
+        speaker_names = payload.get("speaker_names", [])
+        speaker_info = ", ".join(speaker_names) if speaker_names else "Unknown speaker"
+        
+        # Build time info
+        start_time = payload.get("start_time", 0)
+        end_time = payload.get("end_time", 0)
+        time_info = f"{int(start_time // 60)}:{int(start_time % 60):02d} - {int(end_time // 60)}:{int(end_time % 60):02d}"
+        
+        chunk = RetrievedChunk(
+            document_id=payload.get("recording_id", "unknown"),
+            chunk_id=result.id if isinstance(result.id, str) else f"transcript_{result.id}",
+            text=payload.get("chunk_text", ""),
+            similarity_score=result.score,
+            metadata={
+                "source_type": "meeting_transcript",
+                "meeting_id": payload.get("meeting_id", ""),
+                "classroom_id": payload.get("classroom_id", ""),
+                "speaker": speaker_info,
+                "time_range": time_info,
+                "start_time": start_time,
+                "end_time": end_time
+            }
+        )
+        chunks.append(chunk)
+    
+    print(f"[MeetingSearch] Found {len(chunks)} transcript chunks for query")
+    return chunks
+
+
+# ============================================================================
 # Mock Data (for development without Qdrant)
 # ============================================================================
 

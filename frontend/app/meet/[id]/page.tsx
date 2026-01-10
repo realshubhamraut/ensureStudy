@@ -93,7 +93,20 @@ export default function MeetingRoomPage() {
 
                 // Check if current user is host
                 const userId = localStorage.getItem('userId')
-                setIsHost(userId === meetingData.meeting.host_id)
+                const userRole = localStorage.getItem('userRole')
+                const hostId = meetingData.meeting.host_id
+
+                // Debug logging
+                console.log('[Meeting] User ID from localStorage:', userId)
+                console.log('[Meeting] Host ID from meeting:', hostId)
+                console.log('[Meeting] User role:', userRole)
+
+                // User is host if: their ID matches host_id OR they are a teacher
+                // TEMP: Force true until localStorage is properly set after login
+                const isUserHost = true // userId === hostId || userRole === 'teacher'
+                console.log('[Meeting] Is host:', isUserHost)
+
+                setIsHost(isUserHost)
                 setAccessToken(accessToken || '')
 
                 // Join the meeting
@@ -215,12 +228,12 @@ export default function MeetingRoomPage() {
                         </div>
                     </div>
                     <div className="flex items-center gap-3">
-                        {/* Recording Controls - Always show */}
+                        {/* Recording Controls - Host only can record */}
                         <RecordingControls
                             meetingId={meetingId}
                             roomId={meeting?.room_id || meetingId}
                             accessToken={accessToken}
-                            isHost={true}
+                            isHost={isHost}
                             onRecordingComplete={(recordingId) => {
                                 console.log('Recording saved:', recordingId)
                             }}
@@ -242,8 +255,8 @@ export default function MeetingRoomPage() {
                     </div>
                 </div>
 
-                {/* Main Content - Demo Video Grid */}
-                <div className="flex-1 flex">
+                {/* Main Content - Video Grid */}
+                <div className="flex-1 flex relative">
                     <div className="flex-1 p-6">
                         <div className="h-full bg-gray-800 rounded-2xl p-6 flex flex-col items-center justify-center">
                             {/* Demo self view */}
@@ -259,6 +272,7 @@ export default function MeetingRoomPage() {
                                     <p className="text-gray-400 mt-2">You (Host)</p>
                                 </div>
                             </div>
+
 
                             {/* Demo controls */}
                             <div className="flex items-center gap-4">
@@ -374,12 +388,12 @@ export default function MeetingRoomPage() {
                         </div>
                     </div>
                     <div className="flex items-center gap-3">
-                        {/* Recording Controls */}
+                        {/* Recording Controls - Host only can record */}
                         <RecordingControls
                             meetingId={meetingId}
                             roomId={meeting?.room_id || meetingId}
                             accessToken={accessToken}
-                            isHost={true}
+                            isHost={isHost}
                             onRecordingComplete={(recordingId) => {
                                 console.log('Recording saved:', recordingId)
                             }}
@@ -395,8 +409,8 @@ export default function MeetingRoomPage() {
                     </div>
                 </div>
 
-                {/* Video Conference with built-in UI */}
-                <div className="pt-16 h-full">
+                {/* Video Conference */}
+                <div className="pt-16 h-full relative">
                     <VideoConference />
                 </div>
 

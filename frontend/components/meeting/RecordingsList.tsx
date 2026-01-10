@@ -2,14 +2,13 @@
 
 import { useState, useEffect } from 'react'
 import { getApiBaseUrl } from '@/utils/api'
-import { MeetingPlayer } from './MeetingPlayer'
+import { EnhancedSessionPlayer } from './EnhancedSessionPlayer'
 import {
     VideoCameraIcon,
     PlayIcon,
-    ClockIcon,
-    UserIcon,
-    CalendarIcon
-} from '@heroicons/react/24/outline'
+    DocumentTextIcon,
+    SparklesIcon
+} from '@heroicons/react/24/solid'
 import clsx from 'clsx'
 
 interface Recording {
@@ -36,194 +35,155 @@ interface RecordingsListProps {
     accessToken: string
 }
 
-/**
- * List of recordings for a classroom
- * Shows all past meeting recordings with VOD playback
- */
 export function RecordingsList({ classroomId, accessToken }: RecordingsListProps) {
     const [recordings, setRecordings] = useState<Recording[]>([])
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState<string | null>(null)
     const [selectedRecording, setSelectedRecording] = useState<Recording | null>(null)
 
-    // Fetch recordings
     useEffect(() => {
-        async function fetchRecordings() {
+        const fetchRecordings = async () => {
             try {
-                setLoading(true)
                 const res = await fetch(
                     `${getApiBaseUrl()}/api/recordings/classroom/${classroomId}`,
-                    {
-                        headers: { 'Authorization': `Bearer ${accessToken}` }
-                    }
+                    { headers: { Authorization: `Bearer ${accessToken}` } }
                 )
-
-                if (!res.ok) {
-                    throw new Error('Failed to fetch recordings')
+                if (res.ok) {
+                    const data = await res.json()
+                    setRecordings(data.recordings || [])
+                } else {
+                    setError('Failed to load recordings')
                 }
-
-                const data = await res.json()
-                setRecordings(data.recordings || [])
-            } catch (err) {
-                console.error('Error fetching recordings:', err)
-                setError(err instanceof Error ? err.message : 'Failed to load recordings')
+            } catch (e) {
+                console.error('Failed to fetch recordings:', e)
+                setError('Failed to load recordings')
             } finally {
                 setLoading(false)
             }
         }
-
-        if (classroomId && accessToken) {
-            fetchRecordings()
-        }
+        if (accessToken) fetchRecordings()
     }, [classroomId, accessToken])
 
-    // Format duration
     const formatDuration = (seconds: number): string => {
-        const h = Math.floor(seconds / 3600)
-        const m = Math.floor((seconds % 3600) / 60)
-
-        if (h > 0) {
-            return `${h}h ${m}m`
-        }
-        return `${m} min`
-    }
-
-    // Format file size
-    const formatFileSize = (bytes: number): string => {
-        if (bytes < 1024 * 1024) {
-            return `${(bytes / 1024).toFixed(1)} KB`
-        }
-        if (bytes < 1024 * 1024 * 1024) {
-            return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-        }
-        return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`
-    }
-
-    // Format date
-    const formatDate = (dateStr: string): string => {
-        const date = new Date(dateStr.endsWith('Z') ? dateStr : dateStr + 'Z')
-        return date.toLocaleDateString('en-US', {
-            month: 'short',
-            day: 'numeric',
-            year: 'numeric',
-            hour: 'numeric',
-            minute: '2-digit'
-        })
+        if (!seconds) return '0:00'
+        const mins = Math.floor(seconds / 60)
+        const secs = Math.floor(seconds % 60)
+        return `${mins}:${secs.toString().padStart(2, '0')}`
     }
 
     if (loading) {
         return (
-            <div className="flex items-center justify-center py-12">
-                <div className="animate-spin rounded-full h-8 w-8 border-2 border-primary-500 border-t-transparent" />
+            <div className="flex items-center justify-center py-8">
+                <div className="animate-spin rounded-full h-6 w-6 border-2 border-primary-500 border-t-transparent" />
             </div>
         )
     }
 
     if (error) {
-        return (
-            <div className="text-center py-12 text-red-500">
-                <p>{error}</p>
-            </div>
-        )
+        return <div className="text-center py-8 text-red-500 text-sm">{error}</div>
     }
 
     if (recordings.length === 0) {
         return (
-            <div className="text-center py-12">
-                <VideoCameraIcon className="w-16 h-16 mx-auto text-gray-300 mb-4" />
-                <h3 className="text-lg font-medium text-gray-700 mb-2">No recordings yet</h3>
-                <p className="text-gray-500">Past meeting recordings will appear here</p>
+            <div className="text-center py-8">
+                <VideoCameraIcon className="w-10 h-10 mx-auto text-gray-300 mb-2" />
+                <p className="text-gray-500 text-sm">No recordings yet</p>
             </div>
         )
     }
 
     return (
         <>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {recordings.map(recording => (
-                    <div
-                        key={recording.id}
-                        className={clsx(
-                            'card overflow-hidden cursor-pointer hover:shadow-lg transition-shadow',
-                            recording.status !== 'ready' && 'opacity-70'
-                        )}
-                        onClick={() => recording.status === 'ready' && setSelectedRecording(recording)}
-                    >
-                        {/* Thumbnail placeholder */}
-                        <div className="aspect-video bg-gradient-to-br from-gray-700 to-gray-900 relative flex items-center justify-center">
-                            <VideoCameraIcon className="w-12 h-12 text-gray-500" />
+            <div className="space-y-3">
+                {recordings.map(recording => {
+                    const streamUrl = `${getApiBaseUrl()}/api/recordings/${recording.id}/stream`
 
-                            {/* Duration badge */}
-                            <div className="absolute bottom-2 right-2 bg-black/70 text-white text-xs px-2 py-1 rounded">
-                                {formatDuration(recording.duration_seconds)}
+                    return (
+                        <div
+                            key={recording.id}
+                            className={clsx(
+                                'bg-white rounded-xl border border-gray-200 overflow-hidden hover:shadow-md transition-all',
+                                recording.status !== 'ready' && 'opacity-60'
+                            )}
+                        >
+                            {/* Compact Single Row */}
+                            <div className="flex">
+                                {/* Video Thumbnail with Play Button */}
+                                <div
+                                    className="relative w-44 h-24 shrink-0 bg-black cursor-pointer group"
+                                    onClick={() => recording.status === 'ready' && setSelectedRecording(recording)}
+                                >
+                                    {/* Video Preview */}
+                                    <video
+                                        src={streamUrl}
+                                        className="w-full h-full object-cover"
+                                        muted
+                                        preload="metadata"
+                                        onLoadedMetadata={(e) => {
+                                            // Seek to 1 second to get a better thumbnail frame
+                                            (e.target as HTMLVideoElement).currentTime = 1
+                                        }}
+                                    />
+
+                                    {/* Play Button Overlay */}
+                                    <div className="absolute inset-0 bg-black/40 flex items-center justify-center group-hover:bg-black/50 transition-colors">
+                                        <div className="w-10 h-10 bg-white/90 rounded-full flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform">
+                                            <PlayIcon className="w-5 h-5 text-gray-800 ml-0.5" />
+                                        </div>
+                                    </div>
+
+                                    {/* Duration Badge */}
+                                    <div className="absolute bottom-1.5 right-1.5 bg-black/80 text-white text-[10px] font-medium px-1.5 py-0.5 rounded">
+                                        {formatDuration(recording.duration_seconds)}
+                                    </div>
+                                </div>
+
+                                {/* Content */}
+                                <div className="flex-1 flex min-w-0">
+                                    {/* Left: Title + Transcript */}
+                                    <div className="flex-1 p-3 border-r border-gray-100 min-w-0">
+                                        <h3 className="font-medium text-gray-900 truncate text-sm">
+                                            {recording.meeting?.title || 'Recording'}
+                                        </h3>
+                                        <p className="text-xs text-green-600 mt-0.5">Recording Available</p>
+
+                                        <button
+                                            onClick={() => recording.status === 'ready' && setSelectedRecording(recording)}
+                                            className="mt-2 flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-700 transition-colors"
+                                        >
+                                            <DocumentTextIcon className="w-3.5 h-3.5" />
+                                            <span>Full Transcript</span>
+                                        </button>
+                                    </div>
+
+                                    {/* Right: Summary + AI Button */}
+                                    <div className="flex-1 p-3 min-w-0">
+                                        <div className="flex items-center gap-1 text-xs text-gray-500 mb-1">
+                                            <SparklesIcon className="w-3 h-3 text-purple-500" />
+                                            <span>Summary</span>
+                                        </div>
+                                        <p className="text-xs text-gray-600 line-clamp-2 mb-2">
+                                            {recording.summary_brief || 'No summary available...'}
+                                        </p>
+                                        <button
+                                            onClick={() => recording.status === 'ready' && setSelectedRecording(recording)}
+                                            className="w-full flex items-center justify-center gap-1 px-2 py-1.5 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white rounded-md text-xs font-medium transition-all"
+                                        >
+                                            <SparklesIcon className="w-3 h-3" />
+                                            Ask Questions (AI)
+                                        </button>
+                                    </div>
+                                </div>
                             </div>
-
-                            {/* Play button overlay */}
-                            {recording.status === 'ready' && (
-                                <div className="absolute inset-0 bg-black/30 opacity-0 hover:opacity-100 transition-opacity flex items-center justify-center">
-                                    <div className="w-14 h-14 bg-white/20 rounded-full flex items-center justify-center">
-                                        <PlayIcon className="w-7 h-7 text-white ml-1" />
-                                    </div>
-                                </div>
-                            )}
-
-                            {/* Processing status */}
-                            {recording.status === 'processing' && (
-                                <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
-                                    <div className="text-center text-white">
-                                        <div className="animate-spin rounded-full h-8 w-8 border-2 border-white border-t-transparent mx-auto mb-2" />
-                                        <span className="text-sm">Processing...</span>
-                                    </div>
-                                </div>
-                            )}
                         </div>
-
-                        {/* Info */}
-                        <div className="p-4">
-                            {/* Title row with date on the right */}
-                            <div className="flex items-start justify-between gap-2 mb-2">
-                                <h3 className="font-medium text-gray-900 line-clamp-2 flex-1">
-                                    {recording.meeting?.title || 'Meeting Recording'}
-                                </h3>
-                                <div className="flex items-center gap-1 text-xs text-gray-400 shrink-0">
-                                    <CalendarIcon className="w-3.5 h-3.5" />
-                                    <span>{formatDate(recording.created_at)}</span>
-                                </div>
-                            </div>
-
-                            <div className="space-y-1 text-sm text-gray-500">
-                                {recording.meeting?.host_name && (
-                                    <div className="flex items-center gap-2">
-                                        <UserIcon className="w-4 h-4" />
-                                        <span>{recording.meeting.host_name}</span>
-                                    </div>
-                                )}
-                                <div className="flex items-center gap-2">
-                                    <ClockIcon className="w-4 h-4" />
-                                    <span>{formatDuration(recording.duration_seconds)} • {formatFileSize(recording.file_size)}</span>
-                                </div>
-                            </div>
-
-                            {/* Transcript badge */}
-                            {recording.has_transcript && (
-                                <div className="mt-3">
-                                    <span className="inline-flex items-center px-2 py-1 bg-green-100 text-green-700 text-xs rounded-full">
-                                        Transcript Available
-                                    </span>
-                                </div>
-                            )}
-                        </div>
-                    </div>
-                ))}
+                    )
+                })}
             </div>
 
-            {/* Video player modal */}
             {selectedRecording && (
-                <MeetingPlayer
-                    videoUrl={selectedRecording.storage_url}
-                    title={selectedRecording.meeting?.title || 'Meeting Recording'}
-                    duration={selectedRecording.duration_seconds}
-                    transcript={[]} // Will be populated when transcription is ready
+                <EnhancedSessionPlayer
+                    recording={selectedRecording}
+                    accessToken={accessToken}
                     onClose={() => setSelectedRecording(null)}
                 />
             )}

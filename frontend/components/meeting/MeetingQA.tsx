@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import {
     ChatBubbleLeftRightIcon,
     PaperAirplaneIcon,
@@ -50,8 +51,14 @@ export function MeetingQA({
     const [messages, setMessages] = useState<Message[]>([])
     const [input, setInput] = useState('')
     const [isLoading, setIsLoading] = useState(false)
+    const [mounted, setMounted] = useState(false)
     const messagesEndRef = useRef<HTMLDivElement>(null)
     const inputRef = useRef<HTMLInputElement>(null)
+
+    // Ensure portal only renders on client side
+    useEffect(() => {
+        setMounted(true)
+    }, [])
 
     // Scroll to bottom on new messages
     useEffect(() => {
@@ -134,21 +141,24 @@ export function MeetingQA({
         }
     }
 
-    // Floating button when closed
+    // Floating button when closed - rendered via portal to body
     if (!isOpen) {
-        return (
+        if (!mounted) return null
+        return createPortal(
             <button
                 onClick={() => setIsOpen(true)}
-                className="fixed bottom-6 right-6 w-14 h-14 bg-gradient-to-r from-primary-600 to-purple-600 text-white rounded-full shadow-lg hover:shadow-xl transition-all flex items-center justify-center z-40"
+                className="fixed bottom-6 right-6 w-14 h-14 bg-gradient-to-r from-primary-600 to-purple-600 text-white rounded-full shadow-lg hover:shadow-xl transition-all flex items-center justify-center z-[9999]"
                 title="Ask AI about recordings"
             >
                 <SparklesIcon className="w-6 h-6" />
-            </button>
+            </button>,
+            document.body
         )
     }
-
-    return (
-        <div className="fixed bottom-6 right-6 w-96 h-[500px] bg-white rounded-2xl shadow-2xl border border-gray-200 flex flex-col z-50 overflow-hidden">
+    // Open panel - also rendered via portal to body
+    if (!mounted) return null
+    return createPortal(
+        <div className="fixed bottom-6 right-6 w-96 h-[500px] bg-white rounded-2xl shadow-2xl border border-gray-200 flex flex-col z-[9999] overflow-hidden">
             {/* Header */}
             <div className="flex items-center justify-between px-4 py-3 bg-gradient-to-r from-primary-600 to-purple-600 text-white">
                 <div className="flex items-center gap-2">
@@ -258,6 +268,7 @@ export function MeetingQA({
                     </button>
                 </div>
             </form>
-        </div>
+        </div>,
+        document.body
     )
 }

@@ -20,8 +20,10 @@ interface UseRecordingManagerProps {
 }
 
 /**
- * Hook to manage meeting recording with MediaRecorder
- * Records camera and microphone directly
+ * Hook to manage meeting recording
+ * 
+ * Approach: Capture all video elements on the meeting page and composite them
+ * This works like Zoom - no screen share prompts, records what the host sees
  */
 export function useRecordingManager({
     meetingId,
@@ -46,6 +48,8 @@ export function useRecordingManager({
     const streamRef = useRef<MediaStream | null>(null)
     const pendingUploadsRef = useRef<Promise<boolean>[]>([])
     const uploadedChunksRef = useRef(0)
+    const canvasRef = useRef<HTMLCanvasElement | null>(null)
+    const animationFrameRef = useRef<number | null>(null)
 
     // Upload a single chunk
     const uploadChunk = useCallback(async (chunk: Blob, index: number, isFinal: boolean = false): Promise<boolean> => {
@@ -83,11 +87,10 @@ export function useRecordingManager({
         }
     }, [meetingId, accessToken])
 
-    // Finalize recording - waits for all uploads to complete first
+    // Finalize recording
     const finalizeRecording = useCallback(async () => {
         const duration = Math.floor((Date.now() - startTimeRef.current) / 1000)
 
-        // Wait for all pending uploads to complete
         console.log(`[Recording] Waiting for ${pendingUploadsRef.current.length} pending uploads...`)
         await Promise.all(pendingUploadsRef.current)
         console.log(`[Recording] All uploads complete. Uploaded chunks: ${uploadedChunksRef.current}`)
@@ -106,62 +109,190 @@ export function useRecordingManager({
                 body: JSON.stringify({
                     meeting_id: meetingId,
                     total_chunks: uploadedChunksRef.current,
-                    duration_seconds: duration
+                    duration,
+                    title: `Recording - ${new Date().toLocaleString()}`
                 })
             })
 
             if (!res.ok) {
                 const errorText = await res.text()
-                console.error(`[Recording] Finalize failed: ${res.status}`, errorText)
-                throw new Error('Failed to finalize recording')
+                throw new Error(`Finalize failed: ${errorText}`)
             }
 
             const data = await res.json()
-            console.log('[Recording] Recording finalized successfully:', data.recording?.id)
+            console.log('[Recording] Recording finalized:', data)
+
             setState(prev => ({ ...prev, status: 'complete', progress: 100 }))
 
-            if (onRecordingComplete && data.recording?.id) {
-                onRecordingComplete(data.recording.id)
+            if (onRecordingComplete && data.recording_id) {
+                onRecordingComplete(data.recording_id)
             }
 
-            return data.recording
+            // Reset after 3 seconds
+            setTimeout(() => {
+                setState({
+                    isRecording: false,
+                    isPaused: false,
+                    duration: 0,
+                    status: 'idle',
+                    error: null,
+                    progress: 0
+                })
+            }, 3000)
+
         } catch (error) {
             console.error('[Recording] Finalize error:', error)
             setState(prev => ({
                 ...prev,
                 status: 'error',
-                error: 'Failed to finalize recording'
+                error: error instanceof Error ? error.message : 'Failed to save recording'
             }))
-            return null
         }
     }, [meetingId, accessToken, onRecordingComplete])
 
-    // Start recording - captures camera and microphone directly
+    /**
+     * Start recording by capturing video elements and compositing them
+     * This avoids the screen share prompt
+     */
     const startRecording = useCallback(async () => {
-        console.log('[Recording] Starting recording for meeting:', meetingId)
-        console.log('[Recording] Access token:', accessToken ? 'present' : 'missing')
-
         try {
-            // Get camera and microphone
-            console.log('[Recording] Requesting camera and microphone...')
-            const stream = await navigator.mediaDevices.getUserMedia({
-                video: true,
-                audio: true
+            console.log('[Recording] Starting composite recording...')
+            setState(prev => ({ ...prev, status: 'recording', error: null }))
+
+            // Find all video elements in the meeting (LiveKit renders videos)
+            const videoElements = document.querySelectorAll('video') as NodeListOf<HTMLVideoElement>
+            console.log(`[Recording] Found ${videoElements.length} video elements`)
+
+            // Create a canvas to composite all videos
+            const canvas = document.createElement('canvas')
+            canvas.width = 1920
+            canvas.height = 1080
+            canvasRef.current = canvas
+            const ctx = canvas.getContext('2d')!
+
+            // Get audio from all videos
+            const audioContext = new AudioContext()
+            const destination = audioContext.createMediaStreamDestination()
+
+            // Connect audio from all video elements
+            let hasAudio = false
+            videoElements.forEach((video, i) => {
+                if (video.srcObject instanceof MediaStream) {
+                    const audioTracks = (video.srcObject as MediaStream).getAudioTracks()
+                    if (audioTracks.length > 0) {
+                        try {
+                            const source = audioContext.createMediaStreamSource(video.srcObject as MediaStream)
+                            source.connect(destination)
+                            hasAudio = true
+                            console.log(`[Recording] Connected audio from video ${i}`)
+                        } catch (e) {
+                            console.log(`[Recording] Could not connect audio from video ${i}:`, e)
+                        }
+                    }
+                }
             })
 
-            console.log('[Recording] Got media stream:', stream.getTracks().map(t => `${t.kind}: ${t.label}`))
-            streamRef.current = stream
+            // Also capture user's microphone
+            try {
+                const micStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+                const micSource = audioContext.createMediaStreamSource(micStream)
+                micSource.connect(destination)
+                hasAudio = true
+                console.log('[Recording] Connected microphone audio')
+            } catch (e) {
+                console.log('[Recording] Could not get microphone:', e)
+            }
 
-            // Create MediaRecorder
+            // Animation loop to draw all videos to canvas
+            const drawFrame = () => {
+                ctx.fillStyle = '#1f2937' // Dark gray background
+                ctx.fillRect(0, 0, canvas.width, canvas.height)
+
+                const videos = Array.from(document.querySelectorAll('video') as NodeListOf<HTMLVideoElement>)
+                    .filter(v => v.videoWidth > 0 && v.videoHeight > 0)
+
+                if (videos.length === 0) {
+                    // No videos, just show a placeholder
+                    ctx.fillStyle = '#6b7280'
+                    ctx.font = '48px sans-serif'
+                    ctx.textAlign = 'center'
+                    ctx.fillText('Recording...', canvas.width / 2, canvas.height / 2)
+                } else if (videos.length === 1) {
+                    // Single video - full screen
+                    const video = videos[0]
+                    const aspectRatio = video.videoWidth / video.videoHeight
+                    let drawWidth = canvas.width
+                    let drawHeight = canvas.width / aspectRatio
+                    if (drawHeight > canvas.height) {
+                        drawHeight = canvas.height
+                        drawWidth = canvas.height * aspectRatio
+                    }
+                    const x = (canvas.width - drawWidth) / 2
+                    const y = (canvas.height - drawHeight) / 2
+                    ctx.drawImage(video, x, y, drawWidth, drawHeight)
+                } else {
+                    // Multiple videos - grid layout
+                    const cols = Math.ceil(Math.sqrt(videos.length))
+                    const rows = Math.ceil(videos.length / cols)
+                    const cellWidth = canvas.width / cols
+                    const cellHeight = canvas.height / rows
+
+                    videos.forEach((video, index) => {
+                        const col = index % cols
+                        const row = Math.floor(index / cols)
+                        const x = col * cellWidth
+                        const y = row * cellHeight
+
+                        // Draw video maintaining aspect ratio
+                        const aspectRatio = video.videoWidth / video.videoHeight
+                        let drawWidth = cellWidth
+                        let drawHeight = cellWidth / aspectRatio
+                        if (drawHeight > cellHeight) {
+                            drawHeight = cellHeight
+                            drawWidth = cellHeight * aspectRatio
+                        }
+                        const offsetX = x + (cellWidth - drawWidth) / 2
+                        const offsetY = y + (cellHeight - drawHeight) / 2
+
+                        ctx.drawImage(video, offsetX, offsetY, drawWidth, drawHeight)
+                    })
+                }
+
+                // Recording indicator
+                ctx.fillStyle = '#ef4444'
+                ctx.beginPath()
+                ctx.arc(canvas.width - 50, 50, 15, 0, Math.PI * 2)
+                ctx.fill()
+                ctx.fillStyle = 'white'
+                ctx.font = '20px sans-serif'
+                ctx.textAlign = 'right'
+                ctx.fillText('REC', canvas.width - 75, 57)
+
+                if (mediaRecorderRef.current?.state === 'recording') {
+                    animationFrameRef.current = requestAnimationFrame(drawFrame)
+                }
+            }
+
+            // Create combined stream: canvas video + audio
+            const canvasStream = canvas.captureStream(30) // 30 FPS
+
+            // Add audio tracks to the stream
+            if (hasAudio) {
+                destination.stream.getAudioTracks().forEach(track => {
+                    canvasStream.addTrack(track)
+                })
+            }
+
+            streamRef.current = canvasStream
+
+            // Setup MediaRecorder
             const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')
                 ? 'video/webm;codecs=vp9,opus'
                 : MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')
                     ? 'video/webm;codecs=vp8,opus'
                     : 'video/webm'
 
-            console.log('[Recording] Using MIME type:', mimeType)
-
-            const mediaRecorder = new MediaRecorder(stream, {
+            const mediaRecorder = new MediaRecorder(canvasStream, {
                 mimeType,
                 videoBitsPerSecond: 2500000 // 2.5 Mbps
             })
@@ -173,36 +304,24 @@ export function useRecordingManager({
             pendingUploadsRef.current = []
             startTimeRef.current = Date.now()
 
-            // Handle data available - upload chunks progressively
             mediaRecorder.ondataavailable = (event) => {
-                console.log('[Recording] ondataavailable triggered, data size:', event.data?.size || 0)
                 if (event.data && event.data.size > 0) {
                     recordedChunksRef.current.push(event.data)
-                    const chunkIndex = chunkIndexRef.current++
-                    console.log(`[Recording] Got chunk ${chunkIndex}, size: ${event.data.size}`)
+                    const currentIndex = chunkIndexRef.current++
+                    console.log(`[Recording] Got chunk ${currentIndex}, size: ${event.data.size}`)
 
-                    // Track the upload promise
-                    const uploadPromise = uploadChunk(event.data, chunkIndex)
+                    // Upload chunk in background
+                    const uploadPromise = uploadChunk(event.data, currentIndex)
                     pendingUploadsRef.current.push(uploadPromise)
-
-                    setState(prev => ({
-                        ...prev,
-                        progress: Math.min(85, prev.progress + 5)
-                    }))
                 }
             }
 
             mediaRecorder.onstop = async () => {
-                console.log('[Recording] MediaRecorder stopped, total chunks:', chunkIndexRef.current)
-
-                // Finalize - this will wait for all pending uploads
-                await finalizeRecording()
-
-                // Clean up
-                if (streamRef.current) {
-                    streamRef.current.getTracks().forEach(track => track.stop())
-                    streamRef.current = null
+                console.log('[Recording] MediaRecorder stopped')
+                if (animationFrameRef.current) {
+                    cancelAnimationFrame(animationFrameRef.current)
                 }
+                await finalizeRecording()
             }
 
             mediaRecorder.onerror = (event) => {
@@ -210,16 +329,15 @@ export function useRecordingManager({
                 setState(prev => ({
                     ...prev,
                     status: 'error',
-                    error: 'Recording error occurred'
+                    error: 'Recording failed'
                 }))
             }
 
-            // Start recording with 5-second chunks
-            console.log('[Recording] Starting MediaRecorder with 5s chunks...')
-            mediaRecorder.start(5000)
-            console.log('[Recording] MediaRecorder state:', mediaRecorder.state)
+            // Start recording
+            mediaRecorder.start(5000) // Chunk every 5 seconds
+            drawFrame() // Start animation loop
 
-            // Start duration timer
+            // Duration timer
             durationIntervalRef.current = setInterval(() => {
                 setState(prev => ({
                     ...prev,
@@ -227,58 +345,47 @@ export function useRecordingManager({
                 }))
             }, 1000)
 
-            setState({
-                isRecording: true,
-                isPaused: false,
-                duration: 0,
-                status: 'recording',
-                error: null,
-                progress: 0
-            })
-
-            console.log('[Recording] Recording started successfully!')
+            setState(prev => ({ ...prev, isRecording: true, status: 'recording' }))
+            console.log('[Recording] Started successfully - capturing all participants')
 
         } catch (error) {
-            console.error('[Recording] Start recording error:', error)
+            console.error('[Recording] Start error:', error)
             setState(prev => ({
                 ...prev,
                 status: 'error',
                 error: error instanceof Error ? error.message : 'Failed to start recording'
             }))
         }
-    }, [meetingId, accessToken, uploadChunk, finalizeRecording])
+    }, [uploadChunk, finalizeRecording])
 
     // Stop recording
     const stopRecording = useCallback(() => {
-        console.log('[Recording] Stopping recording...')
-        console.log('[Recording] Current state:', state.isRecording)
-        console.log('[Recording] MediaRecorder state:', mediaRecorderRef.current?.state)
+        console.log('[Recording] Stopping...')
 
-        if (mediaRecorderRef.current && state.isRecording) {
-            // Request remaining data before stopping
-            if (mediaRecorderRef.current.state === 'recording') {
-                console.log('[Recording] Requesting final data...')
-                mediaRecorderRef.current.requestData()
-            }
-
-            mediaRecorderRef.current.stop()
-
-            if (durationIntervalRef.current) {
-                clearInterval(durationIntervalRef.current)
-                durationIntervalRef.current = null
-            }
-
-            setState(prev => ({
-                ...prev,
-                isRecording: false,
-                status: 'uploading'
-            }))
+        if (durationIntervalRef.current) {
+            clearInterval(durationIntervalRef.current)
+            durationIntervalRef.current = null
         }
-    }, [state.isRecording])
 
-    // Pause/resume recording
+        if (animationFrameRef.current) {
+            cancelAnimationFrame(animationFrameRef.current)
+        }
+
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+            mediaRecorderRef.current.stop()
+        }
+
+        if (streamRef.current) {
+            streamRef.current.getTracks().forEach(track => track.stop())
+            streamRef.current = null
+        }
+
+        setState(prev => ({ ...prev, isRecording: false, isPaused: false }))
+    }, [])
+
+    // Toggle pause
     const togglePause = useCallback(() => {
-        if (!mediaRecorderRef.current || !state.isRecording) return
+        if (!mediaRecorderRef.current) return
 
         if (state.isPaused) {
             mediaRecorderRef.current.resume()
@@ -287,7 +394,18 @@ export function useRecordingManager({
             mediaRecorderRef.current.pause()
             setState(prev => ({ ...prev, isPaused: true }))
         }
-    }, [state.isRecording, state.isPaused])
+    }, [state.isPaused])
+
+    // Format duration
+    const formatDuration = (seconds: number): string => {
+        const hrs = Math.floor(seconds / 3600)
+        const mins = Math.floor((seconds % 3600) / 60)
+        const secs = seconds % 60
+        if (hrs > 0) {
+            return `${hrs}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
+        }
+        return `${mins}:${secs.toString().padStart(2, '0')}`
+    }
 
     // Cleanup on unmount
     useEffect(() => {
@@ -295,22 +413,23 @@ export function useRecordingManager({
             if (durationIntervalRef.current) {
                 clearInterval(durationIntervalRef.current)
             }
+            if (animationFrameRef.current) {
+                cancelAnimationFrame(animationFrameRef.current)
+            }
             if (streamRef.current) {
                 streamRef.current.getTracks().forEach(track => track.stop())
             }
         }
     }, [])
 
-    // Format duration as mm:ss
-    const formatDuration = (seconds: number): string => {
-        const mins = Math.floor(seconds / 60)
-        const secs = seconds % 60
-        return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
-    }
-
     return {
-        ...state,
+        isRecording: state.isRecording,
+        isPaused: state.isPaused,
+        duration: state.duration,
         formattedDuration: formatDuration(state.duration),
+        status: state.status,
+        error: state.error,
+        progress: state.progress,
         startRecording,
         stopRecording,
         togglePause
