@@ -26,10 +26,13 @@ import {
     CloudArrowUpIcon,
     TrashIcon,
     EyeIcon,
-    GlobeAltIcon
+    GlobeAltIcon,
+    FilmIcon
 } from '@heroicons/react/24/outline'
 import PDFViewer from '@/components/PDFViewer'
 import ImageViewer from '@/components/ImageViewer'
+import { RecordingsList } from '@/components/meeting/RecordingsList'
+import { MeetingQA } from '@/components/meeting/MeetingQA'
 
 interface Material {
     id: string
@@ -109,7 +112,7 @@ interface Classroom {
     has_syllabus?: boolean
 }
 
-type TabType = 'stream' | 'materials' | 'meet' | 'assignments' | 'results'
+type TabType = 'stream' | 'materials' | 'meet' | 'recordings' | 'assignments' | 'results'
 type DateFilter = 'all' | 'today' | 'yesterday' | 'week' | 'custom'
 
 export default function StudentClassroomDetailPage() {
@@ -614,6 +617,7 @@ export default function StudentClassroomDetailPage() {
                     { id: 'stream', label: 'Stream', icon: MegaphoneIcon },
                     { id: 'materials', label: 'Materials', icon: FolderIcon },
                     { id: 'meet', label: 'Meetings', icon: VideoCameraIcon },
+                    { id: 'recordings', label: 'Recordings', icon: FilmIcon },
                     { id: 'assignments', label: `Assignments (${assignments.length})`, icon: AcademicCapIcon },
                     { id: 'results', label: `Results${examResults.length > 0 ? ` (${examResults.length})` : ''}`, icon: CheckCircleIcon },
                 ].map(tab => (
@@ -805,7 +809,7 @@ export default function StudentClassroomDetailPage() {
                             {meetings.map(m => (
                                 <div key={m.id} className="card">
                                     <div className="flex items-center justify-between">
-                                        <div className="flex items-center gap-4">
+                                        <div className="flex items-center gap-4 flex-1">
                                             <div className={`p-3 rounded-xl ${m.status === 'live' ? 'bg-red-100' :
                                                 m.status === 'ended' ? 'bg-green-100' : 'bg-gray-100'
                                                 }`}>
@@ -813,14 +817,22 @@ export default function StudentClassroomDetailPage() {
                                                     m.status === 'ended' ? 'text-green-600' : 'text-gray-500'
                                                     }`} />
                                             </div>
-                                            <div>
-                                                <p className="font-medium text-gray-900">{m.title}</p>
+                                            <div className="flex-1">
+                                                <div className="flex items-center justify-between gap-2">
+                                                    <p className="font-medium text-gray-900">{m.title}</p>
+                                                    {m.scheduled_at && (
+                                                        <div className="flex items-center gap-1 text-xs text-gray-400 shrink-0">
+                                                            <CalendarIcon className="w-3.5 h-3.5" />
+                                                            <span>{new Date(m.scheduled_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                                                        </div>
+                                                    )}
+                                                </div>
                                                 <p className="text-sm text-gray-500">
                                                     {m.status === 'live' && <span className="text-red-600 font-medium">● Live Now</span>}
-                                                    {m.status === 'scheduled' && `Scheduled: ${new Date(m.scheduled_at!).toLocaleString()}`}
+                                                    {m.status === 'scheduled' && `Starts: ${new Date(m.scheduled_at!).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`}
                                                     {m.status === 'ended' && (
                                                         <span className="text-green-600">
-                                                            ✓ Recording Available • {m.duration_minutes} min
+                                                            Recording Available • {m.duration_minutes} min
                                                         </span>
                                                     )}
                                                 </p>
@@ -886,10 +898,6 @@ export default function StudentClassroomDetailPage() {
                                                     Ask Questions (AI)
                                                 </button>
                                             </div>
-
-                                            <p className="text-xs text-gray-400 mt-3">
-                                                📅 Recorded on {new Date(m.ended_at!).toLocaleDateString()}
-                                            </p>
                                         </div>
                                     )}
                                 </div>
@@ -1159,6 +1167,29 @@ export default function StudentClassroomDetailPage() {
                         </div>
                     )}
                 </div>
+            )}
+
+            {/* Recordings Tab */}
+            {activeTab === 'recordings' && (
+                <div className="space-y-4">
+                    <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                        <FilmIcon className="w-5 h-5 text-gray-400" />
+                        Class Recordings
+                    </h2>
+                    <RecordingsList
+                        classroomId={classroomId}
+                        accessToken={typeof window !== 'undefined' ? localStorage.getItem('accessToken') || '' : ''}
+                    />
+                </div>
+            )}
+
+            {/* AI Q&A for Recordings */}
+            {typeof window !== 'undefined' && (
+                <MeetingQA
+                    classroomId={classroomId}
+                    accessToken={localStorage.getItem('accessToken') || ''}
+                    aiServiceUrl={process.env.NEXT_PUBLIC_AI_SERVICE_URL || 'http://localhost:8001'}
+                />
             )}
 
             {/* Results Tab */}

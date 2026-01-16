@@ -29,6 +29,7 @@ import {
     Cog6ToothIcon,
     ClipboardDocumentIcon,
 } from '@heroicons/react/24/outline'
+import { RecordingControls } from '@/components/meeting/RecordingControls'
 
 // LiveKit server configuration
 const LIVEKIT_URL = process.env.NEXT_PUBLIC_LIVEKIT_URL || 'wss://your-livekit-server.livekit.cloud'
@@ -55,6 +56,8 @@ export default function MeetingRoomPage() {
     const [showChat, setShowChat] = useState(false)
     const [showParticipants, setShowParticipants] = useState(false)
     const [participantName, setParticipantName] = useState('Guest')
+    const [isHost, setIsHost] = useState(false)
+    const [accessToken, setAccessToken] = useState('')
 
     // Set participant name on client side only
     useEffect(() => {
@@ -87,6 +90,11 @@ export default function MeetingRoomPage() {
 
                 const meetingData = await meetingRes.json()
                 setMeeting(meetingData.meeting)
+
+                // Check if current user is host
+                const userId = localStorage.getItem('userId')
+                setIsHost(userId === meetingData.meeting.host_id)
+                setAccessToken(accessToken || '')
 
                 // Join the meeting
                 await fetch(`${getApiBaseUrl()}/api/meeting/${meetingId}/join`, {
@@ -207,6 +215,16 @@ export default function MeetingRoomPage() {
                         </div>
                     </div>
                     <div className="flex items-center gap-3">
+                        {/* Recording Controls - Always show */}
+                        <RecordingControls
+                            meetingId={meetingId}
+                            roomId={meeting?.room_id || meetingId}
+                            accessToken={accessToken}
+                            isHost={true}
+                            onRecordingComplete={(recordingId) => {
+                                console.log('Recording saved:', recordingId)
+                            }}
+                        />
                         <button
                             onClick={copyMeetingLink}
                             className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg"
@@ -356,6 +374,16 @@ export default function MeetingRoomPage() {
                         </div>
                     </div>
                     <div className="flex items-center gap-3">
+                        {/* Recording Controls */}
+                        <RecordingControls
+                            meetingId={meetingId}
+                            roomId={meeting?.room_id || meetingId}
+                            accessToken={accessToken}
+                            isHost={true}
+                            onRecordingComplete={(recordingId) => {
+                                console.log('Recording saved:', recordingId)
+                            }}
+                        />
                         <button
                             onClick={copyMeetingLink}
                             className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg"

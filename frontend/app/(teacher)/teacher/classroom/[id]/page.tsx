@@ -152,6 +152,8 @@ export default function TeacherClassroomDetailPage() {
     const [showMeetModal, setShowMeetModal] = useState(false)
     const [showUploadModal, setShowUploadModal] = useState(false)
     const [meetTitle, setMeetTitle] = useState('')
+    const [scheduledAt, setScheduledAt] = useState('')
+    const [enableRecording, setEnableRecording] = useState(true)
     const [uploadSubject, setUploadSubject] = useState('')
     const [selectedFiles, setSelectedFiles] = useState<File[]>([])
     const [syllabusText, setSyllabusText] = useState('')
@@ -401,7 +403,9 @@ export default function TeacherClassroomDetailPage() {
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({
-                    title: meetTitle
+                    title: meetTitle,
+                    scheduled_at: scheduledAt || null,
+                    is_recording_enabled: enableRecording
                 })
             })
 
@@ -415,7 +419,7 @@ export default function TeacherClassroomDetailPage() {
             const meeting: Meeting = {
                 id: data.meeting.id,
                 title: data.meeting.title,
-                status: 'scheduled',
+                status: scheduledAt ? 'scheduled' : 'scheduled',
                 scheduled_at: data.meeting.scheduled_at,
                 meeting_link: data.meeting.meeting_link
             }
@@ -423,22 +427,29 @@ export default function TeacherClassroomDetailPage() {
             setMeetings([meeting, ...meetings])
             setShowMeetModal(false)
             setMeetTitle('')
+            setScheduledAt('')
+            setEnableRecording(true)
 
-            // Start the meeting
-            await fetch(`${getApiBaseUrl()}/api/meeting/${meeting.id}/start`, {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
-                }
-            })
+            // If no scheduled time, start immediately and navigate to meeting
+            if (!scheduledAt) {
+                await fetch(`${getApiBaseUrl()}/api/meeting/${meeting.id}/start`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
+                    }
+                })
 
-            // Update local state
-            setMeetings(prev => prev.map(m =>
-                m.id === meeting.id ? { ...m, status: 'live' as const, started_at: new Date().toISOString() } : m
-            ))
+                // Update local state
+                setMeetings(prev => prev.map(m =>
+                    m.id === meeting.id ? { ...m, status: 'live' as const, started_at: new Date().toISOString() } : m
+                ))
 
-            // Navigate to meeting in same tab
-            router.push(`/meet/${meeting.id}`)
+                // Navigate to meeting
+                router.push(`/meet/${meeting.id}`)
+            } else {
+                // Meeting scheduled for later - show confirmation
+                alert(`Meeting "${meetTitle}" scheduled for ${new Date(scheduledAt).toLocaleString()}`)
+            }
 
         } catch (error) {
             console.error('Failed to create meeting:', error)
@@ -1184,7 +1195,7 @@ export default function TeacherClassroomDetailPage() {
                             {meetings.map(m => (
                                 <div key={m.id} className="card">
                                     <div className="flex items-center justify-between">
-                                        <div className="flex items-center gap-4">
+                                        <div className="flex items-center gap-4 flex-1">
                                             <div className={`p-3 rounded-xl ${m.status === 'live' ? 'bg-red-100' :
                                                 m.status === 'ended' ? 'bg-green-100' : 'bg-gray-100'
                                                 }`}>
@@ -1192,14 +1203,22 @@ export default function TeacherClassroomDetailPage() {
                                                     m.status === 'ended' ? 'text-green-600' : 'text-gray-500'
                                                     }`} />
                                             </div>
-                                            <div>
-                                                <p className="font-medium text-gray-900">{m.title}</p>
+                                            <div className="flex-1">
+                                                <div className="flex items-center justify-between gap-2">
+                                                    <p className="font-medium text-gray-900">{m.title}</p>
+                                                    {m.scheduled_at && (
+                                                        <div className="flex items-center gap-1 text-xs text-gray-400 shrink-0">
+                                                            <CalendarIcon className="w-3.5 h-3.5" />
+                                                            <span>{new Date(m.scheduled_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                                                        </div>
+                                                    )}
+                                                </div>
                                                 <p className="text-sm text-gray-500">
                                                     {m.status === 'live' && <span className="text-red-600 font-medium">● Live Now</span>}
-                                                    {m.status === 'scheduled' && `Scheduled: ${new Date(m.scheduled_at!).toLocaleString()}`}
+                                                    {m.status === 'scheduled' && `Starts: ${new Date(m.scheduled_at!).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`}
                                                     {m.status === 'ended' && (
                                                         <span className="text-green-600">
-                                                            ✓ Ended • {m.duration_minutes} min • Recording saved
+                                                            Ended • {m.duration_minutes} min • Recording saved
                                                         </span>
                                                     )}
                                                 </p>
@@ -1286,10 +1305,6 @@ export default function TeacherClassroomDetailPage() {
                                                     )}
                                                 </div>
                                             </div>
-
-                                            <p className="text-xs text-gray-400 mt-3 text-center">
-                                                📅 Meeting ended on {new Date(m.ended_at!).toLocaleString()}
-                                            </p>
                                         </div>
                                     )}
                                 </div>
@@ -1446,20 +1461,79 @@ export default function TeacherClassroomDetailPage() {
             {showMeetModal && (
                 <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
                     <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6">
-                        <h2 className="text-xl font-bold text-gray-900 mb-4">Start New Meeting</h2>
-                        <input
-                            type="text"
-                            value={meetTitle}
-                            onChange={(e) => setMeetTitle(e.target.value)}
-                            placeholder="Meeting title..."
-                            className="input-field mb-4"
-                        />
+                        <h2 className="text-xl font-bold text-gray-900 mb-4">New Meeting</h2>
+
+                        {/* Meeting Title */}
+                        <div className="mb-4">
+                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                                Meeting Title
+                            </label>
+                            <input
+                                type="text"
+                                value={meetTitle}
+                                onChange={(e) => setMeetTitle(e.target.value)}
+                                placeholder="e.g., Physics Class - Chapter 5"
+                                className="input-field"
+                            />
+                        </div>
+
+                        {/* Schedule Date/Time (Optional) */}
+                        <div className="mb-4">
+                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                                Schedule For (Optional)
+                            </label>
+                            <input
+                                type="datetime-local"
+                                value={scheduledAt}
+                                onChange={(e) => setScheduledAt(e.target.value)}
+                                min={new Date().toISOString().slice(0, 16)}
+                                className="input-field"
+                            />
+                            <p className="text-xs text-gray-500 mt-1">
+                                Leave empty to start immediately
+                            </p>
+                        </div>
+
+                        {/* Recording Toggle */}
+                        <div className="mb-6 flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                            <div>
+                                <p className="font-medium text-gray-900">Enable Recording</p>
+                                <p className="text-xs text-gray-500">Record meeting for later playback</p>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setEnableRecording(prev => !prev)}
+                                className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer items-center rounded-full transition-colors duration-200 ${enableRecording ? 'bg-green-500' : 'bg-gray-300'
+                                    }`}
+                            >
+                                <span
+                                    style={{
+                                        transform: enableRecording ? 'translateX(22px)' : 'translateX(2px)',
+                                        transition: 'transform 200ms ease-in-out'
+                                    }}
+                                    className="inline-block h-5 w-5 rounded-full bg-white shadow-md"
+                                />
+                            </button>
+                        </div>
+
+                        {/* Action Buttons */}
                         <div className="flex gap-3">
-                            <button onClick={() => setShowMeetModal(false)} className="flex-1 px-4 py-2 border border-gray-300 rounded-lg">
+                            <button
+                                onClick={() => {
+                                    setShowMeetModal(false)
+                                    setMeetTitle('')
+                                    setScheduledAt('')
+                                    setEnableRecording(true)
+                                }}
+                                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
+                            >
                                 Cancel
                             </button>
-                            <button onClick={startMeeting} className="flex-1 btn-primary">
-                                Start Meeting
+                            <button
+                                onClick={startMeeting}
+                                className="flex-1 btn-primary"
+                            >
+                                {scheduledAt ? 'Schedule Meeting' : 'Start Now'}
                             </button>
                         </div>
                     </div>

@@ -35,7 +35,7 @@ meetings_bp = Blueprint("meetings", __name__, url_prefix="/api")
 @meetings_bp.route("/classroom/<classroom_id>/meetings", methods=["GET"])
 @require_auth
 def list_meetings(classroom_id):
-    """List all meetings for a classroom"""
+    """List all meetings for a classroom with recording info"""
     user_id = request.user_id
     
     # Verify access to classroom
@@ -53,9 +53,30 @@ def list_meetings(classroom_id):
     # Sort by created_at descending so newest meetings appear first
     meetings = query.order_by(Meeting.created_at.desc()).all()
     
+    # Add recording info for each meeting
+    meeting_ids = [m.id for m in meetings]
+    recordings = MeetingRecording.query.filter(
+        MeetingRecording.meeting_id.in_(meeting_ids)
+    ).all() if meeting_ids else []
+    
+    # Create lookup dictionary
+    recording_by_meeting = {r.meeting_id: r for r in recordings}
+    
+    # Build response with recording URLs
+    result = []
+    for m in meetings:
+        data = m.to_dict()
+        recording = recording_by_meeting.get(m.id)
+        if recording:
+            data['recording_url'] = recording.storage_url
+            data['recording_status'] = recording.status
+            data['has_transcript'] = recording.has_transcript
+            data['transcript'] = recording.transcript_text if hasattr(recording, 'transcript_text') else None
+        result.append(data)
+    
     return jsonify({
-        "meetings": [m.to_dict() for m in meetings],
-        "count": len(meetings)
+        "meetings": result,
+        "count": len(result)
     }), 200
 
 

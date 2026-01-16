@@ -38,6 +38,19 @@ lsof -ti:$DASH_MAIN_PORT | xargs kill -9 2>/dev/null || true
 lsof -ti:$DASH_NOTES_PORT | xargs kill -9 2>/dev/null || true
 sleep 1
 
+# Start Qdrant using docker-compose (if docker is available)
+echo -e "${YELLOW}Starting Qdrant vector database...${NC}"
+if command -v docker &> /dev/null; then
+    # Start only qdrant service from docker-compose
+    docker-compose up -d qdrant 2>/dev/null || docker compose up -d qdrant 2>/dev/null || {
+        echo -e "${YELLOW}Starting Qdrant standalone...${NC}"
+        docker run -d --name ensure-study-qdrant -p 6333:6333 -p 6334:6334 qdrant/qdrant 2>/dev/null || true
+    }
+    echo -e "${GREEN}Qdrant started on http://localhost:6333${NC}"
+else
+    echo -e "${RED}Docker not found - Qdrant won't be available${NC}"
+fi
+
 # Check if venv exists
 if [ ! -d "$VENV_PATH" ]; then
     echo "Creating virtual environment..."
@@ -136,6 +149,7 @@ echo "┌───────────────────────�
 echo "│ Core API:       http://localhost:$CORE_PORT          │"
 echo "│ AI Service:     http://localhost:$AI_PORT          │"
 echo "│ Frontend:       http://localhost:$FRONTEND_PORT          │"
+echo "│ Qdrant (Vector):http://localhost:6333          │"
 echo "│ Dashboard:      http://localhost:$DASH_MAIN_PORT          │"
 echo "│ Notes Tester:   http://localhost:$DASH_NOTES_PORT          │"
 echo "├────────────────────────────────────────────────┤"

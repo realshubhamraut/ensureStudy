@@ -14,6 +14,8 @@ from .api.routes.web_ingest import router as web_ingest_router
 from .api.routes.indexing import router as indexing_router
 from .api.notes import router as notes_router
 from .api.meetings import router as meetings_router
+from .api.meeting_qa import router as meeting_qa_router
+from .api.process_recording import router as process_recording_router
 from .proctor.api import router as proctor_router
 from .utils.logging import log_startup, log_action, log_error, Colors
 
@@ -77,6 +79,8 @@ app.include_router(mock_interview_router)
 app.include_router(softskills_router)
 app.include_router(notes_router)
 app.include_router(meetings_router)
+app.include_router(meeting_qa_router)
+app.include_router(process_recording_router)
 app.include_router(proctor_router)
 app.include_router(web_ingest_router)
 app.include_router(indexing_router)
