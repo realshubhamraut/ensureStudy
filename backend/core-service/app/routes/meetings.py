@@ -14,6 +14,17 @@ from app.models.meeting import Meeting, MeetingParticipant, MeetingRecording, cr
 from app.models.classroom import Classroom, StudentClassroom
 from app.models.notification import create_notification, notify_classroom_members
 
+# Import Kafka producer (safe import - won't fail if Kafka not available)
+try:
+    from kafka_producers.meeting_producer import (
+        on_meeting_created, on_meeting_started, on_meeting_ended,
+        on_participant_joined, on_participant_left, on_recording_uploaded
+    )
+    KAFKA_ENABLED = True
+except ImportError:
+    KAFKA_ENABLED = False
+    print("⚠️ Kafka producer not available, events will not be published")
+
 # LiveKit configuration
 LIVEKIT_API_KEY = os.getenv('LIVEKIT_API_KEY', '')
 LIVEKIT_API_SECRET = os.getenv('LIVEKIT_API_SECRET', '')
@@ -39,7 +50,8 @@ def list_meetings(classroom_id):
     if status:
         query = query.filter_by(status=status)
     
-    meetings = query.order_by(Meeting.scheduled_at.desc()).all()
+    # Sort by created_at descending so newest meetings appear first
+    meetings = query.order_by(Meeting.created_at.desc()).all()
     
     return jsonify({
         "meetings": [m.to_dict() for m in meetings],
@@ -94,6 +106,13 @@ def create_new_meeting(classroom_id):
         source_id=meeting.id,
         action_url=f"/classroom/{classroom_id}?tab=meet"
     )
+    
+    # Publish Kafka event
+    if KAFKA_ENABLED:
+        try:
+            on_meeting_created(meeting.id, classroom_id, user_id, title)
+        except Exception as e:
+            print(f"Failed to publish meeting.created event: {e}")
     
     return jsonify({
         "meeting": meeting.to_dict(),
@@ -155,6 +174,13 @@ def start_meeting_endpoint(meeting_id):
         action_url=meeting.meeting_link
     )
     
+    # Publish Kafka event
+    if KAFKA_ENABLED:
+        try:
+            on_meeting_started(meeting.id, meeting.classroom_id, user_id)
+        except Exception as e:
+            print(f"Failed to publish meeting.started event: {e}")
+    
     return jsonify({
         "meeting": meeting.to_dict(),
         "message": "Meeting started successfully"
@@ -199,6 +225,14 @@ def join_meeting(meeting_id):
         db.session.add(participant)
         db.session.commit()
     
+    # Publish Kafka analytics event
+    if KAFKA_ENABLED:
+        try:
+            user = User.query.get(user_id)
+            on_participant_joined(meeting_id, meeting.classroom_id, user_id, participant.role)
+        except Exception as e:
+            print(f"Failed to publish participant.joined event: {e}")
+    
     return jsonify({
         "participant": participant.to_dict(),
         "meeting": meeting.to_dict(),
@@ -230,36 +264,58 @@ def get_meeting_token(meeting_id):
             "message": "Set LIVEKIT_API_KEY and LIVEKIT_API_SECRET in environment"
         }), 503
     
-    # Generate LiveKit token
+    # Generate LiveKit token using official SDK
     try:
-        # Token claims
-        now = int(time.time())
-        claims = {
-            "iss": LIVEKIT_API_KEY,
-            "sub": user_id,
-            "iat": now,
-            "exp": now + 3600,  # 1 hour expiry
-            "nbf": now,
-            "jti": f"{meeting_id}-{user_id}-{now}",
-            "video": {
-                "roomJoin": True,
-                "room": meeting.room_id,
-                "canPublish": True,
-                "canSubscribe": True,
-                "canPublishData": True,
-            },
-            "name": participant_name,
-            "metadata": json.dumps({
-                "user_id": user_id,
-                "meeting_id": meeting_id,
-                "role": "host" if meeting.host_id == user_id else "attendee"
-            })
-        }
-        
-        token = jwt.encode(claims, LIVEKIT_API_SECRET, algorithm="HS256")
+        # Try to use official livekit-api package
+        try:
+            from livekit.api import AccessToken, VideoGrants
+            
+            token = AccessToken(LIVEKIT_API_KEY, LIVEKIT_API_SECRET) \
+                .with_identity(user_id) \
+                .with_name(participant_name) \
+                .with_grants(VideoGrants(
+                    room_join=True,
+                    room=meeting.room_id,
+                    can_publish=True,
+                    can_subscribe=True,
+                    can_publish_data=True
+                )) \
+                .with_metadata(json.dumps({
+                    "user_id": user_id,
+                    "meeting_id": meeting_id,
+                    "role": "host" if meeting.host_id == user_id else "attendee"
+                }))
+            
+            jwt_token = token.to_jwt()
+            
+        except ImportError:
+            # Fallback to manual JWT if livekit-api not installed
+            now = int(time.time())
+            claims = {
+                "iss": LIVEKIT_API_KEY,
+                "sub": user_id,
+                "iat": now,
+                "exp": now + 3600,
+                "nbf": now,
+                "jti": f"{meeting_id}-{user_id}-{now}",
+                "video": {
+                    "roomJoin": True,
+                    "room": meeting.room_id,
+                    "canPublish": True,
+                    "canSubscribe": True,
+                    "canPublishData": True,
+                },
+                "name": participant_name,
+                "metadata": json.dumps({
+                    "user_id": user_id,
+                    "meeting_id": meeting_id,
+                    "role": "host" if meeting.host_id == user_id else "attendee"
+                })
+            }
+            jwt_token = jwt.encode(claims, LIVEKIT_API_SECRET, algorithm="HS256")
         
         return jsonify({
-            "token": token,
+            "token": jwt_token,
             "room_id": meeting.room_id,
             "participant_name": participant_name,
             "expires_at": datetime.utcnow() + timedelta(hours=1)
@@ -293,6 +349,15 @@ def leave_meeting(meeting_id):
     
     db.session.commit()
     
+    # Publish Kafka analytics event
+    if KAFKA_ENABLED:
+        try:
+            on_participant_left(meeting_id, meeting.classroom_id, user_id, participant.duration_seconds or 0)
+        except Exception as e:
+            print(f"Failed to publish participant.left event: {e}")
+    
+    meeting = Meeting.query.get(meeting_id)
+    
     return jsonify({
         "message": "Left meeting successfully"
     }), 200
@@ -324,6 +389,20 @@ def end_meeting_endpoint(meeting_id):
     
     meeting = end_meeting(meeting_id)
     db.session.commit()
+    
+    # Calculate meeting duration
+    duration_minutes = 0
+    if meeting.started_at and meeting.ended_at:
+        delta = meeting.ended_at - meeting.started_at
+        duration_minutes = int(delta.total_seconds() / 60)
+    
+    # Publish Kafka event
+    if KAFKA_ENABLED:
+        try:
+            participant_count = MeetingParticipant.query.filter_by(meeting_id=meeting_id).count()
+            on_meeting_ended(meeting_id, meeting.classroom_id, duration_minutes, participant_count)
+        except Exception as e:
+            print(f"Failed to publish meeting.ended event: {e}")
     
     return jsonify({
         "meeting": meeting.to_dict(),
@@ -361,7 +440,17 @@ def upload_recording(meeting_id):
     db.session.add(recording)
     db.session.commit()
     
-    # TODO: Trigger Kafka event for transcription processing
+    # Publish Kafka event to trigger transcription pipeline
+    if KAFKA_ENABLED:
+        try:
+            on_recording_uploaded(
+                meeting_id, 
+                recording.id, 
+                storage_url, 
+                data.get('duration_seconds', 0)
+            )
+        except Exception as e:
+            print(f"Failed to publish recording.uploaded event: {e}")
     
     return jsonify({
         "recording": recording.to_dict(),

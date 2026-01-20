@@ -18,6 +18,9 @@ werkzeug==3.0.1
 # Kafka
 kafka-python==2.0.2
 
+# LiveKit
+livekit-api>=0.7.0
+
 # Redis
 redis==5.0.1
 

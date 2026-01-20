@@ -194,13 +194,18 @@ class MeetingRecording(db.Model):
 # Helper functions
 def create_meeting(classroom_id: str, host_id: str, title: str, **kwargs) -> Meeting:
     """Create a new meeting"""
-    room_id = f"{classroom_id[:8]}-{generate_uuid()[:8]}"
+    import os
+    meeting_id = generate_uuid()
+    room_id = f"{classroom_id[:8]}-{meeting_id[:8]}"
+    # Use environment variable for frontend URL, default to localhost for development
+    frontend_url = os.getenv('FRONTEND_URL', 'http://localhost:3000')
     meeting = Meeting(
+        id=meeting_id,
         classroom_id=classroom_id,
         host_id=host_id,
         title=title,
         room_id=room_id,
-        meeting_link=f"https://meet.ensurestudy.com/{room_id}",
+        meeting_link=f"{frontend_url}/meet/{meeting_id}",  # Use meeting id, not room_id
         **kwargs
     )
     db.session.add(meeting)

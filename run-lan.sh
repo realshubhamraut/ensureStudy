@@ -84,18 +84,34 @@ AI_PID=$!
 
 sleep 2
 
-# Start Frontend with LAN access
-echo -e "${GREEN}Starting Frontend on http://$LOCAL_IP:3000${NC}"
+# Start Frontend with LAN access (HTTPS for camera/mic on mobile)
+echo -e "${GREEN}Starting Frontend on https://$LOCAL_IP:3000${NC}"
 cd "$PROJECT_ROOT/frontend"
 if [ ! -d "node_modules" ]; then
     echo "Installing npm dependencies..."
     npm install
 fi
 
-# Set API URL to use LAN IP
+# Check if mkcert certs exist in project root
+CERT_FILE="$PROJECT_ROOT/192.168.4.60+2.pem"
+KEY_FILE="$PROJECT_ROOT/192.168.4.60+2-key.pem"
+
+# Set API URL to use LAN IP (HTTP is fine for API calls)
 export NEXT_PUBLIC_API_URL="http://$LOCAL_IP:8000"
 export NEXT_PUBLIC_AI_URL="http://$LOCAL_IP:8001"
-NEXTAUTH_SECRET="${JWT_SECRET:-local-dev-jwt-secret-key-32chars}" NEXTAUTH_URL="http://$LOCAL_IP:3000" npm run dev -- -H 0.0.0.0 2>&1 | tee -a "$LOG_DIR/frontend_$DATE.log" &
+
+if [ -f "$CERT_FILE" ] && [ -f "$KEY_FILE" ]; then
+    echo -e "${GREEN}Using HTTPS with mkcert certificates${NC}"
+    # Create a custom server to use HTTPS
+    NEXTAUTH_SECRET="${JWT_SECRET:-local-dev-jwt-secret-key-32chars}" \
+    NEXTAUTH_URL="https://$LOCAL_IP:3000" \
+    npm run dev -- -H 0.0.0.0 --experimental-https 2>&1 | tee -a "$LOG_DIR/frontend_$DATE.log" &
+else
+    echo -e "${YELLOW}No mkcert certs found, using HTTP (camera/mic won't work on mobile)${NC}"
+    NEXTAUTH_SECRET="${JWT_SECRET:-local-dev-jwt-secret-key-32chars}" \
+    NEXTAUTH_URL="http://$LOCAL_IP:3000" \
+    npm run dev -- -H 0.0.0.0 2>&1 | tee -a "$LOG_DIR/frontend_$DATE.log" &
+fi
 FRONTEND_PID=$!
 
 sleep 2
@@ -122,12 +138,12 @@ echo "│ Your Network IP: $LOCAL_IP                             "
 echo "├────────────────────────────────────────────────────────┤"
 echo "│ Core API:       http://$LOCAL_IP:8000                  "
 echo "│ AI Service:     http://$LOCAL_IP:8001                  "
-echo "│ Frontend:       http://$LOCAL_IP:3000                  "
+echo "│ Frontend:       https://$LOCAL_IP:3000  (HTTPS!)       "
 echo "│ Dashboard:      http://$LOCAL_IP:8501                  "
 echo "│ Notes Tester:   http://$LOCAL_IP:8502                  "
 echo "├────────────────────────────────────────────────────────┤"
-echo "│ Share this with others on your network:                │"
-echo "│   http://$LOCAL_IP:3000                                "
+echo "│ For Mobile (with camera/mic):                         │"
+echo "│   https://$LOCAL_IP:3000                               "
 echo "└────────────────────────────────────────────────────────┘"
 echo ""
 echo -e "${YELLOW}Log files:${NC}"

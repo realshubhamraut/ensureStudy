@@ -1,5 +1,6 @@
 #!/bin/bash
 # Run ensureStudy locally without Docker
+# Uses different ports than run-lan.sh to avoid conflicts
 # All logs are stored in ./logs directory
 
 set -e
@@ -7,6 +8,13 @@ set -e
 PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
 VENV_PATH="$PROJECT_ROOT/venv"
 LOG_DIR="$PROJECT_ROOT/logs"
+
+# Different ports from run-lan.sh to allow both to run
+CORE_PORT=9000
+AI_PORT=9001
+FRONTEND_PORT=4000
+DASH_MAIN_PORT=9501
+DASH_NOTES_PORT=9502
 
 # Colors
 GREEN='\033[0;32m'
@@ -22,10 +30,12 @@ echo -e "${BLUE}=== ensureStudy Local Development ===${NC}"
 echo -e "${BLUE}Logs stored in: $LOG_DIR${NC}"
 
 # Kill any stale processes on our ports
-echo -e "${YELLOW}Killing stale processes on ports 8000, 8001, 3000...${NC}"
-lsof -ti:8000 | xargs kill -9 2>/dev/null || true
-lsof -ti:8001 | xargs kill -9 2>/dev/null || true
-lsof -ti:3000 | xargs kill -9 2>/dev/null || true
+echo -e "${YELLOW}Killing stale processes on ports $CORE_PORT, $AI_PORT, $FRONTEND_PORT...${NC}"
+lsof -ti:$CORE_PORT | xargs kill -9 2>/dev/null || true
+lsof -ti:$AI_PORT | xargs kill -9 2>/dev/null || true
+lsof -ti:$FRONTEND_PORT | xargs kill -9 2>/dev/null || true
+lsof -ti:$DASH_MAIN_PORT | xargs kill -9 2>/dev/null || true
+lsof -ti:$DASH_NOTES_PORT | xargs kill -9 2>/dev/null || true
 sleep 1
 
 # Check if venv exists
@@ -63,38 +73,44 @@ fi
 # Set environment variables - Use PostgreSQL from .env
 export FLASK_APP=app
 export FLASK_DEBUG=1
-# DATABASE_URL is loaded from .env (PostgreSQL)
 export JWT_SECRET="${JWT_SECRET:-local-dev-jwt-secret-key-32chars}"
 export OPENAI_API_KEY="${OPENAI_API_KEY:-sk-test-key}"
-export PYTHONUNBUFFERED=1  # Force unbuffered output for real-time logging
+export PYTHONUNBUFFERED=1
 
 # Date for log files
 DATE=$(date +%Y-%m-%d)
 
 # Start Core API with logging
-echo -e "${GREEN}Starting Core API on http://localhost:8000${NC}"
+echo -e "${GREEN}Starting Core API on http://localhost:$CORE_PORT${NC}"
 cd "$PROJECT_ROOT/backend/core-service"
-python -m flask run --port 8000 2>&1 | tee -a "$LOG_DIR/core-service_$DATE.log" &
+python -m flask run --port $CORE_PORT 2>&1 | tee -a "$LOG_DIR/core-service_$DATE.log" &
 CORE_PID=$!
 
 sleep 2
 
 # Start AI Service with logging
-echo -e "${GREEN}Starting AI Service on http://localhost:8001${NC}"
+echo -e "${GREEN}Starting AI Service on http://localhost:$AI_PORT${NC}"
 cd "$PROJECT_ROOT/backend/ai-service"
-python -m uvicorn app.main:app --port 8001 --reload 2>&1 | tee -a "$LOG_DIR/ai-service_$DATE.log" &
+python -m uvicorn app.main:app --port $AI_PORT --reload 2>&1 | tee -a "$LOG_DIR/ai-service_$DATE.log" &
 AI_PID=$!
 
 sleep 2
 
 # Start Frontend with logging
-echo -e "${GREEN}Starting Frontend on http://localhost:3000${NC}"
+echo -e "${GREEN}Starting Frontend on http://localhost:$FRONTEND_PORT${NC}"
 cd "$PROJECT_ROOT/frontend"
 if [ ! -d "node_modules" ]; then
     echo "Installing npm dependencies..."
     npm install
 fi
-NEXTAUTH_SECRET="${JWT_SECRET:-local-dev-jwt-secret-key-32chars}" NEXTAUTH_URL="http://localhost:3000" npm run dev 2>&1 | tee -a "$LOG_DIR/frontend_$DATE.log" &
+
+# Set API URLs to use the local ports
+export NEXT_PUBLIC_API_URL="http://localhost:$CORE_PORT"
+export NEXT_PUBLIC_AI_URL="http://localhost:$AI_PORT"
+
+NEXTAUTH_SECRET="${JWT_SECRET:-local-dev-jwt-secret-key-32chars}" \
+NEXTAUTH_URL="http://localhost:$FRONTEND_PORT" \
+npm run dev -- --port $FRONTEND_PORT 2>&1 | tee -a "$LOG_DIR/frontend_$DATE.log" &
 FRONTEND_PID=$!
 
 sleep 2
@@ -103,29 +119,30 @@ sleep 2
 echo -e "${YELLOW}Starting Streamlit Dashboards...${NC}"
 cd "$PROJECT_ROOT/dashboards"
 
-echo -e "${GREEN}  Main Dashboard on http://localhost:8501${NC}"
-streamlit run main_dashboard.py --server.port 8501 --server.headless true 2>&1 | tee -a "$LOG_DIR/dashboard_main_$DATE.log" &
+echo -e "${GREEN}  Main Dashboard on http://localhost:$DASH_MAIN_PORT${NC}"
+streamlit run main_dashboard.py --server.port $DASH_MAIN_PORT --server.headless true 2>&1 | tee -a "$LOG_DIR/dashboard_main_$DATE.log" &
 DASH_MAIN_PID=$!
 
-echo -e "${GREEN}  Notes Tester on http://localhost:8502${NC}"
-streamlit run notes_tester.py --server.port 8502 --server.headless true 2>&1 | tee -a "$LOG_DIR/dashboard_notes_$DATE.log" &
+echo -e "${GREEN}  Notes Tester on http://localhost:$DASH_NOTES_PORT${NC}"
+streamlit run notes_tester.py --server.port $DASH_NOTES_PORT --server.headless true 2>&1 | tee -a "$LOG_DIR/dashboard_notes_$DATE.log" &
 DASH_NOTES_PID=$!
 
 # Wait a bit for services to start
 sleep 3
 
 echo ""
-echo -e "${GREEN}=== All services started ===${NC}"
+echo -e "${GREEN}=== All services started (LOCAL) ===${NC}"
 echo "┌────────────────────────────────────────────────┐"
-echo "│ Core API:       http://localhost:8000          │"
-echo "│ AI Service:     http://localhost:8001          │"
-echo "│ Frontend:       http://localhost:3000          │"
-echo "│ Dashboard:      http://localhost:8501          │"
-echo "│ Notes Tester:   http://localhost:8502          │"
+echo "│ Core API:       http://localhost:$CORE_PORT          │"
+echo "│ AI Service:     http://localhost:$AI_PORT          │"
+echo "│ Frontend:       http://localhost:$FRONTEND_PORT          │"
+echo "│ Dashboard:      http://localhost:$DASH_MAIN_PORT          │"
+echo "│ Notes Tester:   http://localhost:$DASH_NOTES_PORT          │"
 echo "├────────────────────────────────────────────────┤"
 echo "│ Logs:           $LOG_DIR  │"
 echo "└────────────────────────────────────────────────┘"
 echo ""
+echo -e "${YELLOW}NOTE: These ports differ from run-lan.sh to avoid conflicts${NC}"
 echo -e "${YELLOW}Log files:${NC}"
 echo "  tail -f $LOG_DIR/core-service_$DATE.log"
 echo "  tail -f $LOG_DIR/ai-service_$DATE.log"

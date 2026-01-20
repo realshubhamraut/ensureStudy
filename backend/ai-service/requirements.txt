@@ -49,6 +49,7 @@ scikit-image>=0.22.0          # Advanced image processing
 # LangChain & LangGraph for Agentic AI
 langchain>=0.1.0              # LLM orchestration
 langgraph>=0.0.20             # Agentic workflows
+google-generativeai>=0.3.0    # Gemini LLM for summaries
 
 # ==================== Document Processing ====================
 

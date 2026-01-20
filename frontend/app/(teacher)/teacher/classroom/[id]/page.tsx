@@ -185,6 +185,11 @@ export default function TeacherClassroomDetailPage() {
     const [feedbackInput, setFeedbackInput] = useState('')
     const [savingGrade, setSavingGrade] = useState(false)
 
+    // Meeting query states
+    const [meetingQuery, setMeetingQuery] = useState('')
+    const [queryLoading, setQueryLoading] = useState(false)
+    const [queryAnswer, setQueryAnswer] = useState<{ answer: string, sources: any[] } | null>(null)
+
     const subjects = ['Mathematics', 'Physics', 'Chemistry', 'Biology', 'English', 'History', 'Geography', 'Computer Science']
 
     useEffect(() => {
@@ -204,24 +209,51 @@ export default function TeacherClassroomDetailPage() {
                 setStudents(data.students || [])
 
                 // Fetch materials from API
-                const materialsRes = await fetch(`${getApiBaseUrl()}/api/classroom/${classroomId}/materials`, {
-                    headers: {
-                        'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
+                try {
+                    const materialsRes = await fetch(`${getApiBaseUrl()}/api/classroom/${classroomId}/materials`, {
+                        headers: {
+                            'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
+                        }
+                    })
+                    if (materialsRes.ok) {
+                        const materialsData = await materialsRes.json()
+                        setMaterials(materialsData.materials || [])
                     }
-                })
-                if (materialsRes.ok) {
-                    const materialsData = await materialsRes.json()
-                    setMaterials(materialsData.materials || [])
+                } catch (e) {
+                    console.error('Failed to fetch materials:', e)
                 }
 
-                // Mock data for announcements and meetings (can be replaced later)
-                setAnnouncements([
-                    { id: '1', message: 'Welcome to the class! Please review Chapter 5 notes before our next session.', created_at: new Date().toISOString() },
-                    { id: '2', message: 'Quiz on Laws of Motion will be held this Friday.', created_at: new Date(Date.now() - 86400000).toISOString() },
-                ])
-                setMeetings([
-                    { id: '1', title: 'Doubt Clearing Session', status: 'scheduled', scheduled_at: new Date(Date.now() + 86400000).toISOString(), meeting_link: 'https://meet.ensurestudy.com/abc123' }
-                ])
+                // Fetch meetings from API (CRITICAL - for live meeting display)
+                try {
+                    console.log('Fetching meetings for classroom:', classroomId)
+                    const meetingsRes = await fetch(`${getApiBaseUrl()}/api/classroom/${classroomId}/meetings`, {
+                        headers: {
+                            'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
+                        }
+                    })
+                    if (meetingsRes.ok) {
+                        const meetingsData = await meetingsRes.json()
+                        console.log('Fetched meetings:', meetingsData)
+                        setMeetings(meetingsData.meetings || [])
+                    }
+                } catch (e) {
+                    console.error('Failed to fetch meetings:', e)
+                }
+
+                // Fetch announcements from API (optional - may not exist)
+                try {
+                    const announcementsRes = await fetch(`${getApiBaseUrl()}/api/classroom/${classroomId}/announcements`, {
+                        headers: {
+                            'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
+                        }
+                    })
+                    if (announcementsRes.ok) {
+                        const announcementsData = await announcementsRes.json()
+                        setAnnouncements(announcementsData.announcements || [])
+                    }
+                } catch (e) {
+                    console.error('Failed to fetch announcements:', e)
+                }
             } else {
                 alert('Classroom not found')
                 router.push('/teacher/dashboard')
@@ -338,52 +370,101 @@ export default function TeacherClassroomDetailPage() {
         alert('Announcement posted!')
     }
 
-    const startMeeting = () => {
+    const startMeeting = async () => {
         if (!meetTitle.trim()) {
             alert('Enter meeting title')
             return
         }
-        const meeting: Meeting = {
-            id: Date.now().toString(),
-            title: meetTitle,
-            status: 'live',
-            started_at: new Date().toISOString(),
-            meeting_link: `https://meet.ensurestudy.com/${classroomId}-${Date.now()}`
+
+        try {
+            // Create meeting via API
+            const res = await fetch(`${getApiBaseUrl()}/api/classroom/${classroomId}/meetings`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${localStorage.getItem('accessToken')}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    title: meetTitle
+                })
+            })
+
+            if (!res.ok) {
+                const error = await res.json()
+                alert(`Failed to create meeting: ${error.error || 'Unknown error'}`)
+                return
+            }
+
+            const data = await res.json()
+            const meeting: Meeting = {
+                id: data.meeting.id,
+                title: data.meeting.title,
+                status: 'scheduled',
+                scheduled_at: data.meeting.scheduled_at,
+                meeting_link: data.meeting.meeting_link
+            }
+
+            setMeetings([meeting, ...meetings])
+            setShowMeetModal(false)
+            setMeetTitle('')
+
+            // Start the meeting
+            await fetch(`${getApiBaseUrl()}/api/meeting/${meeting.id}/start`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
+                }
+            })
+
+            // Update local state
+            setMeetings(prev => prev.map(m =>
+                m.id === meeting.id ? { ...m, status: 'live' as const, started_at: new Date().toISOString() } : m
+            ))
+
+            // Navigate to meeting in same tab
+            router.push(`/meet/${meeting.id}`)
+
+        } catch (error) {
+            console.error('Failed to create meeting:', error)
+            alert('Failed to create meeting. Please try again.')
         }
-        setMeetings([meeting, ...meetings])
-        setShowMeetModal(false)
-        setMeetTitle('')
-        // Open meeting in new tab
-        window.open(meeting.meeting_link, '_blank')
     }
 
     const endMeeting = async (id: string) => {
         const meeting = meetings.find(m => m.id === id)
         if (!meeting) return
 
-        // Simulate processing recording and transcript
-        const endTime = new Date()
-        const startTime = meeting.started_at ? new Date(meeting.started_at) : endTime
-        const durationMs = endTime.getTime() - startTime.getTime()
-        const durationMinutes = Math.max(1, Math.round(durationMs / 60000))
+        try {
+            // Call backend API to end meeting
+            const res = await fetch(`${getApiBaseUrl()}/api/meeting/${id}/end`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
+                }
+            })
 
-        // In production, this would call the backend API to:
-        // 1. Stop the recording
-        // 2. Process and save video to storage
-        // 3. Generate transcript using speech-to-text
-        // 4. Store in database
+            if (!res.ok) {
+                const error = await res.json()
+                alert(`Failed to end meeting: ${error.error || 'Unknown error'}`)
+                return
+            }
 
-        const updatedMeeting: Meeting = {
-            ...meeting,
-            status: 'ended' as const,
-            ended_at: endTime.toISOString(),
-            duration_minutes: durationMinutes,
-            recording_url: `https://storage.ensurestudy.com/recordings/${classroomId}/${id}.webm`,
-            transcript: `[Auto-generated transcript for "${meeting.title}"]\n\nThis meeting lasted ${durationMinutes} minute(s).\n\nTranscript processing is in progress. The full transcript will be available shortly after AI processing is complete.\n\nKey topics discussed:\n• Introduction and attendance\n• Main lesson content\n• Q&A session\n• Summary and homework`
+            const data = await res.json()
+
+            // Update local state with response from server
+            setMeetings(meetings.map(m => m.id === id ? {
+                ...m,
+                status: 'ended' as const,
+                ended_at: data.meeting.ended_at,
+                duration_minutes: data.meeting.duration_minutes
+            } : m))
+
+            alert('Meeting ended! Recording will be processed.')
+
+        } catch (error) {
+            console.error('Failed to end meeting:', error)
+            alert('Failed to end meeting. Please try again.')
         }
-
-        setMeetings(meetings.map(m => m.id === id ? updatedMeeting : m))
-        alert(`Meeting ended! Recording saved and transcript is being generated.`)
     }
 
     const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1004,6 +1085,82 @@ export default function TeacherClassroomDetailPage() {
             {/* Meet Tab */}
             {activeTab === 'meet' && (
                 <div className="space-y-4">
+                    {/* Meeting Query Card */}
+                    <div className="card bg-gradient-to-r from-purple-50 to-pink-50 border-purple-200">
+                        <div className="flex items-center gap-3 mb-4">
+                            <div className="p-2 bg-gradient-to-br from-purple-500 to-pink-500 rounded-xl">
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 text-white">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456Z" />
+                                </svg>
+                            </div>
+                            <div>
+                                <h3 className="font-semibold text-gray-900">Ask About Meetings</h3>
+                                <p className="text-xs text-gray-500">Query past meeting content using AI</p>
+                            </div>
+                        </div>
+                        <div className="flex gap-2">
+                            <input
+                                type="text"
+                                value={meetingQuery}
+                                onChange={(e) => setMeetingQuery(e.target.value)}
+                                onKeyDown={async (e) => {
+                                    if (e.key === 'Enter' && meetingQuery.trim()) {
+                                        setQueryLoading(true)
+                                        try {
+                                            const res = await fetch(`${getApiBaseUrl().replace(':8000', ':8001')}/api/meetings/query`, {
+                                                method: 'POST',
+                                                headers: { 'Content-Type': 'application/json' },
+                                                body: JSON.stringify({ classroom_id: classroomId, query: meetingQuery })
+                                            })
+                                            if (res.ok) {
+                                                const data = await res.json()
+                                                setQueryAnswer({ answer: data.answer, sources: data.sources })
+                                            }
+                                        } catch (err) { console.error(err) }
+                                        setQueryLoading(false)
+                                    }
+                                }}
+                                placeholder="What was discussed about Newton's laws?"
+                                className="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500"
+                            />
+                            <button
+                                onClick={async () => {
+                                    if (!meetingQuery.trim()) return
+                                    setQueryLoading(true)
+                                    try {
+                                        const res = await fetch(`${getApiBaseUrl().replace(':8000', ':8001')}/api/meetings/query`, {
+                                            method: 'POST',
+                                            headers: { 'Content-Type': 'application/json' },
+                                            body: JSON.stringify({ classroom_id: classroomId, query: meetingQuery })
+                                        })
+                                        if (res.ok) {
+                                            const data = await res.json()
+                                            setQueryAnswer({ answer: data.answer, sources: data.sources })
+                                        }
+                                    } catch (err) { console.error(err) }
+                                    setQueryLoading(false)
+                                }}
+                                disabled={queryLoading}
+                                className="px-4 py-2.5 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-xl hover:from-purple-700 hover:to-pink-700 disabled:opacity-50"
+                            >
+                                {queryLoading ? 'Searching...' : 'Ask'}
+                            </button>
+                        </div>
+                        {queryAnswer && (
+                            <div className="mt-4 p-4 bg-white rounded-xl border border-gray-200">
+                                <p className="text-gray-800 whitespace-pre-wrap">{queryAnswer.answer}</p>
+                                {queryAnswer.sources.length > 0 && (
+                                    <div className="mt-3 pt-3 border-t border-gray-100">
+                                        <p className="text-xs text-gray-500 mb-1">Sources:</p>
+                                        {queryAnswer.sources.map((s, i) => (
+                                            <p key={i} className="text-xs text-gray-400">"{s.text}"</p>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </div>
+
                     <button onClick={() => setShowMeetModal(true)} className="btn-primary flex items-center gap-2">
                         <PlusIcon className="w-5 h-5" />
                         Start New Meeting
@@ -1043,18 +1200,25 @@ export default function TeacherClassroomDetailPage() {
                                         <div className="flex gap-2">
                                             {m.status === 'live' && (
                                                 <>
-                                                    <a href={m.meeting_link} target="_blank" className="btn-primary text-sm flex items-center gap-1">
+                                                    <button onClick={() => router.push(`/meet/${m.id}`)} className="btn-primary text-sm flex items-center gap-1">
                                                         <PlayIcon className="w-4 h-4" /> Join
-                                                    </a>
+                                                    </button>
                                                     <button onClick={() => endMeeting(m.id)} className="px-3 py-2 bg-red-100 text-red-700 rounded-lg text-sm">
                                                         End
                                                     </button>
                                                 </>
                                             )}
                                             {m.status === 'scheduled' && (
-                                                <button onClick={() => {
+                                                <button onClick={async () => {
+                                                    // Start the meeting via API
+                                                    await fetch(`${getApiBaseUrl()}/api/meeting/${m.id}/start`, {
+                                                        method: 'POST',
+                                                        headers: {
+                                                            'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
+                                                        }
+                                                    })
                                                     setMeetings(meetings.map(mt => mt.id === m.id ? { ...mt, status: 'live' as const, started_at: new Date().toISOString() } : mt))
-                                                    window.open(m.meeting_link, '_blank')
+                                                    router.push(`/meet/${m.id}`)
                                                 }} className="btn-primary text-sm">
                                                     Start Now
                                                 </button>

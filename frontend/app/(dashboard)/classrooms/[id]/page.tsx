@@ -241,26 +241,36 @@ export default function StudentClassroomDetailPage() {
                 setMaterials(materialsData.materials || [])
             }
 
-            setAnnouncements([
-                { id: '1', message: 'Welcome to the class! Please review Chapter 5 notes before our next session.', created_at: new Date().toISOString() },
-                { id: '2', message: 'Quiz on Laws of Motion will be held this Friday.', created_at: new Date(Date.now() - 86400000).toISOString() },
-            ])
-
-            setMeetings([
-                { id: '1', title: 'Doubt Clearing Session', status: 'live', started_at: new Date(Date.now() - 1800000).toISOString(), meeting_link: 'https://meet.ensurestudy.com/abc123' },
-                { id: '2', title: 'Weekly Review', status: 'scheduled', scheduled_at: new Date(Date.now() + 86400000).toISOString(), meeting_link: 'https://meet.ensurestudy.com/def456' },
-                {
-                    id: '3',
-                    title: 'Chapter 5 - Laws of Motion',
-                    status: 'ended',
-                    started_at: new Date(Date.now() - 86400000).toISOString(),
-                    ended_at: new Date(Date.now() - 86400000 + 2700000).toISOString(),
-                    duration_minutes: 45,
-                    meeting_link: 'https://meet.ensurestudy.com/ghi789',
-                    recording_url: 'https://storage.ensurestudy.com/recordings/class-10a/lecture-5.webm',
-                    transcript: 'Lecture on Newton\'s Laws of Motion. Today we covered the first and second laws including examples and problem-solving techniques.'
+            // Fetch meetings from API first (most important for live meetings)
+            try {
+                const meetingsRes = await fetch(`${getApiBaseUrl()}/api/classroom/${classroomId}/meetings`, {
+                    headers: {
+                        'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
+                    }
+                })
+                if (meetingsRes.ok) {
+                    const meetingsData = await meetingsRes.json()
+                    console.log('Meetings data:', meetingsData)
+                    setMeetings(meetingsData.meetings || [])
                 }
-            ])
+            } catch (e) {
+                console.error('Failed to fetch meetings:', e)
+            }
+
+            // Fetch announcements from API (may not exist)
+            try {
+                const announcementsRes = await fetch(`${getApiBaseUrl()}/api/classroom/${classroomId}/announcements`, {
+                    headers: {
+                        'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
+                    }
+                })
+                if (announcementsRes.ok) {
+                    const announcementsData = await announcementsRes.json()
+                    setAnnouncements(announcementsData.announcements || [])
+                }
+            } catch (e) {
+                console.error('Failed to fetch announcements:', e)
+            }
         } catch (error) {
             console.error('Failed to fetch classroom:', error)
         } finally {
@@ -582,14 +592,18 @@ export default function StudentClassroomDetailPage() {
                                 <p className="text-sm text-red-100">{meetings.find(m => m.status === 'live')?.title}</p>
                             </div>
                         </div>
-                        <a
-                            href={meetings.find(m => m.status === 'live')?.meeting_link}
-                            target="_blank"
+                        <button
+                            onClick={() => {
+                                const liveMeeting = meetings.find(m => m.status === 'live')
+                                if (liveMeeting) {
+                                    router.push(`/meet/${liveMeeting.id}`)
+                                }
+                            }}
                             className="px-4 py-2 bg-white text-red-600 rounded-lg font-medium flex items-center gap-2"
                         >
                             <PlayIcon className="w-5 h-5" />
                             Join Now
-                        </a>
+                        </button>
                     </div>
                 </div>
             )}
@@ -800,14 +814,13 @@ export default function StudentClassroomDetailPage() {
                                             </div>
                                         </div>
                                         {m.status === 'live' && (
-                                            <a
-                                                href={m.meeting_link}
-                                                target="_blank"
+                                            <button
+                                                onClick={() => router.push(`/meet/${m.id}`)}
                                                 className="btn-primary text-sm flex items-center gap-2"
                                             >
                                                 <PlayIcon className="w-4 h-4" />
                                                 Join
-                                            </a>
+                                            </button>
                                         )}
                                     </div>
 

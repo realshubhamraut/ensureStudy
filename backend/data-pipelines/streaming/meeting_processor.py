@@ -2,20 +2,21 @@
 PySpark Meeting Processor - Big Data Pipeline for Meeting Recordings
 
 This job consumes recording events from Kafka and:
-1. Downloads the recording from storage
-2. Extracts audio and runs speech-to-text (Whisper)
-3. Generates summary using LLM
-4. Creates embeddings for vector search
-5. Stores results in MongoDB and Qdrant
-6. Publishes analytics to Cassandra
+1. Calls AI service for transcription (Whisper)
+2. Calls AI service for summary (Gemini)
+3. Creates embeddings and stores in Qdrant
+4. Stores results in MongoDB
+5. Stores analytics in Cassandra
 
 Run: spark-submit --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0 meeting_processor.py
 """
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import from_json, col, udf, current_timestamp
-from pyspark.sql.types import StructType, StructField, StringType, IntegerType, TimestampType
+from pyspark.sql.functions import from_json, col
+from pyspark.sql.types import StructType, StructField, StringType, IntegerType
 import json
 import os
+import requests
+from datetime import datetime
 
 # Initialize Spark with Kafka and MongoDB connectors
 spark = SparkSession.builder \
@@ -29,9 +30,13 @@ spark = SparkSession.builder \
 
 spark.sparkContext.setLogLevel("WARN")
 
-# Kafka configuration
+# Configuration
 KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
 KAFKA_TOPIC = "meeting-recordings"
+AI_SERVICE_URL = os.getenv("AI_SERVICE_URL", "http://localhost:8001")
+QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
+QDRANT_PORT = int(os.getenv("QDRANT_PORT", "6333"))
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 
 # Define schema for recording events
 recording_schema = StructType([
@@ -39,6 +44,7 @@ recording_schema = StructType([
     StructField("meeting_id", StringType(), True),
     StructField("recording_id", StringType(), True),
     StructField("timestamp", StringType(), True),
+    StructField("classroom_id", StringType(), True),
     StructField("data", StructType([
         StructField("storage_url", StringType(), True),
         StructField("duration_seconds", IntegerType(), True),
@@ -56,110 +62,216 @@ def process_recording_batch(df, epoch_id):
     print(f"Processing batch {epoch_id} with {df.count()} recordings")
     print(f"{'='*60}")
     
-    # Collect rows for processing
     rows = df.collect()
     
     for row in rows:
         meeting_id = row.meeting_id
         recording_id = row.recording_id
+        classroom_id = getattr(row, 'classroom_id', None) or 'unknown'
         storage_url = row.data.storage_url if row.data else None
         duration = row.data.duration_seconds if row.data else 0
         
         print(f"\n📼 Processing: Meeting {meeting_id[:8]}...")
         print(f"   Recording: {recording_id[:8]}...")
+        print(f"   Classroom: {classroom_id[:8] if classroom_id else 'N/A'}...")
         print(f"   Duration: {duration // 60}m {duration % 60}s")
         print(f"   URL: {storage_url}")
         
-        # Step 1: Download recording (placeholder)
-        print("   [1/5] Downloading recording...")
-        # In production: download from S3/GCS
+        if not storage_url:
+            print("   ❌ No storage URL provided, skipping")
+            continue
         
-        # Step 2: Extract audio and transcribe
-        print("   [2/5] Running speech-to-text...")
-        # In production: Use Whisper API or local model
-        transcript = generate_mock_transcript(meeting_id, duration)
-        
-        # Step 3: Generate summary
-        print("   [3/5] Generating summary...")
-        # In production: Call LLM API
-        summary = generate_mock_summary(transcript)
-        
-        # Step 4: Create embeddings
-        print("   [4/5] Creating embeddings...")
-        # In production: Use embedding model
-        
-        # Step 5: Store in MongoDB
-        print("   [5/5] Storing in MongoDB...")
-        store_transcript(meeting_id, recording_id, transcript, summary)
-        
-        print(f"   ✅ Processing complete for {meeting_id[:8]}...")
+        try:
+            # Step 1: Call AI service for transcription
+            print("   [1/4] Calling AI service for transcription...")
+            transcript_response = requests.post(
+                f"{AI_SERVICE_URL}/api/meetings/transcribe",
+                json={
+                    "meeting_id": meeting_id,
+                    "recording_url": storage_url,
+                    "duration_seconds": duration
+                },
+                timeout=300
+            )
+            
+            if transcript_response.status_code != 200:
+                print(f"   ❌ Transcription failed: {transcript_response.text}")
+                continue
+                
+            transcript_data = transcript_response.json()
+            transcript = transcript_data.get("transcript", "")
+            segments = transcript_data.get("segments", [])
+            
+            # Step 2: Call AI service for summary
+            print("   [2/4] Calling AI service for summarization...")
+            summary_response = requests.post(
+                f"{AI_SERVICE_URL}/api/meetings/summarize",
+                json={
+                    "meeting_id": meeting_id,
+                    "transcript": transcript
+                },
+                timeout=60
+            )
+            
+            if summary_response.status_code != 200:
+                print(f"   ⚠️ Summarization failed: {summary_response.text}")
+                summary = {}
+            else:
+                summary = summary_response.json()
+            
+            # Step 3: Create embeddings and store in Qdrant
+            print("   [3/4] Creating embeddings and storing in Qdrant...")
+            store_embeddings_in_qdrant(meeting_id, classroom_id, transcript, segments)
+            
+            # Step 4: Store analytics in Cassandra
+            print("   [4/4] Storing analytics in Cassandra...")
+            store_analytics_cassandra(meeting_id, classroom_id, duration, len(transcript.split()))
+            
+            print(f"   ✅ Processing complete for {meeting_id[:8]}...")
+            
+        except Exception as e:
+            print(f"   ❌ Processing failed: {e}")
 
 
-def generate_mock_transcript(meeting_id: str, duration_seconds: int) -> str:
-    """Generate a mock transcript for testing"""
-    return f"""[Meeting Transcript]
-Meeting ID: {meeting_id}
-Duration: {duration_seconds // 60} minutes
-
-00:00 - Teacher: Good morning everyone, let's begin today's session.
-00:15 - Teacher: Today we'll be covering the laws of motion.
-01:30 - Teacher: Newton's first law states that an object at rest stays at rest.
-03:00 - Student: Could you explain inertia more?
-03:30 - Teacher: Of course, inertia is the resistance to change in motion.
-05:00 - Teacher: Let's move on to Newton's second law, F=ma.
-08:00 - Teacher: For homework, please solve problems 1-10 in chapter 5.
-{duration_seconds // 60}:00 - Teacher: That concludes today's session. Any questions?
-"""
-
-
-def generate_mock_summary(transcript: str) -> dict:
-    """Generate a mock summary for testing"""
-    return {
-        "brief": "Lecture on Newton's Laws of Motion covering inertia and F=ma.",
-        "detailed": "The session covered Newton's laws of motion. The teacher explained the first law about inertia and objects at rest. Students asked questions about inertia which were addressed. The second law (F=ma) was also covered. Homework was assigned from chapter 5.",
-        "key_points": [
-            "Newton's first law - objects at rest stay at rest",
-            "Inertia is resistance to change in motion",
-            "Newton's second law - Force equals mass times acceleration",
-            "Homework: Chapter 5, problems 1-10"
-        ],
-        "topics_discussed": [
-            "Newton's Laws of Motion",
-            "Inertia",
-            "Force and Acceleration"
-        ],
-        "action_items": [
-            "Complete homework problems 1-10 from chapter 5"
-        ]
-    }
-
-
-def store_transcript(meeting_id: str, recording_id: str, transcript: str, summary: dict):
-    """Store transcript in MongoDB"""
-    # Create a DataFrame with the transcript data
-    transcript_data = [{
-        "meeting_id": meeting_id,
-        "recording_id": recording_id,
-        "full_transcript": transcript,
-        "summary": json.dumps(summary),
-        "status": "processed"
-    }]
+def store_embeddings_in_qdrant(meeting_id: str, classroom_id: str, transcript: str, segments: list):
+    """Create embeddings and store in Qdrant"""
+    if not OPENAI_API_KEY:
+        print("      ⚠️ OPENAI_API_KEY not set, skipping embeddings")
+        return
     
-    transcript_df = spark.createDataFrame(transcript_data)
-    
-    # Write to MongoDB
     try:
-        transcript_df.write \
-            .format("mongodb") \
-            .mode("append") \
-            .option("database", "ensure_study_meetings") \
-            .option("collection", "meeting_transcripts") \
-            .save()
-        print("   ✅ Transcript stored in MongoDB")
+        from qdrant_client import QdrantClient
+        from qdrant_client.models import PointStruct, VectorParams, Distance
+        
+        qdrant = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
+        
+        # Ensure collection exists
+        try:
+            qdrant.get_collection("meeting_chunks")
+        except:
+            qdrant.create_collection(
+                collection_name="meeting_chunks",
+                vectors_config=VectorParams(size=1536, distance=Distance.COSINE)
+            )
+        
+        # Chunk transcript
+        chunks = chunk_transcript(transcript, segments)
+        
+        # Get embeddings and store
+        points = []
+        for i, chunk in enumerate(chunks):
+            embedding = get_embedding(chunk["text"])
+            if embedding:
+                points.append(PointStruct(
+                    id=abs(hash(f"{meeting_id}_{i}")) % (10**10),
+                    vector=embedding,
+                    payload={
+                        "meeting_id": meeting_id,
+                        "classroom_id": classroom_id,
+                        "text": chunk["text"],
+                        "timestamp": chunk.get("timestamp", ""),
+                        "speaker": chunk.get("speaker", ""),
+                        "chunk_index": i
+                    }
+                ))
+        
+        if points:
+            qdrant.upsert(collection_name="meeting_chunks", points=points)
+            print(f"      ✅ Stored {len(points)} chunks in Qdrant")
+        
+    except ImportError:
+        print("      ⚠️ qdrant-client not installed")
     except Exception as e:
-        print(f"   ⚠️ MongoDB write failed: {e}")
-        # Fallback: log the data
-        print(f"   📝 Transcript logged: {len(transcript)} chars")
+        print(f"      ⚠️ Qdrant storage failed: {e}")
+
+
+def chunk_transcript(transcript: str, segments: list) -> list:
+    """Chunk transcript into smaller pieces for embedding"""
+    chunks = []
+    
+    if segments:
+        current_chunk = {"text": "", "speaker": "", "timestamp": ""}
+        for seg in segments:
+            if len(current_chunk["text"]) > 500:
+                chunks.append(current_chunk)
+                current_chunk = {"text": "", "speaker": "", "timestamp": ""}
+            
+            current_chunk["text"] += " " + seg.get("text", "")
+            current_chunk["speaker"] = seg.get("speaker", "")
+            current_chunk["timestamp"] = f"{seg.get('start', 0)}-{seg.get('end', 0)}"
+        
+        if current_chunk["text"]:
+            chunks.append(current_chunk)
+    else:
+        # Simple chunking by sentences
+        sentences = transcript.split(". ")
+        current_chunk = ""
+        for sentence in sentences:
+            if len(current_chunk) + len(sentence) > 500:
+                chunks.append({"text": current_chunk, "timestamp": "", "speaker": ""})
+                current_chunk = sentence
+            else:
+                current_chunk += ". " + sentence if current_chunk else sentence
+        if current_chunk:
+            chunks.append({"text": current_chunk, "timestamp": "", "speaker": ""})
+    
+    return chunks
+
+
+def get_embedding(text: str) -> list:
+    """Get embedding from OpenAI API"""
+    try:
+        response = requests.post(
+            "https://api.openai.com/v1/embeddings",
+            headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
+            json={"model": "text-embedding-3-small", "input": text},
+            timeout=30
+        )
+        if response.status_code == 200:
+            return response.json()["data"][0]["embedding"]
+        else:
+            print(f"      Embedding API error: {response.text}")
+    except Exception as e:
+        print(f"      Embedding error: {e}")
+    
+    return None
+
+
+def store_analytics_cassandra(meeting_id: str, classroom_id: str, duration: int, word_count: int):
+    """Store analytics in Cassandra"""
+    try:
+        from cassandra.cluster import Cluster
+        
+        cluster = Cluster([os.getenv("CASSANDRA_HOST", "localhost")])
+        session = cluster.connect()
+        
+        session.execute("""
+            CREATE KEYSPACE IF NOT EXISTS ensure_study
+            WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1}
+        """)
+        session.execute("USE ensure_study")
+        session.execute("""
+            CREATE TABLE IF NOT EXISTS meeting_analytics (
+                classroom_id text,
+                meeting_id text,
+                processed_at timestamp,
+                duration_seconds int,
+                word_count int,
+                PRIMARY KEY ((classroom_id), processed_at, meeting_id)
+            )
+        """)
+        
+        session.execute("""
+            INSERT INTO meeting_analytics (classroom_id, meeting_id, processed_at, duration_seconds, word_count)
+            VALUES (%s, %s, toTimestamp(now()), %s, %s)
+        """, (classroom_id, meeting_id, duration, word_count))
+        
+        print("      ✅ Analytics stored in Cassandra")
+        cluster.shutdown()
+    except ImportError:
+        print("      ⚠️ cassandra-driver not installed")
+    except Exception as e:
+        print(f"      ⚠️ Cassandra write failed: {e}")
 
 
 def main():
@@ -168,6 +280,9 @@ def main():
     print("="*60)
     print(f"Kafka: {KAFKA_BOOTSTRAP_SERVERS}")
     print(f"Topic: {KAFKA_TOPIC}")
+    print(f"AI Service: {AI_SERVICE_URL}")
+    print(f"Qdrant: {QDRANT_HOST}:{QDRANT_PORT}")
+    print(f"OpenAI Key: {'configured' if OPENAI_API_KEY else 'NOT SET'}")
     print("="*60 + "\n")
     
     # Read from Kafka

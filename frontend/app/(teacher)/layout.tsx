@@ -8,18 +8,21 @@ import {
     UsersIcon,
     AcademicCapIcon,
     DocumentTextIcon,
-    ChartBarIcon,
     Cog6ToothIcon,
     ArrowRightOnRectangleIcon,
     Bars3Icon,
     XMarkIcon,
-    ClipboardDocumentCheckIcon
+    ClipboardDocumentCheckIcon,
+    SparklesIcon,
+    ChatBubbleLeftRightIcon
 } from '@heroicons/react/24/outline'
 import clsx from 'clsx'
 
 const navigation = [
-    { name: 'Dashboard', href: '/teacher/dashboard', icon: ChartBarIcon },
-    { name: 'My Students', href: '/teacher/students', icon: AcademicCapIcon },
+    { name: 'AI Assistant', href: '/teacher/dashboard', icon: SparklesIcon },
+    { name: 'Classrooms', href: '/teacher/classrooms', icon: AcademicCapIcon },
+    { name: 'My Students', href: '/teacher/students', icon: UsersIcon },
+    { name: 'Interact', href: '/teacher/interact', icon: ChatBubbleLeftRightIcon },
     { name: 'Exam Evaluations', href: '/teacher/scan', icon: ClipboardDocumentCheckIcon },
     { name: 'Assessments', href: '/teacher/assessments', icon: DocumentTextIcon },
     { name: 'Settings', href: '/teacher/settings', icon: Cog6ToothIcon },
@@ -163,18 +166,30 @@ export default function TeacherLayout({
 
             {/* Main content */}
             <div className="flex-1 flex flex-col min-w-0 lg:ml-16">
-                {/* Top bar */}
-                <header className="sticky top-0 z-30 bg-white border-b border-gray-200 px-6 py-4 flex items-center gap-4">
+                {/* Top bar - hidden on dashboard */}
+                {pathname !== '/teacher/dashboard' && (
+                    <header className="sticky top-0 z-30 bg-white border-b border-gray-200 px-6 py-4 flex items-center gap-4">
+                        <button
+                            className="lg:hidden"
+                            onClick={() => setSidebarOpen(true)}
+                        >
+                            <Bars3Icon className="w-6 h-6" />
+                        </button>
+                        <h1 className="text-xl font-bold text-gray-900">
+                            {navigation.find(n => pathname?.startsWith(n.href))?.name || 'Teacher Portal'}
+                        </h1>
+                    </header>
+                )}
+
+                {/* Mobile menu button for dashboard */}
+                {pathname === '/teacher/dashboard' && (
                     <button
-                        className="lg:hidden"
+                        className="lg:hidden fixed top-4 left-4 z-30 p-2 bg-white rounded-lg shadow-md border border-gray-200"
                         onClick={() => setSidebarOpen(true)}
                     >
                         <Bars3Icon className="w-6 h-6" />
                     </button>
-                    <h1 className="text-xl font-bold text-gray-900">
-                        {navigation.find(n => pathname?.startsWith(n.href))?.name || 'Teacher Portal'}
-                    </h1>
-                </header>
+                )}
 
                 {/* Page content */}
                 <main className="flex-1 p-6 overflow-y-auto">
