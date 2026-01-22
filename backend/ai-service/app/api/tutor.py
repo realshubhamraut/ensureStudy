@@ -24,12 +24,25 @@ class ChatRequest(BaseModel):
 
 
 class ChatResponse(BaseModel):
-    """Chat response"""
+    """Chat response with TAL/ABCR metadata"""
     answer: str
     sources: List[Dict[str, Any]]
     session_id: str
     was_moderated: bool
     moderation_reason: Optional[str] = None
+    
+    # TAL - Topic Anchor
+    topic_anchor: Optional[Dict[str, Any]] = None  # {id, title}
+    
+    # ABCR - Context Routing
+    is_followup: bool = False
+    abcr_confidence: float = 0.0
+    confirm_new_topic: bool = False
+    
+    # MCP - Context Sources
+    context_sources: List[str] = []  # ['anchor', 'classroom', 'curated', 'web']
+    anchor_hits: int = 0
+    web_filtered_count: int = 0
 
 
 # Initialize agent
@@ -45,23 +58,39 @@ async def chat(
     Send a message to the AI tutor.
     
     Messages are moderated for academic content and answered with RAG.
+    Returns TAL/ABCR/MCP metadata for frontend integration.
     """
     try:
         result = await tutor_agent.execute({
             "query": request.message,
             "user_id": user_id,
             "session_id": request.session_id,
-            "student_context": request.context or {}
+            "classroom_id": request.context.get("classroom_id", "") if request.context else "",
+            "clicked_suggestion": request.context.get("clicked_suggestion", False) if request.context else False,
         })
         
         data = result.get("data", {})
+        session_id = result.get("session_id", request.session_id or "new")
         
         return ChatResponse(
             answer=data.get("answer", ""),
             sources=data.get("sources", []),
-            session_id=request.session_id or "new",
+            session_id=session_id,
             was_moderated=data.get("blocked", False),
-            moderation_reason=data.get("reason") if data.get("blocked") else None
+            moderation_reason=data.get("reason") if data.get("blocked") else None,
+            
+            # TAL
+            topic_anchor=data.get("topic_anchor"),
+            
+            # ABCR
+            is_followup=data.get("is_followup", False),
+            abcr_confidence=data.get("abcr_confidence", 0.0),
+            confirm_new_topic=data.get("confirm_new_topic", False),
+            
+            # MCP
+            context_sources=data.get("context_sources", []),
+            anchor_hits=data.get("anchor_hits", 0),
+            web_filtered_count=data.get("web_filtered_count", 0),
         )
     
     except Exception as e:

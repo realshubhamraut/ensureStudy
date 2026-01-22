@@ -141,3 +141,10 @@ AI-Powered-Video-Transcription-And-Summarization-main/
 Artificial-Intelligence-based-Online-Exam-Proctoring-System/
 AutoOEP/
 .env
+
+# Large datasets - use git lfs or download separately
+data/softskills-fluency/
+data/softskills-gestures/
+data/models-pretrained/
+*.parquet
+

@@ -6,7 +6,9 @@ from fastapi.middleware.cors import CORSMiddleware
 import time
 
 from .config import settings
-from .api.routes.tutor import router as tutor_router
+from .api.routes.tutor import router as tutor_router  # /api/ai-tutor (legacy)
+from .api.tutor import router as tutor_chat_router  # /api/tutor (new with TAL/ABCR/MCP)
+from .api.routes.anchor_routes import router as anchor_router
 from .api.routes.evaluation import router as evaluation_router
 from .api.routes.mock_interview import router as mock_interview_router
 from .api.routes.softskills import router as softskills_router
@@ -73,7 +75,9 @@ app.add_middleware(
 
 
 # Include routers
-app.include_router(tutor_router)
+app.include_router(tutor_router)  # /api/ai-tutor (legacy)
+app.include_router(tutor_chat_router)  # /api/tutor (new with TAL/ABCR/MCP)
+app.include_router(anchor_router)
 app.include_router(evaluation_router)
 app.include_router(mock_interview_router)
 app.include_router(softskills_router)
@@ -89,7 +93,9 @@ app.include_router(grading_router)
 
 @app.on_event("startup")
 async def startup_event():
-    """Log service startup."""
+    """Log service startup and optionally preload models."""
+    import os
+    
     log_startup(settings.APP_NAME, 8001)
     
     # Log configuration
@@ -98,6 +104,29 @@ async def startup_event():
     print(f"  LLM Model: {Colors.CYAN}{settings.LLM_MODEL}{Colors.RESET}")
     print(f"  Qdrant: {Colors.CYAN}{settings.QDRANT_HOST}:{settings.QDRANT_PORT}{Colors.RESET}")
     print(f"  Debug Mode: {Colors.CYAN}{settings.DEBUG}{Colors.RESET}")
+    
+    # Optional: Preload models for faster first request
+    if os.getenv("PRELOAD_MODELS", "false").lower() == "true":
+        print(f"\n{Colors.CYAN}Preloading models...{Colors.RESET}")
+        try:
+            # Preload embedding model
+            from sentence_transformers import SentenceTransformer
+            print(f"  Loading {settings.EMBEDDING_MODEL}...")
+            SentenceTransformer(settings.EMBEDDING_MODEL)
+            print(f"  {Colors.GREEN}✓ Embedding model loaded{Colors.RESET}")
+        except Exception as e:
+            print(f"  {Colors.RED}✗ Embedding model failed: {e}{Colors.RESET}")
+        
+        # Skip classifier preload if SKIP_MODERATION is set
+        if os.getenv("SKIP_MODERATION", "false").lower() != "true":
+            try:
+                from app.services.llm_provider import get_classifier
+                print(f"  Loading classifier (bart-large-mnli)...")
+                get_classifier()
+                print(f"  {Colors.GREEN}✓ Classifier loaded{Colors.RESET}")
+            except Exception as e:
+                print(f"  {Colors.RED}✗ Classifier failed: {e}{Colors.RESET}")
+    
     print()
 
 

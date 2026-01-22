@@ -26,6 +26,7 @@ python-dotenv>=1.0.0
 
 # Web Resource Fetching (FREE, no API keys)
 youtube-search-python>=1.6.6  # YouTube video search
+youtube-transcript-api>=0.6.0 # YouTube video transcripts
 duckduckgo-search>=4.1.1      # Web images and articles
 aiohttp>=3.9.0                # Async HTTP client
 
