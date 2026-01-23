@@ -8,6 +8,7 @@ import time
 from .config import settings
 from .api.routes.tutor import router as tutor_router  # /api/ai-tutor (legacy)
 from .api.tutor import router as tutor_chat_router  # /api/tutor (new with TAL/ABCR/MCP)
+from .api.routes.chat import router as pdf_chat_router  # /api/tutor/chat (PDF-specific)
 from .api.routes.anchor_routes import router as anchor_router
 from .api.routes.evaluation import router as evaluation_router
 from .api.routes.mock_interview import router as mock_interview_router
@@ -65,10 +66,11 @@ async def log_requests(request: Request, call_next):
 
 
 # CORS middleware - allow all origins for LAN access
+# Note: When using allow_origins=["*"], credentials must be False
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # Allow all origins for LAN access
-    allow_credentials=True,
+    allow_credentials=False,  # Must be False when using wildcard origin
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -77,6 +79,7 @@ app.add_middleware(
 # Include routers
 app.include_router(tutor_router)  # /api/ai-tutor (legacy)
 app.include_router(tutor_chat_router)  # /api/tutor (new with TAL/ABCR/MCP)
+app.include_router(pdf_chat_router)  # /api/tutor/chat (PDF-specific)
 app.include_router(anchor_router)
 app.include_router(evaluation_router)
 app.include_router(mock_interview_router)

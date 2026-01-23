@@ -131,6 +131,35 @@ def _generate_topic_flowchart(question: str, answer: str, subject: Optional[str]
     style Interphase fill:#e3f2fd,stroke:#2196f3
     style TwoCells fill:#c8e6c9,stroke:#4caf50"""
     
+    # French Revolution
+    if 'french revolution' in question_lower or ('french' in question_lower and 'revolution' in question_lower):
+        return """graph TD
+    Causes[🏛️ Causes of French Revolution]
+    
+    Causes --> Financial[💰 Financial Crisis<br/>Heavy debts, poor economy]
+    Causes --> Social[👥 Social Inequality<br/>Three Estates System]
+    Causes --> Political[⚖️ Political Issues<br/>Absolute monarchy]
+    Causes --> Ideas[💡 Enlightenment Ideas<br/>Liberty, equality, democracy]
+    
+    Financial --> Unrest[Popular Unrest]
+    Social --> Unrest
+    Political --> Unrest
+    Ideas --> Unrest
+    
+    Unrest --> Bastille[🏰 Storming of Bastille<br/>July 14, 1789]
+    Bastille --> DeclarationRights[📜 Declaration of Rights of Man]
+    DeclarationRights --> EndMonarchy[👑 End of Absolute Monarchy]
+    EndMonarchy --> Republic[🇫🇷 French Republic]
+    
+    subgraph Effects [Key Outcomes]
+    Republic --> Liberty[Liberty & Equality]
+    Republic --> Nationalism[Rise of Nationalism]
+    Republic --> Napoleon[Napoleon's Rise]
+    end
+    
+    style Causes fill:#fff3e0,stroke:#ff9800,stroke-width:2px
+    style Effects fill:#e3f2fd,stroke:#2196f3,stroke-width:2px"""
+    
     # Water Cycle
     if 'water cycle' in question_lower:
         return """graph TD

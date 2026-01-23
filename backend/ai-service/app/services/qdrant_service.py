@@ -121,7 +121,7 @@ class QdrantService:
     
     def __init__(self, collection_name: str = None):
         self.collection_name = collection_name or os.getenv(
-            "QDRANT_COLLECTION", "classroom_documents"
+            "QDRANT_COLLECTION_NAME", "classroom_materials"
         )
         
         # Initialize Qdrant client
@@ -380,24 +380,47 @@ class QdrantService:
         
         query_filter = Filter(must=must_conditions)
         
-        # Execute search
+        # Execute search - use query_points instead of deprecated search()
         start_time = time.time()
         
-        results = self.client.search(
-            collection_name=self.collection_name,
-            query_vector=query_embedding,
-            query_filter=query_filter,
-            limit=top_k * 2,  # Get more for reranking
-            score_threshold=score_threshold,
-            with_payload=True,
-            with_vectors=False
-        )
+        from qdrant_client.models import QueryRequest
+        
+        print(f"[Qdrant] Searching collection: {self.collection_name}")
+        print(f"[Qdrant] Filter conditions: {len(must_conditions)}")
+        print(f"[Qdrant] Score threshold: {score_threshold}, Limit: {top_k * 2}")
+        
+        try:
+            query_result = self.client.query_points(
+                collection_name=self.collection_name,
+                query=query_embedding,
+                query_filter=query_filter,
+                limit=top_k * 2,  # Get more for reranking
+                score_threshold=score_threshold,
+                with_payload=True,
+            )
+            
+            # Extract points from QueryResponse
+            results = query_result.points if hasattr(query_result, 'points') else []
+            print(f"[Qdrant] Raw results: {len(results)}")
+            if results:
+                print(f"[Qdrant] Top score: {results[0].score}")
+        except Exception as e:
+            print(f"[Qdrant] Query error: {e}")
+            return []
         
         search_time = int((time.time() - start_time) * 1000)
         logger.debug(f"[Qdrant] Search completed in {search_time}ms, found {len(results)} results")
         
-        # Apply reranking
-        reranked = self._rerank_results(results)[:top_k]
+        # Apply reranking - convert ScoredPoint to dict for _rerank_results
+        results_for_rerank = [
+            {
+                "point_id": r.id,
+                "vector_score": r.score,
+                "payload": r.payload
+            }
+            for r in results
+        ]
+        reranked = self._rerank_results(results_for_rerank)[:top_k]
         
         # Convert to SearchResult objects
         search_results = [
@@ -567,8 +590,13 @@ class QdrantService:
         reranked = []
         
         for r in results:
-            payload = r.payload
-            vector_score = r.score
+            # Handle both dict (from our preparation) and object (from Qdrant)
+            if isinstance(r, dict):
+                payload = r.get("payload", {})
+                vector_score = r.get("vector_score", r.get("score", 0))
+            else:
+                payload = r.payload if hasattr(r, "payload") else {}
+                vector_score = r.score if hasattr(r, "score") else 0
             
             # Get source confidence
             source_confidence = payload.get("source_confidence", 0.7)
@@ -590,8 +618,14 @@ class QdrantService:
                 recency_boost = self._calculate_recency_boost(created_at)
                 final_score *= recency_boost
             
+            # Get point_id - handle both dict and object
+            if isinstance(r, dict):
+                point_id = r.get("point_id", r.get("id", ""))
+            else:
+                point_id = r.id if hasattr(r, "id") else ""
+            
             reranked.append({
-                "point_id": r.id,
+                "point_id": point_id,
                 "vector_score": vector_score,
                 "final_score": final_score,
                 "payload": payload

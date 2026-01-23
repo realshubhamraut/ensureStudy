@@ -48,10 +48,12 @@ async def update_material_status(
     error: Optional[str] = None
 ):
     """Update material indexing status in core service."""
+    import os
+    core_service_url = os.getenv("CORE_SERVICE_URL", "http://localhost:9000")
     try:
         async with httpx.AsyncClient() as client:
             response = await client.put(
-                f"http://localhost:8000/api/classroom/materials/{material_id}/status",
+                f"{core_service_url}/api/classroom/materials/{material_id}/status",
                 json={
                     "indexing_status": status,
                     "chunk_count": chunk_count,

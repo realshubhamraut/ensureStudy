@@ -34,7 +34,7 @@ class DocumentProcessor:
         )
         
         self.qdrant_client = get_qdrant_client()
-        self.collection_name = os.getenv("QDRANT_COLLECTION_NAME", "ensure_study_documents")
+        self.collection_name = os.getenv("QDRANT_COLLECTION_NAME", "classroom_materials")
     
     def load_text_file(self, file_path: str) -> str:
         """Load content from a text file"""

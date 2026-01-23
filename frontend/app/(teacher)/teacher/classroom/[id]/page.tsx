@@ -566,9 +566,25 @@ export default function TeacherClassroomDetailPage() {
         setUploadSubject('')
     }
 
-    const deleteMaterial = (id: string) => {
-        if (confirm('Delete this file?')) {
-            setMaterials(materials.filter(m => m.id !== id))
+    const deleteMaterial = async (id: string) => {
+        if (!confirm('Delete this file?')) return
+
+        try {
+            const res = await fetch(`${getApiBaseUrl()}/api/classroom/${classroomId}/materials/${id}`, {
+                method: 'DELETE',
+                headers: {
+                    'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
+                }
+            })
+
+            if (res.ok) {
+                setMaterials(materials.filter(m => m.id !== id))
+            } else {
+                alert('Failed to delete material')
+            }
+        } catch (error) {
+            console.error('Delete failed:', error)
+            alert('Failed to delete material')
         }
     }
 
@@ -1578,7 +1594,7 @@ export default function TeacherClassroomDetailPage() {
 
             {/* Syllabus PDF View Modal - Using PDFViewer */}
             {showSyllabusModal && classroom?.syllabus_url && (
-                <div className="fixed inset-0 bg-black/90 z-50 flex flex-col">
+                <div className="fixed top-0 left-0 right-0 bottom-0 bg-black z-[100] flex flex-col" style={{ margin: 0, padding: 0 }}>
                     <PDFViewer
                         pdfUrl={classroom.syllabus_url}
                         title={classroom.syllabus_filename || 'Class Syllabus'}
@@ -1922,9 +1938,9 @@ export default function TeacherClassroomDetailPage() {
                 </div>
             )}
 
-            {/* Document Viewer Modal */}
+            {/* Document Viewer Modal - Full screen overlay */}
             {showDocumentViewer && viewingDocument && (
-                <div className="fixed inset-0 bg-black/90 z-50 flex flex-col">
+                <div className="fixed top-0 left-0 right-0 bottom-0 bg-black z-[100] flex flex-col" style={{ margin: 0, padding: 0 }}>
                     {/* Header */}
                     <div className="flex items-center justify-between px-4 py-3 bg-gray-900 border-b border-gray-800">
                         <div className="flex items-center gap-3">

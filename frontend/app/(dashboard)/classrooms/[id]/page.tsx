@@ -715,14 +715,7 @@ export default function StudentClassroomDetailPage() {
                             Study Materials
                         </h2>
                         <div className="flex items-center gap-2 flex-wrap">
-                            {/* INTEGRATION NOTE: Added upload document button */}
-                            <button
-                                onClick={() => setShowDocumentUploadModal(true)}
-                                className="px-3 py-1.5 text-sm rounded-lg font-medium bg-primary-600 text-white hover:bg-primary-700 flex items-center gap-2 transition-colors"
-                            >
-                                <CloudArrowUpIcon className="w-4 h-4" />
-                                Upload Document
-                            </button>
+                            {/* Upload button removed - only teachers can upload materials */}
                             {['all', 'today', 'yesterday', 'week'].map((f) => (
                                 <button
                                     key={f}
@@ -1378,12 +1371,12 @@ export default function StudentClassroomDetailPage() {
                 </div>
             )}
 
-            {/* AI Q&A for Recordings */}
-            {typeof window !== 'undefined' && (
+            {/* AI Q&A for Recordings - Only show on sessions tab */}
+            {activeTab === 'sessions' && typeof window !== 'undefined' && (
                 <MeetingQA
                     classroomId={classroomId}
                     accessToken={localStorage.getItem('accessToken') || ''}
-                    aiServiceUrl={process.env.NEXT_PUBLIC_AI_SERVICE_URL || 'http://localhost:8001'}
+                    aiServiceUrl={process.env.NEXT_PUBLIC_AI_SERVICE_URL || 'http://localhost:9001'}
                 />
             )}
 
@@ -1843,80 +1836,101 @@ export default function StudentClassroomDetailPage() {
                 </div>
             )}
 
-            {/* Document Viewer Modal */}
+            {/* Document Viewer Modal - Full screen overlay */}
             {showDocumentViewer && viewingDocument && (
-                <div className="fixed inset-0 bg-black/90 z-50 flex flex-col">
-                    {/* Header */}
-                    <div className="flex items-center justify-between px-4 py-3 bg-gray-900 border-b border-gray-800">
-                        <div className="flex items-center gap-3">
-                            <DocumentTextIcon className="w-6 h-6 text-primary-400" />
-                            <div>
-                                <h2 className="text-white font-medium">{viewingDocument.name}</h2>
-                                <p className="text-gray-400 text-sm">{formatSize(viewingDocument.size)}</p>
+                <div className="fixed top-0 left-0 right-0 bottom-0 bg-black z-[100] flex flex-col" style={{ margin: 0, padding: 0 }}>
+                    {viewingDocument.type.includes('pdf') ? (
+                        /* For PDFs, use PDFViewer which has its own header */
+                        <PDFViewer
+                            pdfUrl={viewingDocument.url}
+                            title={viewingDocument.name}
+                            fileSize={viewingDocument.size}
+                            materialId={viewingDocument.id}
+                            classroomId={classroomId}
+                            onClose={() => {
+                                setShowDocumentViewer(false)
+                                setViewingDocument(null)
+                            }}
+                        />
+                    ) : (
+                        /* For other files, show the header + content */
+                        <>
+                            <div className="flex items-center justify-between px-4 py-3 bg-gray-900 border-b border-gray-800">
+                                <div className="flex items-center gap-3">
+                                    <DocumentTextIcon className="w-5 h-5 text-primary-400" />
+                                    <span className="text-white font-medium truncate max-w-[300px]">{viewingDocument.name}</span>
+                                    <span className="text-gray-500 text-sm">{formatSize(viewingDocument.size)}</span>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <button
+                                        onClick={() => window.open(viewingDocument.url, '_blank')}
+                                        className="px-3 py-1.5 text-sm text-gray-300 hover:text-white hover:bg-gray-700 rounded flex items-center gap-1.5"
+                                        title="Open in new tab"
+                                    >
+                                        <EyeIcon className="w-4 h-4" />
+                                        <span className="hidden sm:inline">Open in Tab</span>
+                                    </button>
+                                    <button
+                                        onClick={() => {
+                                            const link = document.createElement('a')
+                                            link.href = viewingDocument.url
+                                            link.download = viewingDocument.name
+                                            link.click()
+                                        }}
+                                        className="px-3 py-1.5 text-sm text-gray-300 hover:text-white hover:bg-gray-700 rounded flex items-center gap-1.5"
+                                        title="Download"
+                                    >
+                                        <ArrowDownTrayIcon className="w-4 h-4" />
+                                        <span className="hidden sm:inline">Download</span>
+                                    </button>
+                                    <div className="w-px h-6 bg-gray-700 mx-1" />
+                                    <button
+                                        onClick={() => {
+                                            setShowDocumentViewer(false)
+                                            setViewingDocument(null)
+                                        }}
+                                        className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded"
+                                    >
+                                        <XMarkIcon className="w-5 h-5" />
+                                    </button>
+                                </div>
                             </div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                            <button
-                                onClick={() => window.open(viewingDocument.url, '_blank')}
-                                className="px-3 py-1.5 text-sm bg-gray-700 hover:bg-gray-600 text-white rounded-lg flex items-center gap-2"
-                            >
-                                <ArrowDownTrayIcon className="w-4 h-4" />
-                                Download
-                            </button>
-                            <button
-                                onClick={() => {
-                                    setShowDocumentViewer(false)
-                                    setViewingDocument(null)
-                                }}
-                                className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg"
-                            >
-                                <XMarkIcon className="w-6 h-6" />
-                            </button>
-                        </div>
-                    </div>
 
-                    {/* Content */}
-                    <div className="flex-1 overflow-hidden">
-                        {viewingDocument.type.includes('pdf') ? (
-                            <PDFViewer
-                                pdfUrl={viewingDocument.url}
-                                title={viewingDocument.name}
-                                onClose={() => {
-                                    setShowDocumentViewer(false)
-                                    setViewingDocument(null)
-                                }}
-                            />
-                        ) : viewingDocument.type.includes('image') ? (
-                            <ImageViewer
-                                imageUrl={viewingDocument.url}
-                                title={viewingDocument.name}
-                                onClose={() => {
-                                    setShowDocumentViewer(false)
-                                    setViewingDocument(null)
-                                }}
-                            />
-                        ) : viewingDocument.type.includes('video') ? (
-                            <div className="flex items-center justify-center h-full p-8">
-                                <video
-                                    src={viewingDocument.url}
-                                    controls
-                                    className="max-w-full max-h-full rounded-lg shadow-2xl"
-                                />
+                            {/* Content */}
+                            <div className="flex-1 overflow-hidden">
+                                {viewingDocument.type.includes('image') ? (
+                                    <ImageViewer
+                                        imageUrl={viewingDocument.url}
+                                        title={viewingDocument.name}
+                                        onClose={() => {
+                                            setShowDocumentViewer(false)
+                                            setViewingDocument(null)
+                                        }}
+                                    />
+                                ) : viewingDocument.type.includes('video') ? (
+                                    <div className="flex items-center justify-center h-full p-8">
+                                        <video
+                                            src={viewingDocument.url}
+                                            controls
+                                            className="max-w-full max-h-full rounded-lg shadow-2xl"
+                                        />
+                                    </div>
+                                ) : (
+                                    <div className="flex flex-col items-center justify-center h-full text-center">
+                                        <DocumentTextIcon className="w-16 h-16 text-gray-500 mb-4" />
+                                        <p className="text-gray-400 mb-4">Preview not available for this file type</p>
+                                        <button
+                                            onClick={() => window.open(viewingDocument.url, '_blank')}
+                                            className="px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg flex items-center gap-2"
+                                        >
+                                            <ArrowDownTrayIcon className="w-5 h-5" />
+                                            Download to view
+                                        </button>
+                                    </div>
+                                )}
                             </div>
-                        ) : (
-                            <div className="flex flex-col items-center justify-center h-full text-center">
-                                <DocumentTextIcon className="w-16 h-16 text-gray-500 mb-4" />
-                                <p className="text-gray-400 mb-4">Preview not available for this file type</p>
-                                <button
-                                    onClick={() => window.open(viewingDocument.url, '_blank')}
-                                    className="px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg flex items-center gap-2"
-                                >
-                                    <ArrowDownTrayIcon className="w-5 h-5" />
-                                    Download to view
-                                </button>
-                            </div>
-                        )}
-                    </div>
+                        </>
+                    )}
                 </div>
             )}
         </div>

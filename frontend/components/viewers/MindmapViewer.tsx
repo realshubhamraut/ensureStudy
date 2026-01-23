@@ -11,7 +11,7 @@ interface MindmapViewerProps {
 export function MindmapViewer({ code, title }: MindmapViewerProps) {
     const containerRef = useRef<HTMLDivElement>(null)
     const [error, setError] = useState<string | null>(null)
-    const [zoom, setZoom] = useState(100)
+    const [zoom, setZoom] = useState(225)
 
     // Pan/drag state
     const [pan, setPan] = useState({ x: 0, y: 0 })

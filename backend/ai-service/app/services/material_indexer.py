@@ -264,18 +264,34 @@ class MaterialIndexer:
                 filters={"source_type": SourceType.TEACHER_MATERIAL.value}
             )
             
-            return [
-                {
-                    "chunk_text": r.payload.get("chunk_text", ""),
-                    "document_id": r.payload.get("document_id", ""),
-                    "title": r.payload.get("title", ""),
-                    "page_number": r.payload.get("page_number", 0),
-                    "similarity_score": r.final_score,
-                    "url": r.payload.get("url", ""),
-                    "subject": r.payload.get("subject", "")
-                }
-                for r in results
-            ]
+            # Handle both dataclass (fresh) and dict (from cache) results
+            print(f"[INDEXER] search_semantic returned {len(results)} results, type: {type(results)}")
+            if results:
+                print(f"[INDEXER] First result type: {type(results[0])}")
+                if hasattr(results[0], '__dict__'):
+                    print(f"[INDEXER] First result attrs: {list(results[0].__dict__.keys()) if hasattr(results[0], '__dict__') else 'N/A'}")
+            
+            processed_results = []
+            for r in results:
+                # Check if r is a dict or object
+                if isinstance(r, dict):
+                    payload = r.get("payload", {})
+                    final_score = r.get("final_score", 0)
+                else:
+                    payload = r.payload if hasattr(r, 'payload') else {}
+                    final_score = r.final_score if hasattr(r, 'final_score') else 0
+                
+                processed_results.append({
+                    "chunk_text": payload.get("chunk_text", ""),
+                    "document_id": payload.get("document_id", ""),
+                    "title": payload.get("title", ""),
+                    "page_number": payload.get("page_number", 0),
+                    "similarity_score": final_score,
+                    "url": payload.get("url", ""),
+                    "subject": payload.get("subject", "")
+                })
+            
+            return processed_results
             
         except Exception as e:
             logger.error(f"[INDEXER] Search failed: {e}")

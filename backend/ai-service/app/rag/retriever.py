@@ -15,7 +15,8 @@ class RAGRetriever:
     
     def __init__(self):
         self.qdrant_client = get_qdrant_client()
-        self.collection_name = os.getenv("QDRANT_COLLECTION_NAME", "ensure_study_documents")
+        # Use classroom_materials to match MaterialIndexer collection
+        self.collection_name = os.getenv("QDRANT_COLLECTION_NAME", "classroom_materials")
         
         # Use free HuggingFace embeddings (no API key required)
         self.embeddings = HuggingFaceEmbeddings(
@@ -33,7 +34,9 @@ class RAGRetriever:
         top_k: int = 5,
         subject_filter: Optional[str] = None,
         difficulty_filter: Optional[str] = None,
-        score_threshold: float = 0.5
+        score_threshold: float = 0.5,
+        classroom_id: Optional[str] = None,
+        document_id: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
         Retrieve relevant chunks from Qdrant.
@@ -44,6 +47,8 @@ class RAGRetriever:
             subject_filter: Filter by subject
             difficulty_filter: Filter by difficulty
             score_threshold: Minimum similarity score
+            classroom_id: Filter by classroom (for classroom materials)
+            document_id: Filter by specific document (for PDF-specific queries)
         
         Returns:
             List of chunk dictionaries with text, source, and score
@@ -53,6 +58,15 @@ class RAGRetriever:
         
         # Build filter if needed
         filter_conditions = []
+        if document_id:
+            # Most specific filter - single document
+            filter_conditions.append(
+                FieldCondition(key="document_id", match=MatchValue(value=document_id))
+            )
+        if classroom_id:
+            filter_conditions.append(
+                FieldCondition(key="classroom_id", match=MatchValue(value=classroom_id))
+            )
         if subject_filter:
             filter_conditions.append(
                 FieldCondition(key="subject", match=MatchValue(value=subject_filter))
@@ -64,30 +78,90 @@ class RAGRetriever:
         
         search_filter = Filter(must=filter_conditions) if filter_conditions else None
         
-        # Search Qdrant
-        results = self.qdrant_client.search(
-            collection_name=self.collection_name,
-            query_vector=query_embedding,
-            query_filter=search_filter,
-            limit=top_k,
-            with_payload=True,
-            score_threshold=score_threshold
-        )
+        # Debug logging
+        print(f"[RETRIEVER] 🔎 Query: {query[:50]}...")
+        print(f"[RETRIEVER] 📊 Collection: {self.collection_name}")
+        print(f"[RETRIEVER] 🎯 Filter conditions: {len(filter_conditions)}")
+        for fc in filter_conditions:
+            print(f"[RETRIEVER]    - {fc.key} = {fc.match.value}")
+        print(f"[RETRIEVER] 📏 Embedding dimension: {len(query_embedding)}")
+        print(f"[RETRIEVER] 📉 Score threshold: {score_threshold}")
+        
+        # Search Qdrant using query_points (qdrant-client 1.16+)
+        from qdrant_client.models import QueryRequest
+        
+        try:
+            query_result = self.qdrant_client.query_points(
+                collection_name=self.collection_name,
+                query=query_embedding,
+                query_filter=search_filter,
+                limit=top_k,
+                with_payload=True,
+                score_threshold=score_threshold
+            )
+            print(f"[RETRIEVER] ✅ Qdrant query successful")
+            print(f"[RETRIEVER] 📦 Result type: {type(query_result)}")
+        except Exception as e:
+            print(f"[RETRIEVER] ❌ Qdrant query failed: {e}")
+            import traceback
+            traceback.print_exc()
+            return []
+        
+        # query_points returns QueryResponse with .points attribute
+        results = query_result.points if hasattr(query_result, 'points') else []
+        print(f"[RETRIEVER] 📊 Raw results count: {len(results)}")
         
         chunks = []
         for match in results:
             chunks.append({
                 "id": match.id,
-                "text": match.payload.get("full_text", match.payload.get("text", "")),
-                "source": match.payload.get("source", "unknown"),
-                "page": match.payload.get("page", 0),
+                "text": match.payload.get("full_text", match.payload.get("chunk_text", match.payload.get("text", ""))),
+                "content": match.payload.get("full_text", match.payload.get("chunk_text", match.payload.get("text", ""))),
+                "source": match.payload.get("source", match.payload.get("url", "unknown")),
+                "source_type": match.payload.get("source_type", "teacher_material"),
+                "page": match.payload.get("page_number", match.payload.get("page", 0)),
                 "subject": match.payload.get("subject", "general"),
                 "topic": match.payload.get("topic", ""),
+                "title": match.payload.get("title", ""),
+                "document_id": match.payload.get("document_id", ""),
+                "classroom_id": match.payload.get("classroom_id", ""),
+                "url": match.payload.get("url", ""),
                 "difficulty": match.payload.get("difficulty", "medium"),
-                "similarity_score": round(match.score, 4)
+                "similarity_score": round(match.score, 4),
+                "relevance_score": round(match.score, 4)
             })
         
         return chunks
+    
+    def retrieve(
+        self,
+        query: str,
+        top_k: int = 10,
+        classroom_id: Optional[str] = None,
+        document_id: Optional[str] = None,
+        score_threshold: float = 0.3
+    ) -> List[Dict[str, Any]]:
+        """
+        Retrieve method for TutorAgent compatibility.
+        Wraps retrieve_chunks with classroom_id and document_id support.
+        
+        Args:
+            query: Search query
+            top_k: Number of results
+            classroom_id: Classroom to filter by
+            document_id: Specific document to filter by
+            score_threshold: Minimum similarity
+            
+        Returns:
+            List of chunk dictionaries
+        """
+        return self.retrieve_chunks(
+            query=query,
+            top_k=top_k,
+            classroom_id=classroom_id,
+            document_id=document_id,
+            score_threshold=score_threshold
+        )
     
     def generate_answer(
         self,

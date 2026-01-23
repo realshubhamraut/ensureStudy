@@ -124,4 +124,3 @@ ensureStudy/
 
 ### License
 
-MIT License

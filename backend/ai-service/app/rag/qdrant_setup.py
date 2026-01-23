@@ -15,10 +15,22 @@ from typing import List, Optional
 
 def get_qdrant_client() -> QdrantClient:
     """Get Qdrant client instance"""
+    host = os.getenv("QDRANT_HOST", "localhost")
+    port = int(os.getenv("QDRANT_PORT", 6333))
+    api_key = os.getenv("QDRANT_API_KEY")
+    
+    # For local development, use http:// URL directly to avoid SSL issues
+    if host in ("localhost", "127.0.0.1") and not api_key:
+        return QdrantClient(
+            url=f"http://{host}:{port}",
+            timeout=60
+        )
+    
+    # For remote/cloud Qdrant with API key
     return QdrantClient(
-        host=os.getenv("QDRANT_HOST", "localhost"),
-        port=int(os.getenv("QDRANT_PORT", 6333)),
-        api_key=os.getenv("QDRANT_API_KEY"),
+        host=host,
+        port=port,
+        api_key=api_key,
         timeout=60
     )
 
@@ -27,7 +39,7 @@ def initialize_qdrant() -> QdrantClient:
     """Initialize Qdrant vector database with collection"""
     client = get_qdrant_client()
     
-    collection_name = os.getenv("QDRANT_COLLECTION_NAME", "ensure_study_documents")
+    collection_name = os.getenv("QDRANT_COLLECTION_NAME", "classroom_materials")
     embedding_dimensions = int(os.getenv("EMBEDDING_DIMENSIONS", 1536))
     
     # Check if collection exists
@@ -120,7 +132,7 @@ def ingest_documents(
 def delete_collection(collection_name: Optional[str] = None) -> bool:
     """Delete a Qdrant collection"""
     client = get_qdrant_client()
-    collection = collection_name or os.getenv("QDRANT_COLLECTION_NAME", "ensure_study_documents")
+    collection = collection_name or os.getenv("QDRANT_COLLECTION_NAME", "classroom_materials")
     
     try:
         client.delete_collection(collection_name=collection)
@@ -134,7 +146,7 @@ def delete_collection(collection_name: Optional[str] = None) -> bool:
 def get_collection_info() -> dict:
     """Get info about the main collection"""
     client = get_qdrant_client()
-    collection_name = os.getenv("QDRANT_COLLECTION_NAME", "ensure_study_documents")
+    collection_name = os.getenv("QDRANT_COLLECTION_NAME", "classroom_materials")
     
     try:
         info = client.get_collection(collection_name=collection_name)

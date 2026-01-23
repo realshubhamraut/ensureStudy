@@ -90,6 +90,9 @@ interface SourceItem {
     // New fields for dynamic web resources
     trustScore?: number      // 0.0 - 1.0 trust score
     sourceType?: string      // 'encyclopedia', 'academic', 'educational', etc.
+    // Fields for classroom documents
+    documentId?: string      // Document UUID for loading PDF
+    pageNumber?: number      // Page number for highlighting
 }
 
 interface Conversation {
@@ -493,7 +496,7 @@ export default function AITutorPage() {
                 content: m.content
             }))
 
-            const res = await fetch('${getAiServiceUrl()}/api/ai-tutor/query', {
+            const res = await fetch(`${getAiServiceUrl()}/api/ai-tutor/query`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -526,13 +529,17 @@ export default function AITutorPage() {
 
                 // Add classroom sources (documents)
                 if (data.data.sources) {
-                    const classroomSources = data.data.sources.map((s: { document_id: string; title: string; similarity_score: number }, i: number) => ({
+                    const classroomSources = data.data.sources.map((s: { document_id: string; title: string; similarity_score: number; url?: string; page_number?: number }, i: number) => ({
                         id: `doc_${i}`,
                         type: 'pdf' as const,
                         title: s.title,
                         relevance: Math.round(s.similarity_score * 100),
                         snippet: 'From your classroom materials',
-                        source: 'Classroom Materials'
+                        source: 'Classroom Materials',
+                        // Add URL so PDF can be opened in sidebar - use document_id to construct file URL
+                        url: s.url || `${process.env.NEXT_PUBLIC_CORE_API_URL || 'http://localhost:8000'}/api/files/${s.document_id}.pdf`,
+                        documentId: s.document_id,
+                        pageNumber: s.page_number || 1
                     }))
                     allSources.push(...classroomSources)
                 }
@@ -655,40 +662,12 @@ export default function AITutorPage() {
                 ]
             }
 
-            // Populate sources sidebar with mock data (simulating crawled resources)
+            // Sources will be populated from real API data only
+            // No mock materials - let the user know if nothing is found
             const mockSources: SourceItem[] = []
 
-            // Always include classroom materials if useNotes is on
-            if (useNotes) {
-                mockSources.push(
-                    {
-                        id: 's1',
-                        type: 'pdf',
-                        title: 'Chapter 5 - Fundamentals.pdf',
-                        relevance: 94,
-                        snippet: 'The core principles of this concept involve understanding the basic building blocks...',
-                        source: 'Classroom Materials',
-                        fileSize: '2.4 MB'
-                    },
-                    {
-                        id: 's2',
-                        type: 'note',
-                        title: 'Class Notes - Week 3',
-                        relevance: 87,
-                        snippet: 'Key takeaways from the lecture on this topic...',
-                        source: 'Your Notes'
-                    },
-                    {
-                        id: 's3',
-                        type: 'pptx',
-                        title: 'Lecture Slides - Introduction.pptx',
-                        relevance: 85,
-                        snippet: 'Slides covering the introduction and main concepts...',
-                        source: 'Classroom Materials',
-                        fileSize: '5.1 MB'
-                    }
-                )
-            }
+            // Note: Real classroom materials come from the main API response (data.data.sources)
+            // This fallback block only runs when the main API fails
 
             // Add web resources if findResources is on - USE REAL API
             if (findResources) {
@@ -697,7 +676,7 @@ export default function AITutorPage() {
                     const controller = new AbortController()
                     const timeoutId = setTimeout(() => controller.abort(), 30000)  // 30s for web crawling
 
-                    const webResponse = await fetch('${getAiServiceUrl()}/api/resources/web', {
+                    const webResponse = await fetch(`${getAiServiceUrl()}/api/resources/web`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
@@ -1600,17 +1579,45 @@ export default function AITutorPage() {
 
                             {/* PDF/Document Viewer */}
                             {(activeSource.type === 'pdf' || activeSource.type === 'pptx' || activeSource.type === 'note') && !viewerError && (
-                                <div className="flex-1 flex flex-col items-center justify-center p-6 text-center bg-white">
-                                    <DocumentIcon className="w-16 h-16 text-gray-300 mb-4" />
-                                    <p className="text-gray-900 font-medium mb-2">{activeSource.title}</p>
-                                    {activeSource.fileSize && (
-                                        <p className="text-gray-500 text-sm mb-4">{activeSource.fileSize}</p>
+                                <div className="flex-1 flex flex-col bg-white overflow-hidden">
+                                    {/* Document Header */}
+                                    <div className="p-3 border-b border-gray-200 flex items-center justify-between bg-gray-50">
+                                        <div className="flex items-center gap-2">
+                                            <DocumentIcon className="w-5 h-5 text-red-600" />
+                                            <span className="font-medium text-gray-900 text-sm truncate">{activeSource.title}</span>
+                                        </div>
+                                        {activeSource.url && (
+                                            <a
+                                                href={activeSource.url}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="text-xs text-blue-600 hover:underline flex items-center gap-1"
+                                            >
+                                                Open in new tab
+                                                <ArrowTopRightOnSquareIcon className="w-3 h-3" />
+                                            </a>
+                                        )}
+                                    </div>
+
+                                    {/* PDF Viewer Content */}
+                                    {activeSource.url ? (
+                                        <iframe
+                                            src={activeSource.url}
+                                            className="w-full flex-1 border-0"
+                                            title={activeSource.title}
+                                            onLoad={() => setViewerLoading(false)}
+                                            onError={() => {
+                                                setViewerError('Unable to load document preview')
+                                            }}
+                                        />
+                                    ) : (
+                                        <div className="flex-1 flex flex-col items-center justify-center p-6 text-center">
+                                            <DocumentIcon className="w-16 h-16 text-gray-300 mb-4" />
+                                            <p className="text-gray-900 font-medium mb-2">{activeSource.title}</p>
+                                            <p className="text-gray-500 text-sm mb-4">Document preview not available</p>
+                                            <p className="text-gray-400 text-xs">Open the document in your classroom to view it</p>
+                                        </div>
                                     )}
-                                    <p className="text-gray-500 text-sm mb-4">Document preview is available in your classroom</p>
-                                    <button className="inline-flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors">
-                                        <DocumentIcon className="w-4 h-4" />
-                                        Open Document
-                                    </button>
                                 </div>
                             )}
 

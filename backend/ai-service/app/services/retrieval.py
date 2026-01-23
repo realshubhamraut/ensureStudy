@@ -123,18 +123,19 @@ def semantic_search(
     client = get_qdrant_client()
     
     try:
-        results = client.search(
+        query_result = client.query_points(
             collection_name=settings.QDRANT_COLLECTION,
-            query_vector=query_embedding,
+            query=query_embedding,
             query_filter=search_filter,
             limit=top_k,
             score_threshold=threshold
         )
+        # Extract points from QueryResponse
+        results = query_result.points if hasattr(query_result, 'points') else []
     except Exception as e:
-        # If Qdrant is not available, return mock data for development
-        if settings.DEBUG:
-            return _get_mock_chunks(query, subject)
-        raise e
+        # If Qdrant is not available, return empty list (no mock data!)
+        print(f"[Retrieval] Qdrant query failed: {e}")
+        return []
     
     # Step 4: Convert to RetrievedChunk objects
     chunks = []
@@ -206,13 +207,15 @@ def search_meeting_transcripts(
     client = get_qdrant_client()
     
     try:
-        results = client.search(
+        query_result = client.query_points(
             collection_name="meeting_transcripts",  # Different collection!
-            query_vector=query_embedding,
+            query=query_embedding,
             query_filter=search_filter,
             limit=top_k,
             score_threshold=threshold
         )
+        # Extract points from QueryResponse
+        results = query_result.points if hasattr(query_result, 'points') else []
     except Exception as e:
         print(f"[MeetingSearch] Error searching transcripts: {e}")
         return []
@@ -251,112 +254,4 @@ def search_meeting_transcripts(
     print(f"[MeetingSearch] Found {len(chunks)} transcript chunks for query")
     return chunks
 
-
-# ============================================================================
-# Mock Data (for development without Qdrant)
-# ============================================================================
-
-def _get_mock_chunks(query: str, subject: Optional[str] = None) -> List[RetrievedChunk]:
-    """Return mock chunks for development/testing."""
-    
-    mock_data = {
-        "physics": [
-            {
-                "document_id": "doc_physics_101",
-                "chunk_id": "ch_001",
-                "text": "Newton's first law of motion, also known as the law of inertia, states that an object at rest will remain at rest, and an object in motion will remain in motion at a constant velocity, unless acted upon by an unbalanced external force. This principle was revolutionary because it contradicted the Aristotelian view that objects naturally tend toward rest.",
-                "similarity_score": 0.89,
-                "metadata": {"subject": "physics", "topic": "mechanics", "chapter": "3"}
-            },
-            {
-                "document_id": "doc_physics_101",
-                "chunk_id": "ch_002",
-                "text": "Newton's second law of motion states that the acceleration of an object is directly proportional to the net force acting on it and inversely proportional to its mass. Mathematically, this is expressed as F = ma, where F is force, m is mass, and a is acceleration.",
-                "similarity_score": 0.82,
-                "metadata": {"subject": "physics", "topic": "mechanics", "chapter": "3"}
-            },
-            {
-                "document_id": "doc_physics_101",
-                "chunk_id": "ch_003",
-                "text": "Example: A 5 kg object experiences a force of 10 N. Using F = ma, the acceleration is a = F/m = 10/5 = 2 m/s². This demonstrates how to apply Newton's second law in practice.",
-                "similarity_score": 0.75,
-                "metadata": {"subject": "physics", "topic": "mechanics", "chapter": "3", "type": "example"}
-            },
-        ],
-        "biology": [
-            {
-                "document_id": "doc_bio_ch4",
-                "chunk_id": "ch_101",
-                "text": "Photosynthesis is the process by which green plants and some other organisms use sunlight to synthesize nutrients from carbon dioxide and water. It occurs in the chloroplasts using chlorophyll pigment. The overall equation is: 6CO2 + 6H2O + light energy → C6H12O6 + 6O2.",
-                "similarity_score": 0.91,
-                "metadata": {"subject": "biology", "topic": "plant biology", "chapter": "4"}
-            },
-            {
-                "document_id": "doc_bio_ch4",
-                "chunk_id": "ch_102",
-                "text": "The light-dependent reactions occur in the thylakoid membranes, producing ATP and NADPH. The light-independent reactions (Calvin cycle) occur in the stroma, using ATP and NADPH to fix carbon dioxide into glucose.",
-                "similarity_score": 0.84,
-                "metadata": {"subject": "biology", "topic": "plant biology", "chapter": "4"}
-            },
-        ],
-        "math": [
-            {
-                "document_id": "doc_math_algebra",
-                "chunk_id": "ch_201",
-                "text": "The quadratic formula is used to solve equations of the form ax² + bx + c = 0. The solution is given by x = (-b ± √(b² - 4ac)) / 2a. The discriminant (b² - 4ac) determines the nature of roots: positive gives two real roots, zero gives one real root, negative gives complex roots.",
-                "similarity_score": 0.88,
-                "metadata": {"subject": "math", "topic": "algebra", "chapter": "5"}
-            },
-            {
-                "document_id": "doc_math_algebra",
-                "chunk_id": "ch_202",
-                "text": "Example: Solve x² - 5x + 6 = 0. Here a=1, b=-5, c=6. Discriminant = 25-24 = 1 > 0. Solutions: x = (5 ± 1)/2. So x = 3 or x = 2.",
-                "similarity_score": 0.79,
-                "metadata": {"subject": "math", "topic": "algebra", "chapter": "5", "type": "example"}
-            },
-        ]
-    }
-    
-    # Return subject-specific or general chunks
-    if subject and subject in mock_data:
-        chunks = mock_data[subject]
-    else:
-        # If no subject, filter by relevance/threshold instead of returning everything
-        chunks = []
-        similarity_threshold = settings.SIMILARITY_THRESHOLD or 0.6
-        
-        # Simple keyword matching to simulate semantic search on mock data
-        query_terms = set(query.lower().split())
-        
-        for subj, subj_chunks in mock_data.items():
-            for chunk in subj_chunks:
-                # Mock similarity: check if any query term is in the chunk text
-                text_lower = chunk["text"].lower()
-                matches = sum(1 for term in query_terms if term in text_lower and len(term) > 3)
-                
-                # Boost score if matches found, otherwise low score
-                mock_score = 0.85 if matches > 0 else 0.2
-                
-                # Only include if score meets threshold
-                if mock_score >= similarity_threshold:
-                    chunks.append({**chunk, "similarity_score": mock_score})
-        
-        # If no strict matches, return nothing (prevent junk pollution)
-        if not chunks and "test" in query.lower():
-             # Only strictly fallback for "test" queries
-             for subject_chunks in mock_data.values():
-                 chunks.extend(subject_chunks)
-
-        chunks.sort(key=lambda x: x.get("similarity_score", 0), reverse=True)
-        chunks = chunks[:settings.TOP_K_RESULTS]
-    
-    return [
-        RetrievedChunk(
-            document_id=c["document_id"],
-            chunk_id=c["chunk_id"],
-            text=c["text"],
-            similarity_score=c["similarity_score"],
-            metadata=c["metadata"]
-        )
-        for c in chunks
-    ]
+# Note: Mock data removed - only real classroom materials are shown now

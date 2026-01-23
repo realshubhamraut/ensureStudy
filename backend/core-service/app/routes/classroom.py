@@ -425,8 +425,10 @@ def upload_material(classroom_id):
     # Trigger indexing for PDF files
     if material.file_type == 'application/pdf':
         try:
+            import os
+            ai_service_url = os.getenv('AI_SERVICE_URL', 'http://localhost:9001')
             http_requests.post(
-                'http://localhost:8001/api/index/material',
+                f'{ai_service_url}/api/index/material',
                 json={
                     'material_id': material.id,
                     'file_url': material.file_url,
@@ -437,6 +439,7 @@ def upload_material(classroom_id):
                 },
                 timeout=5
             )
+            print(f"[CLASSROOM] Triggered indexing for material {material.id}")
         except Exception as e:
             # Don't fail upload if indexing trigger fails
             print(f"[CLASSROOM] Warning: Failed to trigger indexing: {e}")

@@ -350,7 +350,7 @@ async def process_tutor_query(request: TutorQueryRequest) -> TutorQueryResponse:
                 title=chunk.title or chunk.metadata.get("topic", "Source"),
                 similarity_score=round(chunk.similarity_score, 3),
                 url=chunk.url,
-                page_number=chunk.page_number
+                page_number=chunk.page_number if chunk.page_number is not None else 0
             )
             for chunk in context.chunks_used
         ]

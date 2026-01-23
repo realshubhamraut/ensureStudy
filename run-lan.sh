@@ -1,5 +1,6 @@
 #!/bin/bash
-# Run ensureStudy for LAN access (accessible from other devices on same network)
+# Run ensureStudy for LAN access with FULL HTTPS
+# Required for camera/microphone features on mobile/other devices
 # All logs are stored in ./logs directory
 
 set -e
@@ -21,9 +22,12 @@ NC='\033[0m' # No Color
 # Create logs directory
 mkdir -p "$LOG_DIR"
 
-echo -e "${BLUE}=== ensureStudy LAN Development ===${NC}"
+echo -e "${BLUE}╔════════════════════════════════════════════════════════════╗${NC}"
+echo -e "${BLUE}║       ensureStudy LAN Development (HTTPS Mode)             ║${NC}"
+echo -e "${BLUE}╚════════════════════════════════════════════════════════════╝${NC}"
 echo -e "${BLUE}Local IP: $LOCAL_IP${NC}"
 echo -e "${BLUE}Logs stored in: $LOG_DIR${NC}"
+echo ""
 
 # Kill any stale processes on our ports
 echo -e "${YELLOW}Killing stale processes on ports 8000, 8001, 3000...${NC}"
@@ -32,25 +36,38 @@ lsof -ti:8001 | xargs kill -9 2>/dev/null || true
 lsof -ti:3000 | xargs kill -9 2>/dev/null || true
 sleep 1
 
+# ============================================================================
+# Check/Generate mkcert certificates
+# ============================================================================
+CERT_FILE="$PROJECT_ROOT/${LOCAL_IP}+2.pem"
+KEY_FILE="$PROJECT_ROOT/${LOCAL_IP}+2-key.pem"
+
+if [ ! -f "$CERT_FILE" ] || [ ! -f "$KEY_FILE" ]; then
+    echo -e "${YELLOW}Generating mkcert certificates for $LOCAL_IP...${NC}"
+    if ! command -v mkcert &> /dev/null; then
+        echo -e "${RED}mkcert not found! Install with: brew install mkcert${NC}"
+        exit 1
+    fi
+    mkcert -install
+    cd "$PROJECT_ROOT"
+    mkcert "$LOCAL_IP" localhost 127.0.0.1
+    echo -e "${GREEN}✓ Certificates generated${NC}"
+else
+    echo -e "${GREEN}✓ Using existing certificates for $LOCAL_IP${NC}"
+fi
+
 # Check if venv exists
 if [ ! -d "$VENV_PATH" ]; then
     echo "Creating virtual environment..."
     python3 -m venv "$VENV_PATH"
 fi
 
-# Activate venv if not already activated
+# Activate venv
 if [ -z "$VIRTUAL_ENV" ] || [ "$VIRTUAL_ENV" != "$VENV_PATH" ]; then
     echo -e "${YELLOW}Activating virtual environment...${NC}"
     source "$VENV_PATH/bin/activate"
 else
     echo -e "${GREEN}Virtual environment already active${NC}"
-fi
-
-# Check if flask is installed
-if ! python -c "import flask" 2>/dev/null; then
-    echo "Installing Python dependencies..."
-    pip install flask flask-cors flask-sqlalchemy flask-migrate pyjwt werkzeug redis python-dotenv gunicorn
-    pip install fastapi uvicorn pydantic python-jose python-multipart aiohttp httpx openai langchain langchain-openai sentence-transformers
 fi
 
 # Load environment variables from .env
@@ -62,29 +79,36 @@ fi
 export FLASK_APP=app
 export FLASK_DEBUG=1
 export JWT_SECRET="${JWT_SECRET:-local-dev-jwt-secret-key-32chars}"
-export OPENAI_API_KEY="${OPENAI_API_KEY:-sk-test-key}"
 export PYTHONUNBUFFERED=1
 
 # Date for log files
 DATE=$(date +%Y-%m-%d)
 
-# Start Core API with LAN access (0.0.0.0)
-echo -e "${GREEN}Starting Core API on http://$LOCAL_IP:8000${NC}"
+# ============================================================================
+# Start Core API with HTTPS (using stable runner script)
+# ============================================================================
+echo -e "${GREEN}Starting Core API on https://$LOCAL_IP:8000${NC}"
 cd "$PROJECT_ROOT/backend/core-service"
-python -m flask run --host=0.0.0.0 --port 8000 2>&1 | tee -a "$LOG_DIR/core-service_$DATE.log" &
+python run_https.py "$CERT_FILE" "$KEY_FILE" 8000 2>&1 | tee -a "$LOG_DIR/core-service_$DATE.log" &
 CORE_PID=$!
 
-sleep 2
+sleep 3
 
-# Start AI Service with LAN access (0.0.0.0)
-echo -e "${GREEN}Starting AI Service on http://$LOCAL_IP:8001${NC}"
+# ============================================================================
+# Start AI Service with HTTPS
+# ============================================================================
+echo -e "${GREEN}Starting AI Service on https://$LOCAL_IP:8001${NC}"
 cd "$PROJECT_ROOT/backend/ai-service"
-python -m uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload 2>&1 | tee -a "$LOG_DIR/ai-service_$DATE.log" &
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8001 \
+    --ssl-keyfile "$KEY_FILE" --ssl-certfile "$CERT_FILE" \
+    --reload 2>&1 | tee -a "$LOG_DIR/ai-service_$DATE.log" &
 AI_PID=$!
 
-sleep 2
+sleep 3
 
-# Start Frontend with LAN access (HTTPS for camera/mic on mobile)
+# ============================================================================
+# Start Frontend with HTTPS
+# ============================================================================
 echo -e "${GREEN}Starting Frontend on https://$LOCAL_IP:3000${NC}"
 cd "$PROJECT_ROOT/frontend"
 if [ ! -d "node_modules" ]; then
@@ -92,64 +116,54 @@ if [ ! -d "node_modules" ]; then
     npm install
 fi
 
-# Check if mkcert certs exist in project root
-CERT_FILE="$PROJECT_ROOT/192.168.4.60+2.pem"
-KEY_FILE="$PROJECT_ROOT/192.168.4.60+2-key.pem"
+# Configure frontend for HTTPS LAN access
+echo -e "${YELLOW}Configuring frontend for HTTPS LAN access...${NC}"
+cat > .env.local << EOF
+# Environment Variables for Next.js Frontend (LAN Mode - HTTPS)
+# Auto-generated by run-lan.sh
 
-# Set API URL to use LAN IP (HTTP is fine for API calls)
-export NEXT_PUBLIC_API_URL="http://$LOCAL_IP:8000"
-export NEXT_PUBLIC_AI_URL="http://$LOCAL_IP:8001"
+# API URLs (HTTPS on LAN IP: $LOCAL_IP)
+NEXT_PUBLIC_API_URL=https://$LOCAL_IP:8000
+NEXT_PUBLIC_AI_SERVICE_URL=https://$LOCAL_IP:8001
 
-if [ -f "$CERT_FILE" ] && [ -f "$KEY_FILE" ]; then
-    echo -e "${GREEN}Using HTTPS with mkcert certificates${NC}"
-    # Create a custom server to use HTTPS
-    NEXTAUTH_SECRET="${JWT_SECRET:-local-dev-jwt-secret-key-32chars}" \
-    NEXTAUTH_URL="https://$LOCAL_IP:3000" \
-    npm run dev -- -H 0.0.0.0 --experimental-https 2>&1 | tee -a "$LOG_DIR/frontend_$DATE.log" &
-else
-    echo -e "${YELLOW}No mkcert certs found, using HTTP (camera/mic won't work on mobile)${NC}"
-    NEXTAUTH_SECRET="${JWT_SECRET:-local-dev-jwt-secret-key-32chars}" \
-    NEXTAUTH_URL="http://$LOCAL_IP:3000" \
-    npm run dev -- -H 0.0.0.0 2>&1 | tee -a "$LOG_DIR/frontend_$DATE.log" &
-fi
+# NextAuth Configuration
+NEXTAUTH_URL=https://$LOCAL_IP:3000
+NEXTAUTH_SECRET=local-dev-nextauth-secret-key-32-characters
+EOF
+
+echo -e "${GREEN}  → .env.local configured with HTTPS${NC}"
+
+# Start Next.js with experimental HTTPS
+NEXTAUTH_SECRET="${JWT_SECRET:-local-dev-jwt-secret-key-32chars}" \
+NEXTAUTH_URL="https://$LOCAL_IP:3000" \
+npm run dev -- -H 0.0.0.0 --experimental-https 2>&1 | tee -a "$LOG_DIR/frontend_$DATE.log" &
 FRONTEND_PID=$!
 
-sleep 2
+sleep 5
 
-# Start Streamlit Dashboards with LAN access
-echo -e "${YELLOW}Starting Streamlit Dashboards...${NC}"
-cd "$PROJECT_ROOT/dashboards"
-
-echo -e "${GREEN}  Main Dashboard on http://$LOCAL_IP:8501${NC}"
-streamlit run main_dashboard.py --server.port 8501 --server.headless true --server.address 0.0.0.0 2>&1 | tee -a "$LOG_DIR/dashboard_main_$DATE.log" &
-DASH_MAIN_PID=$!
-
-echo -e "${GREEN}  Notes Tester on http://$LOCAL_IP:8502${NC}"
-streamlit run notes_tester.py --server.port 8502 --server.headless true --server.address 0.0.0.0 2>&1 | tee -a "$LOG_DIR/dashboard_notes_$DATE.log" &
-DASH_NOTES_PID=$!
-
-# Wait a bit for services to start
-sleep 3
-
+# ============================================================================
+# Display Summary
+# ============================================================================
 echo ""
-echo -e "${GREEN}=== All services started (LAN Accessible) ===${NC}"
-echo "┌────────────────────────────────────────────────────────┐"
-echo "│ Your Network IP: $LOCAL_IP                             "
-echo "├────────────────────────────────────────────────────────┤"
-echo "│ Core API:       http://$LOCAL_IP:8000                  "
-echo "│ AI Service:     http://$LOCAL_IP:8001                  "
-echo "│ Frontend:       https://$LOCAL_IP:3000  (HTTPS!)       "
-echo "│ Dashboard:      http://$LOCAL_IP:8501                  "
-echo "│ Notes Tester:   http://$LOCAL_IP:8502                  "
-echo "├────────────────────────────────────────────────────────┤"
-echo "│ For Mobile (with camera/mic):                         │"
-echo "│   https://$LOCAL_IP:3000                               "
-echo "└────────────────────────────────────────────────────────┘"
+echo -e "${GREEN}╔════════════════════════════════════════════════════════════╗${NC}"
+echo -e "${GREEN}║       ensureStudy LAN (HTTPS) Ready! 🔒                    ║${NC}"
+echo -e "${GREEN}╠════════════════════════════════════════════════════════════╣${NC}"
+echo -e "${GREEN}║  Your Network IP: ${BLUE}$LOCAL_IP${GREEN}                               ║${NC}"
+echo -e "${GREEN}╠════════════════════════════════════════════════════════════╣${NC}"
+echo -e "${GREEN}║  ${NC}Frontend:       ${BLUE}https://$LOCAL_IP:3000${NC}                   ${GREEN}║${NC}"
+echo -e "${GREEN}║  ${NC}Core API:       ${BLUE}https://$LOCAL_IP:8000${NC}                   ${GREEN}║${NC}"
+echo -e "${GREEN}║  ${NC}AI Service:     ${BLUE}https://$LOCAL_IP:8001${NC}                   ${GREEN}║${NC}"
+echo -e "${GREEN}║  ${NC}AI Docs:        ${BLUE}https://$LOCAL_IP:8001/docs${NC}              ${GREEN}║${NC}"
+echo -e "${GREEN}╠════════════════════════════════════════════════════════════╣${NC}"
+echo -e "${GREEN}║  ${YELLOW}⚠️  FOR OTHER DEVICES - Accept certs first:${NC}               ${GREEN}║${NC}"
+echo -e "${GREEN}║  ${NC}1. Visit ${BLUE}https://$LOCAL_IP:8000${NC} → Accept cert           ${GREEN}║${NC}"
+echo -e "${GREEN}║  ${NC}2. Visit ${BLUE}https://$LOCAL_IP:8001${NC} → Accept cert           ${GREEN}║${NC}"
+echo -e "${GREEN}║  ${NC}3. Then use ${BLUE}https://$LOCAL_IP:3000${NC}                      ${GREEN}║${NC}"
+echo -e "${GREEN}╠════════════════════════════════════════════════════════════╣${NC}"
+echo -e "${GREEN}║  ${NC}Logs: ${YELLOW}$LOG_DIR${NC}                          ${GREEN}║${NC}"
+echo -e "${GREEN}╚════════════════════════════════════════════════════════════╝${NC}"
 echo ""
-echo -e "${YELLOW}Log files:${NC}"
-echo "  tail -f $LOG_DIR/core-service_$DATE.log"
-echo "  tail -f $LOG_DIR/ai-service_$DATE.log"
-echo "  tail -f $LOG_DIR/frontend_$DATE.log"
+echo -e "${YELLOW}Camera/Microphone: ✅ Enabled (HTTPS mode)${NC}"
 echo ""
 echo "Press Ctrl+C to stop all services"
 
@@ -157,7 +171,7 @@ echo "Press Ctrl+C to stop all services"
 cleanup() {
     echo ""
     echo -e "${YELLOW}Stopping services...${NC}"
-    kill $CORE_PID $AI_PID $FRONTEND_PID $DASH_MAIN_PID $DASH_NOTES_PID 2>/dev/null
+    kill $CORE_PID $AI_PID $FRONTEND_PID 2>/dev/null
     echo -e "${GREEN}All services stopped. Logs saved to $LOG_DIR${NC}"
     exit 0
 }

@@ -136,18 +136,6 @@ FRONTEND_PID=$!
 
 sleep 2
 
-# Start Streamlit Dashboards with logging
-echo -e "${YELLOW}Starting Streamlit Dashboards...${NC}"
-cd "$PROJECT_ROOT/dashboards"
-
-echo -e "${GREEN}  Main Dashboard on http://localhost:$DASH_MAIN_PORT${NC}"
-streamlit run main_dashboard.py --server.port $DASH_MAIN_PORT --server.headless true 2>&1 | tee -a "$LOG_DIR/dashboard_main_$DATE.log" &
-DASH_MAIN_PID=$!
-
-echo -e "${GREEN}  Notes Tester on http://localhost:$DASH_NOTES_PORT${NC}"
-streamlit run notes_tester.py --server.port $DASH_NOTES_PORT --server.headless true 2>&1 | tee -a "$LOG_DIR/dashboard_notes_$DATE.log" &
-DASH_NOTES_PID=$!
-
 # Wait a bit for services to start
 sleep 3
 
@@ -158,8 +146,6 @@ echo "│ Core API:       http://localhost:$CORE_PORT          │"
 echo "│ AI Service:     http://localhost:$AI_PORT          │"
 echo "│ Frontend:       http://localhost:$FRONTEND_PORT          │"
 echo "│ Qdrant (Vector):http://localhost:6333          │"
-echo "│ Dashboard:      http://localhost:$DASH_MAIN_PORT          │"
-echo "│ Notes Tester:   http://localhost:$DASH_NOTES_PORT          │"
 echo "├────────────────────────────────────────────────┤"
 echo "│ Logs:           $LOG_DIR  │"
 echo "└────────────────────────────────────────────────┘"
@@ -176,7 +162,7 @@ echo "Press Ctrl+C to stop all services"
 cleanup() {
     echo ""
     echo -e "${YELLOW}Stopping services...${NC}"
-    kill $CORE_PID $AI_PID $FRONTEND_PID $DASH_MAIN_PID $DASH_NOTES_PID 2>/dev/null
+    kill $CORE_PID $AI_PID $FRONTEND_PID 2>/dev/null
     echo -e "${GREEN}All services stopped. Logs saved to $LOG_DIR${NC}"
     exit 0
 }
