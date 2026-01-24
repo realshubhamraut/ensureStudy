@@ -320,7 +320,7 @@ class QdrantService:
     def search_semantic(
         self,
         query_embedding: List[float],
-        classroom_id: str,
+        classroom_id: Optional[str] = None,  # None = search ALL classrooms
         top_k: int = 10,
         filters: Optional[Dict] = None,
         score_threshold: float = 0.3,
@@ -331,7 +331,7 @@ class QdrantService:
         
         Args:
             query_embedding: 384-dim query vector
-            classroom_id: Classroom to search within
+            classroom_id: Classroom to search within (None = ALL classrooms)
             top_k: Number of results to return
             filters: Additional filters (student_id, source_type, etc.)
             score_threshold: Minimum similarity score
@@ -348,13 +348,14 @@ class QdrantService:
                 logger.debug("[Qdrant] Cache hit for semantic search")
                 return cached
         
-        # Build filter
-        must_conditions = [
-            FieldCondition(
+        # Build filter - only add classroom_id if provided
+        must_conditions = []
+        
+        if classroom_id:
+            must_conditions.append(FieldCondition(
                 key="classroom_id",
                 match=MatchValue(value=classroom_id)
-            )
-        ]
+            ))
         
         if filters:
             if filters.get("student_id"):

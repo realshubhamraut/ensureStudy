@@ -233,16 +233,16 @@ class MaterialIndexer:
     def search_classroom_materials(
         self,
         query: str,
-        classroom_id: str,
+        classroom_id: Optional[str] = None,  # None = search ALL classrooms
         top_k: int = 5,
         score_threshold: float = 0.3
     ) -> List[Dict[str, Any]]:
         """
-        Search indexed materials for a classroom.
+        Search indexed materials for a classroom or all classrooms.
         
         Args:
             query: Search query
-            classroom_id: Classroom to search within
+            classroom_id: Classroom to search within (None = search ALL)
             top_k: Number of results
             score_threshold: Minimum similarity score
             

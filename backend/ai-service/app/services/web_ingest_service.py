@@ -282,7 +282,7 @@ def worker1_extract_topic(query: str, conversation_history: list = None) -> str:
                     print(f"[WORKER-1] Previous query was: '{prev_query[:50]}...'")
                     return topic
     
-    # Educational keywords
+    # Educational keywords - expanded to include more terms
     educational_keywords = {
         'equation', 'equations', 'formula', 'formulas', 'theorem', 'theorems',
         'quadratic', 'linear', 'polynomial', 'calculus', 'algebra', 'geometry',
@@ -290,33 +290,42 @@ def worker1_extract_topic(query: str, conversation_history: list = None) -> str:
         'physics', 'chemistry', 'biology', 'force', 'energy', 'velocity',
         'atom', 'molecule', 'reaction', 'synthesis', 'war', 'revolution',
         'derivative', 'integral', 'function', 'graph', 'vector', 'matrix',
-        'newton', 'einstein', 'darwin', 'motion', 'gravity', 'laws'
+        'newton', 'newtons', 'einstein', 'darwin', 'motion', 'gravity', 'laws', 'law',
+        'french', 'world', 'civil', 'american', 'industrial',  # History keywords
+        'first', 'second', 'third',  # Ordinal - important for "first law"
     }
     
     # Standard extraction from current query
     import string
-    words = query.lower().translate(str.maketrans('', '', string.punctuation)).split()
+    # Keep apostrophes for possessive forms (newton's -> newtons)
+    clean_query = query.lower().replace("'s", "s").replace("'", "")
+    words = clean_query.translate(str.maketrans('', '', string.punctuation.replace("'", ""))).split()
     content_words = [w for w in words if w not in stopwords and len(w) > 2]
     
     topic_words = []
     
+    # First pass: collect all educational keywords
     for word in content_words:
         if word in educational_keywords:
             topic_words.append(word)
     
+    # If no educational keywords found, use last few content words
     if not topic_words:
         topic_words = content_words[-min(3, len(content_words)):]
     else:
+        # Add preceding word for context (e.g., "newton's first" -> include context)
         for i, word in enumerate(content_words):
             if word in educational_keywords and i > 0:
-                if content_words[i-1] not in topic_words:
-                    topic_words.insert(0, content_words[i-1])
+                prev_word = content_words[i-1]
+                if prev_word not in topic_words and prev_word not in stopwords:
+                    topic_words.insert(0, prev_word)
     
     topic = ' '.join(topic_words).strip()
     
+    # Fallback: use last 3 words if topic is too short
     if not topic or len(topic) < 3:
         words = query.translate(str.maketrans('', '', string.punctuation)).split()
-        topic = ' '.join(words[-min(2, len(words)):])
+        topic = ' '.join(words[-min(3, len(words)):])
     
     print(f"[WORKER-1] Topic extracted: '{topic}'")
     return topic
@@ -620,24 +629,17 @@ def store_in_qdrant(chunks: List[Dict[str, Any]], embeddings: List[List[float]])
     
     try:
         from qdrant_client import QdrantClient
-        from qdrant_client.models import  VectorParams, Distance, PointStruct
+        from qdrant_client.models import VectorParams, Distance, PointStruct
         import os
         
-        # Use file-based Qdrant (same as cache service)
-        qdrant_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-            "data",
-            "qdrant_cache"
-        )
-        os.makedirs(qdrant_path, exist_ok=True)
+        # Use Qdrant SERVER (not file-based) to avoid concurrent access issues
+        qdrant_host = os.getenv("QDRANT_HOST", "localhost")
+        qdrant_port = int(os.getenv("QDRANT_PORT", "6333"))
         
-        client = QdrantClient(path=qdrant_path)
-        collection_name = "web_content_cache"
+        client = QdrantClient(host=qdrant_host, port=qdrant_port, timeout=30)
+        collection_name = "web_content"  # Separate from cache
         
         # Ensure collection exists
-        from sentence_transformers import SentenceTransformer
-        model = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')
-        
         collections = client.get_collections().collections
         if collection_name not in [c.name for c in collections]:
             client.create_collection(
@@ -647,6 +649,7 @@ def store_in_qdrant(chunks: List[Dict[str, Any]], embeddings: List[List[float]])
                     distance=Distance.COSINE
                 )
             )
+            print(f"[WORKER-7] Created collection: {collection_name}")
         
         # Create points
         points = []
@@ -674,7 +677,7 @@ def store_in_qdrant(chunks: List[Dict[str, Any]], embeddings: List[List[float]])
             batch = points[i:i + batch_size]
             client.upsert(collection_name=collection_name, points=batch)
         
-        logger.info(f"Stored {len(points)} chunks in Qdrant collection: {collection_name}")
+        print(f"[WORKER-7] ✅ Stored {len(points)} chunks in Qdrant (server: {qdrant_host}:{qdrant_port})")
         return len(points)
         
     except Exception as e:
@@ -816,18 +819,32 @@ async def ingest_web_resources(
             url = page['url']
             html_content = page['content']
             
-            print(f"[DEBUG] Processing page: {url[:50]}")
+            print(f"\n{'='*70}")
+            print(f"[WORKER-6] 🌐 PROCESSING URL: {url}")
+            print(f"{'='*70}")
             
             try:
                 # Extract clean text with trafilatura
                 import trafilatura
                 clean_text = trafilatura.extract(html_content)
                 
-                print(f"[DEBUG] Trafilatura extracted: {len(clean_text) if clean_text else 0} chars")
-                
                 if not clean_text or len(clean_text) < 100:
-                    print(f"[WORKER-6] ⚠ Insufficient content from {url[:40]}")
+                    print(f"[WORKER-6] ⚠ Insufficient content from {url[:60]}")
                     continue
+                
+                print(f"[WORKER-6] 📄 Extracted {len(clean_text)} characters")
+                
+                # Show content preview - FIRST 500 chars
+                print(f"\n[CONTENT PREVIEW - First 500 chars]")
+                print("-" * 50)
+                print(clean_text[:500])
+                print("-" * 50)
+                
+                # Show LAST 200 chars
+                print(f"\n[CONTENT PREVIEW - Last 200 chars]")
+                print("-" * 50)
+                print(clean_text[-200:])
+                print("-" * 50 + "\n")
                 
                 # LIMIT content size for performance (15000 chars max)
                 MAX_CONTENT = 15000
@@ -836,14 +853,14 @@ async def ingest_web_resources(
                     last_period = clean_text.rfind('.')
                     if last_period > MAX_CONTENT * 0.8:
                         clean_text = clean_text[:last_period + 1]
-                    print(f"[WORKER-6] Truncated to {len(clean_text)} chars")
+                    print(f"[WORKER-6] ✂ Truncated to {len(clean_text)} chars")
                 
                 # Count tokens
                 from .debug_logger import count_tokens
                 token_count = count_tokens(clean_text)
                 total_tokens += token_count
                 
-                print(f"[DEBUG] Counted {token_count} tokens")
+                print(f"[WORKER-6] 📊 Token count: {token_count}")
                 
                 # Normalize
                 normalized = normalize_content(clean_text, url.split('/')[-1], 'text')
@@ -855,6 +872,15 @@ async def ingest_web_resources(
                     source_type='webpage',
                     source_trust=calculate_trust_score(url)
                 )
+                
+                print(f"[WORKER-6] ✅ Created {len(chunks)} chunks for Qdrant")
+                
+                # Show chunk previews
+                for i, chunk in enumerate(chunks[:3]):  # Show first 3 chunks
+                    print(f"  [Chunk {i+1}] {chunk['text'][:150]}...")
+                
+                if len(chunks) > 3:
+                    print(f"  ... and {len(chunks) - 3} more chunks")
                 
                 # Generate resource ID
                 resource_id = hashlib.md5(url.encode()).hexdigest()[:12]
@@ -876,25 +902,28 @@ async def ingest_web_resources(
                 
                 all_chunks.extend(chunks)
                 
+                print(f"[WORKER-6] ✅ Source: {extract_source_name(url)} | Trust: {calculate_trust_score(url):.2f}")
+                
             except Exception as e:
-                print(f"[WORKER-6] ❌ Processing error for {url[:40]}: {e}")
+                print(f"[WORKER-6] ❌ Processing error for {url[:60]}: {e}")
                 import traceback
-                print(f"[WORKER-6] Full traceback:")
                 traceback.print_exc()
-                print(f"[WORKER-6] Continuing to next page...")
         
         # Worker-6 Complete
-        print(f"[WORKER-6] ✅ Clean tokens: {total_tokens}")
+        print(f"\n{'='*70}")
+        print(f"[WORKER-6] ✅ COMPLETE: {len(resources)} sources, {total_tokens} total tokens")
+        print(f"{'='*70}\n")
         
         # WORKER-7: Chunk + Embed
         total_stored = 0
         if all_chunks:
+            print(f"[WORKER-7] 📦 Storing {len(all_chunks)} chunks in Qdrant...")
             texts = [chunk['text'] for chunk in all_chunks]
             embeddings = generate_embeddings(texts)
             
             if embeddings:
                 total_stored = store_in_qdrant(all_chunks, embeddings)
-                print(f"[WORKER-7] ✅ Stored {total_stored} chunks in Qdrant")
+                print(f"[WORKER-7] ✅ Successfully stored {total_stored} chunks in Qdrant")
         
         # Pipeline complete
         elapsed = time.time() - start_time

@@ -3,6 +3,7 @@ Curriculum Models - Subject, Topic, Subtopic Hierarchy
 """
 from datetime import datetime
 from app import db
+from sqlalchemy.types import JSON
 import uuid
 
 
@@ -224,3 +225,186 @@ class StudentSubtopicProgress(db.Model):
             "total_time_minutes": self.total_time_minutes,
             "last_attempt_at": self.last_attempt_at.isoformat() if self.last_attempt_at else None
         }
+
+
+class Syllabus(db.Model):
+    """Syllabus document linked to classroom for topic extraction"""
+    __tablename__ = "syllabi"
+    
+    id = db.Column(db.String(36), primary_key=True, default=generate_uuid)
+    classroom_id = db.Column(db.String(36), db.ForeignKey("classrooms.id"), nullable=False, index=True)
+    document_id = db.Column(db.String(36), nullable=True)  # PDF/document reference (no FK - stored externally)
+    
+    title = db.Column(db.String(300), nullable=False)
+    subject_id = db.Column(db.String(36), db.ForeignKey("subjects.id"), nullable=True)  # Link to Subject
+    academic_year = db.Column(db.String(20))  # "2025-26"
+    description = db.Column(db.Text)
+    
+    # Extraction status
+    extraction_status = db.Column(db.String(20), default="pending")  # pending, processing, completed, failed
+    extraction_error = db.Column(db.Text)
+    extracted_topics_count = db.Column(db.Integer, default=0)
+    
+    created_by = db.Column(db.String(36), db.ForeignKey("users.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    subject = db.relationship("Subject", backref="syllabi")
+    
+    def to_dict(self):
+        return {
+            "id": str(self.id),
+            "classroom_id": str(self.classroom_id),
+            "document_id": str(self.document_id) if self.document_id else None,
+            "title": self.title,
+            "subject_id": str(self.subject_id) if self.subject_id else None,
+            "academic_year": self.academic_year,
+            "description": self.description,
+            "extraction_status": self.extraction_status,
+            "extracted_topics_count": self.extracted_topics_count,
+            "created_at": self.created_at.isoformat() if self.created_at else None
+        }
+
+
+class QuestionBank(db.Model):
+    """Question bank for a classroom/subject - collection of questions"""
+    __tablename__ = "question_banks"
+    
+    id = db.Column(db.String(36), primary_key=True, default=generate_uuid)
+    classroom_id = db.Column(db.String(36), db.ForeignKey("classrooms.id"), nullable=False, index=True)
+    subject_id = db.Column(db.String(36), db.ForeignKey("subjects.id"), nullable=True)
+    
+    name = db.Column(db.String(200), nullable=False)
+    description = db.Column(db.Text)
+    total_questions = db.Column(db.Integer, default=0)
+    
+    # Source tracking
+    source_type = db.Column(db.String(50), default="generated")  # generated, imported, manual
+    source_document_id = db.Column(db.String(36))  # Reference to source PDF if applicable
+    
+    created_by = db.Column(db.String(36), db.ForeignKey("users.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    questions = db.relationship("Question", backref="question_bank", cascade="all, delete-orphan")
+    
+    def to_dict(self):
+        return {
+            "id": str(self.id),
+            "classroom_id": str(self.classroom_id),
+            "subject_id": str(self.subject_id) if self.subject_id else None,
+            "name": self.name,
+            "description": self.description,
+            "total_questions": self.total_questions,
+            "source_type": self.source_type,
+            "created_at": self.created_at.isoformat() if self.created_at else None
+        }
+
+
+class Question(db.Model):
+    """Individual question with topic linkage and analytics"""
+    __tablename__ = "questions"
+    
+    id = db.Column(db.String(36), primary_key=True, default=generate_uuid)
+    question_bank_id = db.Column(db.String(36), db.ForeignKey("question_banks.id"), nullable=True, index=True)
+    
+    # Topic hierarchy linkage
+    topic_id = db.Column(db.String(36), db.ForeignKey("topics.id"), nullable=True, index=True)
+    subtopic_id = db.Column(db.String(36), db.ForeignKey("subtopics.id"), nullable=True, index=True)
+    
+    # Question content
+    question_type = db.Column(db.String(20), nullable=False)  # mcq, descriptive, short_answer
+    question_text = db.Column(db.Text, nullable=False)
+    
+    # For MCQ: store options as JSON array
+    options = db.Column(JSON, default=list)  # [{"id": "A", "text": "Option A"}, ...]
+    correct_answer = db.Column(db.String(500))  # For MCQ: "A", "B", etc. For descriptive: key points
+    explanation = db.Column(db.Text)  # Explanation shown after answer
+    
+    # Key points for descriptive answers (used for evaluation)
+    key_points = db.Column(JSON, default=list)  # ["point1", "point2", ...]
+    
+    # Difficulty and metadata
+    difficulty = db.Column(db.String(20), default="medium")  # easy, medium, hard
+    marks = db.Column(db.Integer, default=1)
+    time_estimate_seconds = db.Column(db.Integer, default=60)
+    
+    # Source tracking
+    source_chunk_id = db.Column(db.String(100))  # Qdrant point ID if generated from chunk
+    source_content_preview = db.Column(db.Text)  # First 500 chars of source content
+    
+    # Analytics
+    times_used = db.Column(db.Integer, default=0)
+    times_correct = db.Column(db.Integer, default=0)
+    times_incorrect = db.Column(db.Integer, default=0)
+    average_time_taken = db.Column(db.Float)  # Average time students take
+    difficulty_rating = db.Column(db.Float)  # Calculated from success rate
+    
+    # Status
+    is_active = db.Column(db.Boolean, default=True)
+    review_status = db.Column(db.String(20), default="pending")  # pending, approved, rejected
+    
+    created_by = db.Column(db.String(36), db.ForeignKey("users.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    topic = db.relationship("Topic", backref="questions")
+    subtopic = db.relationship("Subtopic", backref="questions")
+    
+    __table_args__ = (
+        db.Index('idx_question_topic', 'topic_id'),
+        db.Index('idx_question_type_difficulty', 'question_type', 'difficulty'),
+    )
+    
+    def to_dict(self, include_answer: bool = False):
+        """Convert to dictionary. Set include_answer=False to hide correct answer for students."""
+        data = {
+            "id": str(self.id),
+            "question_bank_id": str(self.question_bank_id) if self.question_bank_id else None,
+            "topic_id": str(self.topic_id) if self.topic_id else None,
+            "subtopic_id": str(self.subtopic_id) if self.subtopic_id else None,
+            "question_type": self.question_type,
+            "question_text": self.question_text,
+            "options": self.options,
+            "difficulty": self.difficulty,
+            "marks": self.marks,
+            "time_estimate_seconds": self.time_estimate_seconds,
+            "times_used": self.times_used,
+            "is_active": self.is_active,
+            "review_status": self.review_status,
+            "created_at": self.created_at.isoformat() if self.created_at else None
+        }
+        
+        if include_answer:
+            data["correct_answer"] = self.correct_answer
+            data["explanation"] = self.explanation
+            data["key_points"] = self.key_points
+        
+        return data
+    
+    def update_analytics(self, was_correct: bool, time_taken_seconds: int):
+        """Update question analytics after a student answers"""
+        self.times_used += 1
+        if was_correct:
+            self.times_correct += 1
+        else:
+            self.times_incorrect += 1
+        
+        # Update average time
+        if self.average_time_taken is None:
+            self.average_time_taken = float(time_taken_seconds)
+        else:
+            # Running average
+            self.average_time_taken = (
+                (self.average_time_taken * (self.times_used - 1) + time_taken_seconds) / 
+                self.times_used
+            )
+        
+        # Update difficulty rating based on success rate
+        if self.times_used >= 5:  # Only calculate after 5 attempts
+            success_rate = self.times_correct / self.times_used
+            # Invert: lower success rate = higher difficulty
+            self.difficulty_rating = round(1 - success_rate, 2)

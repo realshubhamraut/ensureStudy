@@ -62,6 +62,7 @@ def create_app(config_name=None):
     from app.routes.meetings import meetings_bp
     from app.routes.recordings import recordings_bp
     from app.routes.grading_callback import grading_bp
+    from app.routes.topics import topics_bp
     
     app.register_blueprint(auth_bp)
     app.register_blueprint(users_bp)
@@ -83,11 +84,12 @@ def create_app(config_name=None):
     app.register_blueprint(meetings_bp)
     app.register_blueprint(recordings_bp)
     app.register_blueprint(grading_bp)
+    app.register_blueprint(topics_bp)
     
     # Import models for table creation
     from app.models.organization import Organization, LicensePurchase
     from app.models.student_profile import StudentProfile, ParentStudentLink, TeacherClassAssignment
-    from app.models.curriculum import Subject, Topic, Subtopic, SubtopicAssessment, StudentSubtopicProgress
+    from app.models.curriculum import Subject, Topic, Subtopic, SubtopicAssessment, StudentSubtopicProgress, Syllabus, QuestionBank, Question
     from app.models.classroom import Classroom, StudentClassroom
     from app.models.notes import NoteProcessingJob, DigitizedNotePage, NoteEmbedding, NoteSearchHistory
     from app.models.assignment import Assignment, AssignmentAttachment, Submission, SubmissionFile

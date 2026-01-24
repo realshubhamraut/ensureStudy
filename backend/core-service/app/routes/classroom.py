@@ -220,8 +220,14 @@ def get_syllabus(classroom_id):
     if not classroom:
         return jsonify({"error": "Classroom not found"}), 404
     
-    # Check access: teacher who owns it OR enrolled student
-    if user:
+    # Check for internal service call (X-Service-Key header)
+    service_key = request.headers.get("X-Service-Key")
+    is_internal = service_key == "internal-ai-service"
+    
+    # Check access: teacher who owns it OR enrolled student OR internal service
+    if is_internal:
+        pass  # Internal service calls are allowed
+    elif user:
         is_teacher = classroom.teacher_id == user.id
         is_enrolled = StudentClassroom.query.filter_by(
             student_id=user.id,
@@ -234,13 +240,28 @@ def get_syllabus(classroom_id):
     else:
         return jsonify({"error": "Authentication required"}), 401
     
+    # Generate dynamic syllabus URL based on current request host
+    # This ensures the URL works regardless of which port configuration is used
+    syllabus_url = None
+    if classroom.syllabus_url:
+        # Extract the filename from the stored URL
+        import re
+        match = re.search(r'/api/files/([^/]+)$', classroom.syllabus_url)
+        if match:
+            filename = match.group(1)
+            base_url = request.host_url.rstrip('/')
+            syllabus_url = f"{base_url}/api/files/{filename}"
+        else:
+            syllabus_url = classroom.syllabus_url  # Fallback to stored URL
+    
     return jsonify({
-        "syllabus_url": classroom.syllabus_url,
+        "syllabus_url": syllabus_url,
         "syllabus_content": classroom.syllabus_content,
         "syllabus_filename": classroom.syllabus_filename,
         "syllabus_uploaded_at": classroom.syllabus_uploaded_at.isoformat() if classroom.syllabus_uploaded_at else None,
         "has_syllabus": bool(classroom.syllabus_url or classroom.syllabus_content),
         "classroom_name": classroom.name,
+        "subject": classroom.subject,
         "teacher_name": f"{classroom.teacher.first_name or ''} {classroom.teacher.last_name or ''}".strip() or classroom.teacher.username if classroom.teacher else None
     }), 200
 

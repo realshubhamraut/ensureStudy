@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     # Qdrant Settings
     QDRANT_HOST: str = "localhost"
     QDRANT_PORT: int = 6333
-    QDRANT_COLLECTION: str = "study_materials"
+    QDRANT_COLLECTION: str = "classroom_materials"
     
     # Embedding Settings (Hugging Face - FREE, LOCAL)
     EMBEDDING_MODEL: str = "sentence-transformers/all-mpnet-base-v2"

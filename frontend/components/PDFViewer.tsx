@@ -11,7 +11,7 @@ import {
     PaperAirplaneIcon,
     ChatBubbleLeftRightIcon
 } from '@heroicons/react/24/outline'
-import { getApiBaseUrl } from '@/utils/api'
+import { getApiBaseUrl, getAiServiceUrl } from '@/utils/api'
 import ReactMarkdown from 'react-markdown'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
@@ -49,11 +49,24 @@ export default function PDFViewer({ pdfUrl, title, fileSize, materialId, classro
     const [chatLoading, setChatLoading] = useState(false)
     const chatEndRef = useRef<HTMLDivElement>(null)
 
-    // Fix URL if it points to wrong port
+    // Fix URL to use the correct API based on current frontend port
+    // Port 3000 (run-local.sh) -> API on port 8000
+    // Port 4000 (run-lan.sh) -> API on port 9000
     const correctedUrl = useMemo(() => {
         if (!pdfUrl) return pdfUrl
-        const apiUrl = process.env.NEXT_PUBLIC_API_URL || `http://${window.location.hostname}:9000`
-        return pdfUrl.replace(/http:\/\/localhost:(8000|5000)/g, apiUrl)
+
+        // Get the current API base URL dynamically
+        const apiBaseUrl = getApiBaseUrl()
+
+        // Extract just the filename from the URL
+        const match = pdfUrl.match(/\/api\/files\/([^\/]+)$/)
+        if (match) {
+            const filename = match[1]
+            return `${apiBaseUrl}/api/files/${filename}`
+        }
+
+        // Fallback: replace any localhost:PORT pattern with current API URL
+        return pdfUrl.replace(/https?:\/\/[^\/]+\/api\/files\//, `${apiBaseUrl}/api/files/`)
     }, [pdfUrl])
 
     const isValidUrl = correctedUrl && correctedUrl !== '#' && correctedUrl.length > 1
@@ -94,8 +107,8 @@ export default function PDFViewer({ pdfUrl, title, fileSize, materialId, classro
         setChatLoading(true)
 
         try {
-            // HARDCODED: run-local.sh uses port 9001 for AI service
-            const aiServiceUrl = 'http://localhost:9001'
+            // Use dynamic AI service URL based on current frontend port
+            const aiServiceUrl = getAiServiceUrl()
 
             console.log('[PDF Chat] Sending request to:', `${aiServiceUrl}/api/tutor/document-chat`)
             console.log('[PDF Chat] Query:', text)

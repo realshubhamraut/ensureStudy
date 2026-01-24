@@ -1,7 +1,11 @@
 #!/bin/bash
-# Run ensureStudy locally without Docker
-# Uses different ports than run-lan.sh to avoid conflicts
-# All logs are stored in ./logs directory
+# ============================================================================
+# run-local.sh - LOCAL Development Only (Your Machine)
+# ============================================================================
+# Ports: Frontend 3000, Core API 8000, AI Service 8001
+# Access: https://localhost:3000 (YOUR MACHINE ONLY)
+# Can run SIMULTANEOUSLY with run-lan.sh (uses different ports)
+# ============================================================================
 
 set -e
 
@@ -9,192 +13,111 @@ PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
 VENV_PATH="$PROJECT_ROOT/venv"
 LOG_DIR="$PROJECT_ROOT/logs"
 
-# Different ports from run-lan.sh to allow both to run
-CORE_PORT=9000
-AI_PORT=9001
-FRONTEND_PORT=4000
-DASH_MAIN_PORT=9501
-DASH_NOTES_PORT=9502
+# LOCAL PORTS (different from run-lan.sh for simultaneous running)
+FRONTEND_PORT=3000
+CORE_PORT=8000
+AI_PORT=8001
 
 # Colors
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 YELLOW='\033[0;33m'
 RED='\033[0;31m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
-# Create logs directory
 mkdir -p "$LOG_DIR"
 
-echo -e "${BLUE}=== ensureStudy Local Development ===${NC}"
-echo -e "${BLUE}Logs stored in: $LOG_DIR${NC}"
+echo -e "${BLUE}╔════════════════════════════════════════════════════════════╗${NC}"
+echo -e "${BLUE}║       ensureStudy LOCAL Development (HTTPS)                ║${NC}"
+echo -e "${BLUE}╚════════════════════════════════════════════════════════════╝${NC}"
+echo -e "${BLUE}Ports: Frontend=$FRONTEND_PORT, API=$CORE_PORT, AI=$AI_PORT${NC}"
+echo ""
 
-# Kill any stale processes on our ports
+# Kill stale processes on our ports only
 echo -e "${YELLOW}Killing stale processes on ports $CORE_PORT, $AI_PORT, $FRONTEND_PORT...${NC}"
 lsof -ti:$CORE_PORT | xargs kill -9 2>/dev/null || true
 lsof -ti:$AI_PORT | xargs kill -9 2>/dev/null || true
 lsof -ti:$FRONTEND_PORT | xargs kill -9 2>/dev/null || true
-lsof -ti:$DASH_MAIN_PORT | xargs kill -9 2>/dev/null || true
-lsof -ti:$DASH_NOTES_PORT | xargs kill -9 2>/dev/null || true
 sleep 1
 
-# Start Qdrant using docker-compose (if docker is available)
-echo -e "${YELLOW}Starting Qdrant vector database...${NC}"
-if command -v docker &> /dev/null; then
-    # Check if Docker daemon is running
-    if ! docker info &> /dev/null; then
-        echo -e "${YELLOW}Docker daemon not running. Attempting to start Docker Desktop...${NC}"
-        open -a Docker 2>/dev/null || true
-        
-        # Wait up to 30 seconds for Docker to start
-        echo -e "${YELLOW}Waiting for Docker to start (up to 30s)...${NC}"
-        for i in {1..30}; do
-            if docker info &> /dev/null; then
-                echo -e "${GREEN}Docker is now running!${NC}"
-                break
-            fi
-            sleep 1
-            echo -n "."
-        done
-        echo ""
-        
-        if ! docker info &> /dev/null; then
-            echo -e "${RED}Docker failed to start. Please start Docker Desktop manually.${NC}"
-            echo -e "${RED}Classroom materials will NOT be available without Qdrant.${NC}"
-        fi
+# Generate mkcert certificates for localhost
+CERT_FILE="$PROJECT_ROOT/localhost+2.pem"
+KEY_FILE="$PROJECT_ROOT/localhost+2-key.pem"
+
+if [ ! -f "$CERT_FILE" ] || [ ! -f "$KEY_FILE" ]; then
+    echo -e "${YELLOW}Generating mkcert certificates for localhost...${NC}"
+    if ! command -v mkcert &> /dev/null; then
+        echo -e "${RED}mkcert not found! Install with: brew install mkcert${NC}"
+        exit 1
     fi
-    
-    # Try to start Qdrant if Docker is running
-    if docker info &> /dev/null; then
-        # Start only qdrant service from docker-compose
-        docker-compose up -d qdrant 2>/dev/null || docker compose up -d qdrant 2>/dev/null || {
-            echo -e "${YELLOW}Starting Qdrant standalone...${NC}"
-            docker start ensure-study-qdrant 2>/dev/null || \
-            docker run -d --name ensure-study-qdrant -p 6333:6333 -p 6334:6334 qdrant/qdrant 2>/dev/null || true
-        }
-        echo -e "${GREEN}Qdrant started on http://localhost:6333${NC}"
-        
-        # Start MongoDB for meeting transcription storage
-        echo -e "${YELLOW}Starting MongoDB...${NC}"
-        docker start mongodb 2>/dev/null || docker run -d --name mongodb -p 27017:27017 mongo:latest 2>/dev/null || true
-        echo -e "${GREEN}MongoDB started on localhost:27017${NC}"
-    fi
+    mkcert -install
+    cd "$PROJECT_ROOT"
+    mkcert localhost 127.0.0.1 ::1
+    echo -e "${GREEN}✓ Certificates generated${NC}"
 else
-    echo -e "${RED}Docker not found - Qdrant and MongoDB won't be available${NC}"
+    echo -e "${GREEN}✓ Using existing certificates${NC}"
 fi
 
-# Check if venv exists
-if [ ! -d "$VENV_PATH" ]; then
-    echo "Creating virtual environment..."
-    python3 -m venv "$VENV_PATH"
+# Start Docker services
+if command -v docker &> /dev/null && docker info &> /dev/null 2>&1; then
+    docker start ensure-study-qdrant 2>/dev/null || docker run -d --name ensure-study-qdrant -p 6333:6333 -p 6334:6334 qdrant/qdrant 2>/dev/null || true
+    docker start mongodb 2>/dev/null || docker run -d --name mongodb -p 27017:27017 mongo:latest 2>/dev/null || true
 fi
 
-# Activate venv if not already activated
-if [ -z "$VIRTUAL_ENV" ] || [ "$VIRTUAL_ENV" != "$VENV_PATH" ]; then
-    echo -e "${YELLOW}Activating virtual environment...${NC}"
-    source "$VENV_PATH/bin/activate"
-else
-    echo -e "${GREEN}Virtual environment already active${NC}"
-fi
+# Setup Python virtual environment
+[ ! -d "$VENV_PATH" ] && python3 -m venv "$VENV_PATH"
+[ -z "$VIRTUAL_ENV" ] && source "$VENV_PATH/bin/activate"
 
-# Check if flask is installed
-if ! python -c "import flask" 2>/dev/null; then
-    echo "Installing Python dependencies..."
-    pip install flask flask-cors flask-sqlalchemy flask-migrate pyjwt werkzeug redis python-dotenv gunicorn
-    pip install fastapi uvicorn pydantic python-jose python-multipart aiohttp httpx openai langchain langchain-openai sentence-transformers
-fi
+# Load environment
+[ -f "$PROJECT_ROOT/.env" ] && export $(grep -v '^#' "$PROJECT_ROOT/.env" | xargs)
 
-# Check if streamlit is installed
-if ! python -c "import streamlit" 2>/dev/null; then
-    echo "Installing Streamlit..."
-    pip install streamlit plotly pandas
-fi
-
-# Load environment variables from .env
-if [ -f "$PROJECT_ROOT/.env" ]; then
-    export $(grep -v '^#' "$PROJECT_ROOT/.env" | xargs)
-fi
-
-# Set environment variables - Use PostgreSQL from .env
-export FLASK_APP=app
-export FLASK_DEBUG=1
+export FLASK_APP=app FLASK_DEBUG=1 PYTHONUNBUFFERED=1
 export JWT_SECRET="${JWT_SECRET:-local-dev-jwt-secret-key-32chars}"
-export OPENAI_API_KEY="${OPENAI_API_KEY:-sk-test-key}"
-export PYTHONUNBUFFERED=1
-export AI_SERVICE_URL="http://localhost:$AI_PORT"
-export CORE_SERVICE_URL="http://localhost:$CORE_PORT"
-export HUGGINGFACE_API_KEY="${HUGGINGFACE_API_KEY:-}"  # Set this for olmOCR-7B support
+export AI_SERVICE_URL="https://localhost:$AI_PORT"
+export CORE_SERVICE_URL="https://localhost:$CORE_PORT"
 
-# Date for log files
 DATE=$(date +%Y-%m-%d)
 
-# Start Core API with logging
-echo -e "${GREEN}Starting Core API on http://localhost:$CORE_PORT${NC}"
+# Start Core API (localhost only)
+echo -e "${GREEN}Starting Core API on https://localhost:$CORE_PORT${NC}"
 cd "$PROJECT_ROOT/backend/core-service"
-python -m flask run --port $CORE_PORT 2>&1 | tee -a "$LOG_DIR/core-service_$DATE.log" &
-CORE_PID=$!
-
-sleep 2
-
-# Start AI Service with logging
-echo -e "${GREEN}Starting AI Service on http://localhost:$AI_PORT${NC}"
-cd "$PROJECT_ROOT/backend/ai-service"
-python -m uvicorn app.main:app --port $AI_PORT --reload 2>&1 | tee -a "$LOG_DIR/ai-service_$DATE.log" &
-AI_PID=$!
-
-sleep 2
-
-# Start Frontend with logging
-echo -e "${GREEN}Starting Frontend on http://localhost:$FRONTEND_PORT${NC}"
-cd "$PROJECT_ROOT/frontend"
-if [ ! -d "node_modules" ]; then
-    echo "Installing npm dependencies..."
-    npm install
-fi
-
-# Set API URLs to use the local ports
-export NEXT_PUBLIC_API_URL="http://localhost:$CORE_PORT"
-export NEXT_PUBLIC_AI_URL="http://localhost:$AI_PORT"
-
-NEXTAUTH_SECRET="${JWT_SECRET:-local-dev-jwt-secret-key-32chars}" \
-NEXTAUTH_URL="http://localhost:$FRONTEND_PORT" \
-npm run dev -- --port $FRONTEND_PORT 2>&1 | tee -a "$LOG_DIR/frontend_$DATE.log" &
-FRONTEND_PID=$!
-
-sleep 2
-
-# Wait a bit for services to start
+python run_https.py "$CERT_FILE" "$KEY_FILE" $CORE_PORT 2>&1 | tee -a "$LOG_DIR/core-local_$DATE.log" &
 sleep 3
 
-echo ""
-echo -e "${GREEN}=== All services started (LOCAL) ===${NC}"
-echo "┌────────────────────────────────────────────────┐"
-echo "│ Core API:       http://localhost:$CORE_PORT          │"
-echo "│ AI Service:     http://localhost:$AI_PORT          │"
-echo "│ Frontend:       http://localhost:$FRONTEND_PORT          │"
-echo "│ Qdrant (Vector):http://localhost:6333          │"
-echo "├────────────────────────────────────────────────┤"
-echo "│ Logs:           $LOG_DIR  │"
-echo "└────────────────────────────────────────────────┘"
-echo ""
-echo -e "${YELLOW}NOTE: These ports differ from run-lan.sh to avoid conflicts${NC}"
-echo -e "${YELLOW}Log files:${NC}"
-echo "  tail -f $LOG_DIR/core-service_$DATE.log"
-echo "  tail -f $LOG_DIR/ai-service_$DATE.log"
-echo "  tail -f $LOG_DIR/frontend_$DATE.log"
-echo ""
-echo "Press Ctrl+C to stop all services"
+# Start AI Service (localhost only)
+echo -e "${GREEN}Starting AI Service on https://localhost:$AI_PORT${NC}"
+cd "$PROJECT_ROOT/backend/ai-service"
+python -m uvicorn app.main:app --host 127.0.0.1 --port $AI_PORT \
+    --ssl-keyfile "$KEY_FILE" --ssl-certfile "$CERT_FILE" \
+    --reload 2>&1 | tee -a "$LOG_DIR/ai-local_$DATE.log" &
+sleep 3
 
-# Trap Ctrl+C and cleanup
-cleanup() {
-    echo ""
-    echo -e "${YELLOW}Stopping services...${NC}"
-    kill $CORE_PID $AI_PID $FRONTEND_PID 2>/dev/null
-    echo -e "${GREEN}All services stopped. Logs saved to $LOG_DIR${NC}"
-    exit 0
-}
+# Start Frontend (localhost only)
+echo -e "${GREEN}Starting Frontend on https://localhost:$FRONTEND_PORT${NC}"
+cd "$PROJECT_ROOT/frontend"
+[ ! -d "node_modules" ] && npm install
 
-trap cleanup SIGINT SIGTERM
+NEXT_PUBLIC_API_URL="https://localhost:$CORE_PORT" \
+NEXT_PUBLIC_AI_SERVICE_URL="https://localhost:$AI_PORT" \
+NEXTAUTH_SECRET="${JWT_SECRET}" \
+NEXTAUTH_URL="https://localhost:$FRONTEND_PORT" \
+npm run dev -- --port $FRONTEND_PORT --experimental-https 2>&1 | tee -a "$LOG_DIR/frontend-local_$DATE.log" &
 
-# Wait for any process to exit
+sleep 5
+
+echo ""
+echo -e "${GREEN}╔════════════════════════════════════════════════════════════╗${NC}"
+echo -e "${GREEN}║       LOCAL Session Ready! 🔒                              ║${NC}"
+echo -e "${GREEN}╠════════════════════════════════════════════════════════════╣${NC}"
+echo -e "${GREEN}║  Frontend:     ${YELLOW}https://localhost:$FRONTEND_PORT${NC}                     ${GREEN}║${NC}"
+echo -e "${GREEN}║  Core API:     ${YELLOW}https://localhost:$CORE_PORT${NC}                     ${GREEN}║${NC}"
+echo -e "${GREEN}║  AI Service:   ${YELLOW}https://localhost:$AI_PORT${NC}                     ${GREEN}║${NC}"
+echo -e "${GREEN}╠════════════════════════════════════════════════════════════╣${NC}"
+echo -e "${GREEN}║  ${BLUE}This is YOUR session. Uses localhost ONLY.${NC}               ${GREEN}║${NC}"
+echo -e "${GREEN}║  ${BLUE}Run run-lan.sh in another terminal for friend access.${NC}   ${GREEN}║${NC}"
+echo -e "${GREEN}╚════════════════════════════════════════════════════════════╝${NC}"
+echo ""
+echo "Press Ctrl+C to stop"
+
+trap 'echo ""; echo -e "${YELLOW}Stopping LOCAL services...${NC}"; pkill -P $$; exit 0' SIGINT SIGTERM
 wait

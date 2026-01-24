@@ -40,8 +40,12 @@ export default function SignInPage() {
         setLoading(true)
 
         try {
-            // First authenticate with backend
-            const res = await fetch(`${getApiBaseUrl()}/api/auth/login`, {
+            // Authenticate with backend API
+            const loginUrl = `${getApiBaseUrl()}/api/auth/login`
+            console.log('[Login] Calling API:', loginUrl)
+            console.log('[Login] From:', window.location.origin)
+
+            const res = await fetch(loginUrl, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ email, password })

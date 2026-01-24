@@ -123,38 +123,40 @@ async def process_tutor_query(request: TutorQueryRequest) -> TutorQueryResponse:
             subject=request.subject.value if request.subject else None
         )
         
-        # Also search classroom materials if classroom_id is provided
+        # ALWAYS search classroom materials (even if no specific classroom selected)
+        # When no classroom_id, search across ALL classrooms
         classroom_chunks = []
         transcript_chunks = []
         
+        # Search classroom materials (PDFs, docs, etc.)
+        try:
+            from ...services.material_indexer import get_material_indexer
+            indexer = get_material_indexer()
+            classroom_results = indexer.search_classroom_materials(
+                query=request.question,
+                classroom_id=request.classroom_id,  # None = search all
+                top_k=5,
+                score_threshold=0.3
+            )
+            # Convert to same format as regular chunks
+            from ...services.retrieval import RetrievedChunk
+            for r in classroom_results:
+                classroom_chunks.append(RetrievedChunk(
+                    document_id=r["document_id"],
+                    chunk_id=f"classroom_{r['document_id']}",
+                    text=r["chunk_text"],
+                    similarity_score=r["similarity_score"],
+                    title=r.get("title", "Classroom Material"),
+                    page_number=r.get("page_number", 0),
+                    url=r.get("url", "")
+                ))
+            print(f"[TUTOR] 📚 Found {len(classroom_chunks)} classroom material chunks" + 
+                  (f" from classroom {request.classroom_id}" if request.classroom_id else " from ALL classrooms"))
+        except Exception as e:
+            print(f"[TUTOR] ⚠ Classroom material search failed: {e}")
+        
+        # Search meeting transcripts if classroom_id is provided
         if request.classroom_id:
-            # Search classroom materials (PDFs, docs, etc.)
-            try:
-                from ...services.material_indexer import get_material_indexer
-                indexer = get_material_indexer()
-                classroom_results = indexer.search_classroom_materials(
-                    query=request.question,
-                    classroom_id=request.classroom_id,
-                    top_k=5,
-                    score_threshold=0.3
-                )
-                # Convert to same format as regular chunks
-                from ...services.retrieval import RetrievedChunk
-                for r in classroom_results:
-                    classroom_chunks.append(RetrievedChunk(
-                        document_id=r["document_id"],
-                        chunk_id=f"classroom_{r['document_id']}",
-                        text=r["chunk_text"],
-                        similarity_score=r["similarity_score"],
-                        title=r.get("title", "Classroom Material"),
-                        page_number=r.get("page_number", 0),
-                        url=r.get("url", "")
-                    ))
-                print(f"[TUTOR] Found {len(classroom_chunks)} classroom material chunks")
-            except Exception as e:
-                print(f"[TUTOR] Classroom material search failed: {e}")
-            
-            # Search meeting transcripts (what the teacher said in class!)
             try:
                 from ...services.retrieval import search_meeting_transcripts
                 transcript_results = search_meeting_transcripts(
@@ -164,9 +166,9 @@ async def process_tutor_query(request: TutorQueryRequest) -> TutorQueryResponse:
                     threshold=0.4
                 )
                 transcript_chunks = transcript_results
-                print(f"[TUTOR] Found {len(transcript_chunks)} meeting transcript chunks")
+                print(f"[TUTOR] 🎤 Found {len(transcript_chunks)} meeting transcript chunks")
             except Exception as e:
-                print(f"[TUTOR] Meeting transcript search failed: {e}")
+                print(f"[TUTOR] ⚠ Meeting transcript search failed: {e}")
         
         # Merge and sort by score (classroom materials and transcripts get priority boost)
         all_classroom_content = classroom_chunks + transcript_chunks
@@ -343,11 +345,49 @@ async def process_tutor_query(request: TutorQueryRequest) -> TutorQueryResponse:
             suggested_topics=llm_response.suggested_topics
         )
         
+        # Helper function to extract a meaningful title
+        def get_source_title(chunk) -> str:
+            # Priority 1: Use existing title
+            if chunk.title and chunk.title.strip() and chunk.title != "Source":
+                return chunk.title
+            
+            # Priority 2: Extract from URL
+            if chunk.url:
+                from urllib.parse import urlparse
+                parsed = urlparse(chunk.url)
+                domain = parsed.netloc.replace('www.', '').replace('en.', '')
+                # Extract page name from path
+                path_parts = [p for p in parsed.path.split('/') if p]
+                if path_parts:
+                    page_name = path_parts[-1].replace('_', ' ').replace('-', ' ')
+                    # Clean up file extensions
+                    page_name = page_name.replace('.html', '').replace('.pdf', '')
+                    if len(page_name) > 3:
+                        return f"{page_name[:50]}"
+                # Fallback to domain name
+                if domain:
+                    domain_name = domain.split('.')[0].title()
+                    return f"{domain_name} Article"
+            
+            # Priority 3: Use topic from metadata
+            topic = chunk.metadata.get("topic", "") if chunk.metadata else ""
+            if topic and topic != "Source":
+                return topic
+            
+            # Priority 4: Extract from text preview
+            if hasattr(chunk, 'text') and chunk.text:
+                # Get first meaningful sentence
+                text = chunk.text[:100].strip()
+                if text:
+                    return f"{text[:40]}..."
+            
+            return "Study Material"
+        
         sources = [
             SourceInfo(
                 document_id=chunk.document_id,
                 chunk_id=chunk.chunk_id,
-                title=chunk.title or chunk.metadata.get("topic", "Source"),
+                title=get_source_title(chunk),
                 similarity_score=round(chunk.similarity_score, 3),
                 url=chunk.url,
                 page_number=chunk.page_number if chunk.page_number is not None else 0

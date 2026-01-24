@@ -16,6 +16,8 @@ from .api.routes.softskills import router as softskills_router
 from .api.routes.web_ingest import router as web_ingest_router
 from .api.routes.indexing import router as indexing_router
 from .api.routes.grading import router as grading_router
+from .api.routes.syllabus import router as syllabus_router
+from .api.routes.questions import router as questions_router
 from .api.notes import router as notes_router
 from .api.meetings import router as meetings_router
 from .api.meeting_qa import router as meeting_qa_router
@@ -92,6 +94,8 @@ app.include_router(proctor_router)
 app.include_router(web_ingest_router)
 app.include_router(indexing_router)
 app.include_router(grading_router)
+app.include_router(syllabus_router)  # /api/syllabus
+app.include_router(questions_router)  # /api/questions
 
 
 @app.on_event("startup")
