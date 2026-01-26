@@ -184,7 +184,7 @@ def finalize_recording():
         # Trigger transcription processing in AI service (async, non-blocking)
         try:
             import requests
-            ai_service_url = os.getenv('AI_SERVICE_URL', 'http://localhost:8001')
+            ai_service_url = os.getenv('AI_SERVICE_URL', 'https://localhost:8001')
             video_path = final_path
             
             requests.post(
@@ -195,7 +195,8 @@ def finalize_recording():
                     'classroom_id': meeting.classroom_id,
                     'video_path': video_path
                 },
-                timeout=2.0  # Quick timeout - processing happens in background
+                timeout=2.0,  # Quick timeout - processing happens in background
+                verify=False  # Allow self-signed certs in dev
             )
             print(f"[Recording] Triggered transcription for recording {recording_id}")
         except Exception as e:

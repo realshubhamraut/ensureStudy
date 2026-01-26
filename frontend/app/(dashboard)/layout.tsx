@@ -17,7 +17,8 @@ import {
     Bars3Icon,
     XMarkIcon,
     FolderIcon,
-    UserGroupIcon
+    UserGroupIcon,
+    RocketLaunchIcon
 } from '@heroicons/react/24/outline'
 import { useState, useCallback, useRef } from 'react'
 import clsx from 'clsx'
@@ -26,6 +27,7 @@ import { NotificationBell } from '@/components/NotificationBell'
 const navigation = [
     { name: 'Dashboard', href: '/dashboard', icon: HomeIcon },
     { name: 'My Classrooms', href: '/classrooms', icon: FolderIcon },
+    { name: 'Curriculum', href: '/curriculum', icon: RocketLaunchIcon },
     { name: 'Interact', href: '/interact', icon: ChatBubbleLeftRightIcon },
     { name: 'AI Tutor', href: '/chat', icon: BookOpenIcon },
     { name: 'Soft Skills AI', href: '/softskills', icon: UserGroupIcon },

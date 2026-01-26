@@ -1,16 +1,17 @@
 """
 Web Knowledge Ingest Service - MULTI-WORKER PARALLEL CRAWLER
 
-7-Worker Pipeline Architecture:
+8-Worker Pipeline Architecture:
   Worker-1: Topic Extraction (NLP)
-  Worker-2: DuckDuckGo Discovery (1 call/query)
+  Worker-2A: Serper API Search (Google SERP - top 5 results)
+  Worker-2B: DuckDuckGo Fallback (if Serper fails)
   Worker-3: Wikipedia Search API
   Worker-4: Wikipedia Content Fetch
-  Worker-5: Parallel Page Crawlers (async)
+  Worker-5: Parallel Page Crawlers (async, 3-5 URLs)
   Worker-6: Content Cleaner (trafilatura)
   Worker-7: Chunk + Embed (MiniLM)
 
-Wikipedia is PRIMARY knowledge source.
+Multi-source search: Serper API (primary), DuckDuckGo (fallback), Wikipedia (always).
 Guarantees ≥1 resource when internet available.
 """
 import os
@@ -494,7 +495,7 @@ async def worker5_parallel_crawl(urls: List[str]) -> List[Dict[str, Any]]:
 # Worker-2: DuckDuckGo Discovery (1 call/sec limit)
 # ============================================================================
 
-def worker2_duckduckgo_search(query: str, max_results: int = 3) -> List[Dict[str, Any]]:
+def worker2_duckduckgo_search(query: str, max_results: int = 5) -> List[Dict[str, Any]]:
     """
     WORKER-2: DuckDuckGo URL Discovery.
     Makes EXACTLY 1 API call per query (rate limit: 1 call/sec).
@@ -503,7 +504,7 @@ def worker2_duckduckgo_search(query: str, max_results: int = 3) -> List[Dict[str
     
     Args:
         query: Full user query (not shortened keywords)
-        max_results: Maximum URLs to return (default 3)
+        max_results: Maximum URLs to return (default 5)
         
     Returns:
         List of search results with URLs
@@ -514,27 +515,40 @@ def worker2_duckduckgo_search(query: str, max_results: int = 3) -> List[Dict[str
         print(f"[WORKER-2] DuckDuckGo search for: {query[:50]}...")
         
         with DDGS() as ddgs:
-            # ENHANCED: Search for educational content broadly
+            # ENHANCED: Search for educational content with site biases
             # Include trusted educational sources in query context
-            educational_query = f"{query} tutorial explanation learn"
+            educational_query = f"{query} site:wikipedia.org OR site:khanacademy.org OR site:britannica.com OR site:byjus.com OR site:toppr.com OR explanation tutorial"
             results = list(ddgs.text(
                 educational_query,
-                max_results=min(max_results + 2, 6),  # Get extra for filtering
+                max_results=min(max_results + 3, 10),  # Get extra for filtering
                 region='us-en',
                 safesearch='on'
             ))
         
         # Filter out low-quality domains
-        blocked_domains = ['pinterest', 'facebook', 'twitter', 'instagram', 'tiktok', 'reddit']
+        blocked_domains = ['pinterest', 'facebook', 'twitter', 'instagram', 'tiktok', 'reddit', 'quora', 'yahoo']
         filtered_results = [
             r for r in results 
             if r.get('href') and not any(bd in r.get('href', '').lower() for bd in blocked_domains)
         ]
         
-        urls_found = [r.get('href', '') for r in filtered_results if r.get('href')]
-        print(f"[WORKER-2] ✅ DuckDuckGo URLs ({len(urls_found)}): {urls_found[:3]}")
+        # Prioritize trusted educational domains
+        trusted_domains = ['wikipedia', 'khanacademy', 'britannica', 'byjus', 'toppr', 'ncert', '.edu', 'coursera', 'edx', 'mit.edu']
         
-        return filtered_results[:max_results]
+        def get_priority(result):
+            url = result.get('href', '').lower()
+            for idx, domain in enumerate(trusted_domains):
+                if domain in url:
+                    return idx
+            return len(trusted_domains) + 1
+        
+        # Sort by trust priority
+        sorted_results = sorted(filtered_results, key=get_priority)
+        
+        urls_found = [r.get('href', '') for r in sorted_results if r.get('href')]
+        print(f"[WORKER-2] ✅ DuckDuckGo URLs ({len(urls_found)}): {urls_found[:5]}")
+        
+        return sorted_results[:max_results]
         
     except Exception as e:
         print(f"[WORKER-2] ❌ DuckDuckGo error: {e}")
@@ -692,7 +706,7 @@ def store_in_qdrant(chunks: List[Dict[str, Any]], embeddings: List[List[float]])
 async def ingest_web_resources(
     query: str,
     subject: Optional[str] = None,
-    max_sources: int = 3,
+    max_sources: int = 5,  # Increased for multi-source
     conversation_history: list = None
 ) -> IngestResult:
     """
@@ -746,21 +760,39 @@ async def ingest_web_resources(
         if wiki_search:
             wiki_data = await worker4_wikipedia_content(wiki_search['canonical_title'])
         
-        # WORKER-2: DuckDuckGo (1 call only)
-        search_results = worker2_duckduckgo_search(topic, max_results=3)
+        # WORKER-2A: Serper API Search (primary - multi-source)
+        serper_urls = []
+        try:
+            from .search_api import search_web
+            serper_results = await search_web(topic, num_results=5)
+            serper_urls = [r['url'] for r in serper_results if r.get('url')]
+            if serper_urls:
+                print(f"[WORKER-2A] ✅ Serper found {len(serper_urls)} sources")
+                for u in serper_urls:
+                    print(f"  - {u}")
+        except Exception as e:
+            print(f"[WORKER-2A] ⚠️ Serper search failed: {e}")
+        
+        # WORKER-2B: DuckDuckGo search (always run for diverse sources)
+        ddg_urls = []
+        print(f"[WORKER-2B] DuckDuckGo search for diverse sources...")
+        search_results = worker2_duckduckgo_search(topic, max_results=5)
+        ddg_urls = [r.get('href') for r in search_results if r.get('href')]
         
         # Collect URLs for parallel fetch
         urls_to_fetch = []
         
-        # Add Wikipedia URL if available
+        # Add Wikipedia URL first (highest trust)
         if wiki_data:
             wiki_url = wiki_data.get('url')
             if wiki_url:
                 urls_to_fetch.append(wiki_url)
                 print(f"[PIPELINE] Wikipedia URL added: {wiki_url}")
         
-        # Add DuckDuckGo URLs
-        ddg_urls = [r.get('href') for r in search_results if r.get('href')]
+        # Add Serper URLs (multi-source)
+        urls_to_fetch.extend(serper_urls)
+        
+        # Add DuckDuckGo URLs as fallback
         urls_to_fetch.extend(ddg_urls)
         
         # Fallback: If still no URLs, try Wikipedia Search API

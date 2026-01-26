@@ -1,9 +1,11 @@
 """
 Recording Processing API
 Handles transcription and embedding generation for meeting recordings
+Supports both local filesystem and S3 storage
 """
 import os
 import asyncio
+import tempfile
 import httpx
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from pydantic import BaseModel
@@ -15,8 +17,49 @@ from app.services.meeting_embedding_service import meeting_embedding_service
 router = APIRouter(prefix="/api/process", tags=["recording-processing"])
 
 # Core service URL for status updates
-CORE_SERVICE_URL = os.getenv('CORE_SERVICE_URL', 'http://localhost:9000')
-RECORDINGS_DIR = os.getenv('RECORDINGS_DIR', '/Users/proxim/projects/ensureStudy/backend/core-service/recordings')
+CORE_SERVICE_URL = os.getenv('CORE_SERVICE_URL', 'https://localhost:8000')
+RECORDINGS_DIR = os.getenv('RECORDINGS_DIR', '/app/recordings')
+
+# Storage configuration
+STORAGE_PROVIDER = os.getenv('STORAGE_PROVIDER', 'local')  # 'local' or 's3'
+AWS_S3_BUCKET = os.getenv('AWS_S3_BUCKET', 'ensurestudy-files')
+AWS_REGION = os.getenv('AWS_REGION', 'ap-south-1')
+
+# Lazy-loaded S3 client
+_s3_client = None
+
+
+def get_s3_client():
+    """Get or create S3 client"""
+    global _s3_client
+    if _s3_client is None:
+        try:
+            import boto3
+            _s3_client = boto3.client('s3', region_name=AWS_REGION)
+        except ImportError:
+            print("[Process] boto3 not installed, S3 unavailable")
+            return None
+    return _s3_client
+
+
+async def download_from_s3(s3_key: str) -> str:
+    """Download file from S3 to temp location, returns local path"""
+    s3 = get_s3_client()
+    if not s3:
+        raise RuntimeError("S3 client not available")
+    
+    # Get file extension from key
+    ext = os.path.splitext(s3_key)[1] or '.webm'
+    temp_file = tempfile.NamedTemporaryFile(suffix=ext, delete=False)
+    
+    print(f"[Process] Downloading from S3: {s3_key}")
+    
+    def do_download():
+        s3.download_file(AWS_S3_BUCKET, s3_key, temp_file.name)
+    
+    await asyncio.to_thread(do_download)
+    print(f"[Process] Downloaded to: {temp_file.name}")
+    return temp_file.name
 
 
 class ProcessRecordingRequest(BaseModel):
@@ -51,7 +94,7 @@ async def update_recording_status(
         if summary:
             data["summary"] = summary
             
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(verify=False) as client:  # Allow self-signed certs
             await client.patch(
                 f"{CORE_SERVICE_URL}/api/recordings/{recording_id}/status",
                 json=data,
@@ -131,23 +174,48 @@ async def process_recording(
     """
     Start processing a recording in the background
     Called by core-service after recording is finalized
-    """
-    # Determine video path
-    video_path = request.video_path
-    if not video_path:
-        # Default path based on recording ID
-        video_path = os.path.join(RECORDINGS_DIR, f"{request.recording_id}.webm")
-        
-        # Check for MP4 version
-        mp4_path = os.path.join(RECORDINGS_DIR, f"{request.recording_id}.mp4")
-        if os.path.exists(mp4_path):
-            video_path = mp4_path
     
-    if not os.path.exists(video_path):
-        raise HTTPException(
-            status_code=404,
-            detail=f"Video file not found: {video_path}"
-        )
+    Supports both local filesystem and S3 storage:
+    - STORAGE_PROVIDER=local: Uses local filesystem path
+    - STORAGE_PROVIDER=s3: Downloads from S3 to temp file first
+    """
+    video_path = request.video_path
+    s3_key = None  # Track if we need to download from S3
+    
+    if STORAGE_PROVIDER == 's3':
+        # For S3, the video_path is actually an S3 key
+        if video_path:
+            # If path is provided, use it as S3 key
+            s3_key = video_path if not video_path.startswith('/') else f"recordings/{request.recording_id}.webm"
+        else:
+            # Default S3 key
+            s3_key = f"recordings/{request.recording_id}.webm"
+        
+        # Try to download from S3
+        try:
+            video_path = await download_from_s3(s3_key)
+            print(f"[Process] Downloaded S3 file to: {video_path}")
+        except Exception as e:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Failed to download from S3: {s3_key} - {e}"
+            )
+    else:
+        # Local storage
+        if not video_path:
+            # Default path based on recording ID
+            video_path = os.path.join(RECORDINGS_DIR, f"{request.recording_id}.webm")
+            
+            # Check for MP4 version
+            mp4_path = os.path.join(RECORDINGS_DIR, f"{request.recording_id}.mp4")
+            if os.path.exists(mp4_path):
+                video_path = mp4_path
+        
+        if not os.path.exists(video_path):
+            raise HTTPException(
+                status_code=404,
+                detail=f"Video file not found: {video_path}"
+            )
     
     # Start background processing
     background_tasks.add_task(

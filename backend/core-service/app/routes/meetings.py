@@ -43,6 +43,17 @@ def list_meetings(classroom_id):
     if not classroom:
         return jsonify({"error": "Classroom not found"}), 404
     
+    # Check if user is teacher or enrolled student
+    is_teacher = classroom.teacher_id == user_id
+    is_enrolled = StudentClassroom.query.filter_by(
+        student_id=user_id,
+        classroom_id=classroom_id,
+        is_active=True
+    ).first() is not None
+    
+    if not (is_teacher or is_enrolled):
+        return jsonify({"error": "Access denied. You must be enrolled in this classroom."}), 403
+    
     # Get status filter
     status = request.args.get('status')  # scheduled, live, ended
     

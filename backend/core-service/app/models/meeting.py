@@ -174,10 +174,13 @@ class MeetingRecording(db.Model):
     meeting = db.relationship("Meeting", backref=db.backref("recordings", lazy="dynamic"))
     
     def to_dict(self):
+        # NOTE: storage_url removed from response - frontend should construct
+        # stream URL dynamically using its own API base URL to handle
+        # localhost vs LAN IP differences
         return {
             "id": self.id,
             "meeting_id": self.meeting_id,
-            "storage_url": self.storage_url,
+            # frontend constructs: `${getApiBaseUrl()}/api/recordings/${id}/stream`
             "storage_provider": self.storage_provider,
             "file_size": self.file_size,
             "duration_seconds": self.duration_seconds,

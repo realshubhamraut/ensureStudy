@@ -166,11 +166,22 @@ export default function MeetingRoomPage() {
             console.error('Error leaving meeting:', err)
         }
 
-        // Navigate back to classroom
+        // Navigate back to classroom based on user role
+        const userRole = localStorage.getItem('userRole')
         if (meeting?.classroom_id) {
-            router.push(`/teacher/classroom/${meeting.classroom_id}?tab=meet`)
+            if (userRole === 'teacher') {
+                router.push(`/teacher/classroom/${meeting.classroom_id}?tab=meet`)
+            } else {
+                // Students and others go to student classroom view
+                router.push(`/classrooms/${meeting.classroom_id}`)
+            }
         } else {
-            router.back()
+            // Fallback to role-based dashboard
+            if (userRole === 'teacher') {
+                router.push('/teacher/dashboard')
+            } else {
+                router.push('/dashboard')
+            }
         }
     }, [meetingId, meeting, router])
 

@@ -1,5 +1,5 @@
 'use client'
-import { getApiBaseUrl } from '@/utils/api'
+import { getApiBaseUrl, fixFileUrl } from '@/utils/api'
 
 
 import { useState, useEffect, useRef } from 'react'
@@ -768,9 +768,9 @@ export default function StudentClassroomDetailPage() {
                                                 setViewingDocument(material)
                                                 setShowDocumentViewer(true)
                                             } else if (material.type.includes('video')) {
-                                                window.open(material.url, '_blank')
+                                                window.open(fixFileUrl(material.url), '_blank')
                                             } else {
-                                                window.open(material.url, '_blank')
+                                                window.open(fixFileUrl(material.url), '_blank')
                                             }
                                         }}
                                     >
@@ -800,7 +800,7 @@ export default function StudentClassroomDetailPage() {
                                         )}
                                         {/* Download Button */}
                                         <button
-                                            onClick={() => window.open(material.url, '_blank')}
+                                            onClick={() => window.open(fixFileUrl(material.url), '_blank')}
                                             className="p-2 text-gray-400 hover:text-primary-600 hover:bg-primary-50 rounded-lg"
                                             title="Download"
                                         >
@@ -972,10 +972,10 @@ export default function StudentClassroomDetailPage() {
                                                     {/* Video Thumbnail */}
                                                     <div
                                                         className="relative w-44 shrink-0 bg-gray-900 cursor-pointer group"
-                                                        onClick={() => window.open(m.recording_url!, '_blank')}
+                                                        onClick={() => window.open(fixFileUrl(m.recording_url!), '_blank')}
                                                     >
                                                         <video
-                                                            src={m.recording_url}
+                                                            src={fixFileUrl(m.recording_url)}
                                                             className="w-full h-full object-cover"
                                                             muted
                                                             preload="metadata"
@@ -997,7 +997,7 @@ export default function StudentClassroomDetailPage() {
                                                     <div className="w-48 p-3 border-r border-gray-100 flex flex-col justify-center shrink-0">
                                                         <h3 className="font-semibold text-gray-900 text-sm line-clamp-2 mb-2">{m.title}</h3>
                                                         <a
-                                                            href={m.recording_url}
+                                                            href={fixFileUrl(m.recording_url)}
                                                             target="_blank"
                                                             className="text-xs text-primary-600 hover:underline flex items-center gap-1"
                                                         >
@@ -1261,7 +1261,7 @@ export default function StudentClassroomDetailPage() {
                                                             {assignment.attachments.map((att, idx) => (
                                                                 <a
                                                                     key={idx}
-                                                                    href={att.url}
+                                                                    href={fixFileUrl(att.url)}
                                                                     target="_blank"
                                                                     rel="noopener noreferrer"
                                                                     className="text-sm text-primary-600 hover:underline flex items-center gap-1 bg-gray-50 px-2 py-1 rounded"
@@ -1315,7 +1315,7 @@ export default function StudentClassroomDetailPage() {
                                                                     {assignment.my_submission.files.map((file: { id: string; url: string; filename: string }, idx: number) => (
                                                                         <a
                                                                             key={idx}
-                                                                            href={file.url}
+                                                                            href={fixFileUrl(file.url)}
                                                                             target="_blank"
                                                                             rel="noopener noreferrer"
                                                                             className="text-sm text-blue-600 hover:underline flex items-center gap-1 bg-white px-3 py-2 rounded border border-gray-200 hover:bg-blue-50 transition-colors"
@@ -1681,7 +1681,7 @@ export default function StudentClassroomDetailPage() {
             {showSyllabusModal && classroom?.syllabus_url && (
                 <div className="fixed inset-0 bg-black/90 z-50 flex flex-col">
                     <PDFViewer
-                        pdfUrl={classroom.syllabus_url}
+                        pdfUrl={fixFileUrl(classroom.syllabus_url)}
                         title={`${classroom.name} - Syllabus`}
                         onClose={() => setShowSyllabusModal(false)}
                     />
@@ -1842,7 +1842,7 @@ export default function StudentClassroomDetailPage() {
                     {viewingDocument.type.includes('pdf') ? (
                         /* For PDFs, use PDFViewer which has its own header */
                         <PDFViewer
-                            pdfUrl={viewingDocument.url}
+                            pdfUrl={fixFileUrl(viewingDocument.url)}
                             title={viewingDocument.name}
                             fileSize={viewingDocument.size}
                             materialId={viewingDocument.id}
@@ -1863,7 +1863,7 @@ export default function StudentClassroomDetailPage() {
                                 </div>
                                 <div className="flex items-center gap-2">
                                     <button
-                                        onClick={() => window.open(viewingDocument.url, '_blank')}
+                                        onClick={() => window.open(fixFileUrl(viewingDocument.url), '_blank')}
                                         className="px-3 py-1.5 text-sm text-gray-300 hover:text-white hover:bg-gray-700 rounded flex items-center gap-1.5"
                                         title="Open in new tab"
                                     >
@@ -1873,7 +1873,7 @@ export default function StudentClassroomDetailPage() {
                                     <button
                                         onClick={() => {
                                             const link = document.createElement('a')
-                                            link.href = viewingDocument.url
+                                            link.href = fixFileUrl(viewingDocument.url)
                                             link.download = viewingDocument.name
                                             link.click()
                                         }}

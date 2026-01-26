@@ -63,6 +63,7 @@ def create_app(config_name=None):
     from app.routes.recordings import recordings_bp
     from app.routes.grading_callback import grading_bp
     from app.routes.topics import topics_bp
+    from app.routes.web_resources import web_resources_bp
     
     app.register_blueprint(auth_bp)
     app.register_blueprint(users_bp)
@@ -85,6 +86,7 @@ def create_app(config_name=None):
     app.register_blueprint(recordings_bp)
     app.register_blueprint(grading_bp)
     app.register_blueprint(topics_bp)
+    app.register_blueprint(web_resources_bp)
     
     # Import models for table creation
     from app.models.organization import Organization, LicensePurchase

@@ -1876,6 +1876,23 @@ export default function AITutorPage() {
                                 const filteredSources = getFilteredSources()
                                 const articles = filteredSources.filter(s => ['article', 'webpage'].includes(s.type))
                                 if (articles.length === 0) return null
+
+                                // Helper to get domain icon styling
+                                const getDomainStyle = (url: string) => {
+                                    const u = url?.toLowerCase() || ''
+                                    if (u.includes('wikipedia')) return { bg: 'bg-gray-100', text: 'text-gray-700', icon: '📖', label: 'Wikipedia' }
+                                    if (u.includes('khanacademy')) return { bg: 'bg-green-100', text: 'text-green-700', icon: '🎓', label: 'Khan Academy' }
+                                    if (u.includes('britannica')) return { bg: 'bg-blue-100', text: 'text-blue-700', icon: '📚', label: 'Britannica' }
+                                    if (u.includes('byjus')) return { bg: 'bg-purple-100', text: 'text-purple-700', icon: '🎯', label: 'Byjus' }
+                                    if (u.includes('toppr')) return { bg: 'bg-orange-100', text: 'text-orange-700', icon: '📝', label: 'Toppr' }
+                                    if (u.includes('ncert')) return { bg: 'bg-red-100', text: 'text-red-700', icon: '📕', label: 'NCERT' }
+                                    if (u.includes('coursera')) return { bg: 'bg-blue-100', text: 'text-blue-700', icon: '🎓', label: 'Coursera' }
+                                    if (u.includes('.edu')) return { bg: 'bg-indigo-100', text: 'text-indigo-700', icon: '🏫', label: 'Academic' }
+                                    return { bg: 'bg-green-50', text: 'text-green-600', icon: '🌐', label: 'Web' }
+                                }
+
+                                const isWikipedia = (url: string) => url?.toLowerCase().includes('wikipedia.org')
+
                                 return (
                                     <div className="border-b border-gray-100">
                                         <div className="px-4 py-3 bg-gray-50 flex items-center gap-2">
@@ -1886,35 +1903,60 @@ export default function AITutorPage() {
                                             </span>
                                         </div>
                                         <div className="p-2 space-y-2">
-                                            {articles.map((source) => (
-                                                <div
-                                                    key={source.id}
-                                                    onClick={() => openContentViewer(source)}
-                                                    className={`flex items-start gap-3 p-3 rounded-lg cursor-pointer transition-all group ${activeSource?.id === source.id
-                                                        ? 'bg-primary-50 border border-primary-200'
-                                                        : 'hover:bg-gray-100 hover:shadow-sm'
-                                                        }`}
-                                                >
-                                                    <div className="p-2 rounded-lg flex-shrink-0 bg-green-50 text-green-600 group-hover:bg-green-100 transition-colors">
-                                                        <GlobeAltIcon className="w-5 h-5" />
-                                                    </div>
-                                                    <div className="flex-1 min-w-0">
-                                                        <p className="text-sm font-medium text-gray-900 line-clamp-1">{source.title}</p>
-                                                        <p className="text-xs text-green-600 mt-0.5">{source.source || 'Web'}</p>
-                                                        {source.snippet && (
-                                                            <p className="text-xs text-gray-500 mt-1 line-clamp-2">{source.snippet}</p>
+                                            {articles.map((source) => {
+                                                const style = getDomainStyle(source.url || '')
+                                                const isWiki = isWikipedia(source.url || '')
+                                                return (
+                                                    <div
+                                                        key={source.id}
+                                                        onClick={() => openContentViewer(source)}
+                                                        className={`flex items-start gap-3 p-3 rounded-lg cursor-pointer transition-all group ${activeSource?.id === source.id
+                                                            ? 'bg-primary-50 border border-primary-200'
+                                                            : 'hover:bg-gray-100 hover:shadow-sm'
+                                                            }`}
+                                                    >
+                                                        {/* Domain-specific icon */}
+                                                        <div className={`p-2 rounded-lg flex-shrink-0 ${style.bg} ${style.text} group-hover:scale-105 transition-transform`}>
+                                                            <span className="text-lg">{style.icon}</span>
+                                                        </div>
+                                                        <div className="flex-1 min-w-0">
+                                                            <p className="text-sm font-medium text-gray-900 line-clamp-1">{source.title}</p>
+                                                            <div className="flex items-center gap-2 mt-0.5">
+                                                                <span className={`text-xs ${style.text} font-medium`}>{style.label}</span>
+                                                                {!isWiki && (
+                                                                    <span className="text-xs text-gray-400 flex items-center gap-0.5">
+                                                                        <ArrowTopRightOnSquareIcon className="w-3 h-3" />
+                                                                        Opens in new tab
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                            {source.snippet && (
+                                                                <p className="text-xs text-gray-500 mt-1 line-clamp-2">{source.snippet}</p>
+                                                            )}
+                                                        </div>
+                                                        {/* Trust score badge */}
+                                                        {source.trustScore && (
+                                                            <span className={`text-xs px-2 py-0.5 rounded-full flex-shrink-0 ${source.trustScore >= 0.9 ? 'bg-green-100 text-green-700' :
+                                                                    source.trustScore >= 0.8 ? 'bg-blue-100 text-blue-700' :
+                                                                        'bg-gray-100 text-gray-600'
+                                                                }`}>
+                                                                {Math.round(source.trustScore * 100)}%
+                                                            </span>
                                                         )}
+                                                        {/* Hover overlay button */}
+                                                        <div className="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                                                            <span className={`${isWiki ? 'bg-gray-700' : 'bg-green-600'} text-white text-xs px-3 py-1.5 rounded-full font-medium shadow-sm flex items-center gap-1`}>
+                                                                {isWiki ? 'Preview' : (
+                                                                    <>
+                                                                        <ArrowTopRightOnSquareIcon className="w-3 h-3" />
+                                                                        Open
+                                                                    </>
+                                                                )}
+                                                            </span>
+                                                        </div>
                                                     </div>
-                                                    {/* Hover overlay button */}
-                                                    <div className="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
-                                                        <span className="bg-green-600 text-white text-xs px-3 py-1.5 rounded-full font-medium shadow-sm">
-                                                            Read
-                                                        </span>
-                                                    </div>
-                                                    {/* Link icon - hide on hover */}
-                                                    <LinkIcon className="w-4 h-4 text-gray-400 flex-shrink-0 mt-1 group-hover:hidden" />
-                                                </div>
-                                            ))}
+                                                )
+                                            })}
                                         </div>
                                     </div>
                                 )

@@ -55,6 +55,39 @@ export function getAiServiceUrl(): string {
     return `${protocol}//${hostname}:8001`
 }
 
+/**
+ * Fix file URLs that may have been stored with wrong port numbers.
+ * This rewrites URLs like "http://localhost:9000/api/files/..." to use
+ * the current API base URL.
+ * 
+ * @param url - The file URL to fix (may be absolute or relative)
+ * @returns The fixed URL using the current API base URL
+ */
+export function fixFileUrl(url: string | undefined | null): string {
+    if (!url) return ''
+
+    // If it's already a relative path, make it absolute
+    if (url.startsWith('/api/files/')) {
+        return `${getApiBaseUrl()}${url}`
+    }
+
+    // Pattern to match common API file URLs with any port
+    const filePathMatch = url.match(/https?:\/\/[^/]+\/api\/files\/(.+)$/)
+    if (filePathMatch) {
+        const filename = filePathMatch[1]
+        return `${getApiBaseUrl()}/api/files/${filename}`
+    }
+
+    // For other absolute URLs with localhost:9000 or localhost:8000, fix them
+    const localhostMatch = url.match(/https?:\/\/localhost:\d+(.*)/)
+    if (localhostMatch) {
+        return `${getApiBaseUrl()}${localhostMatch[1]}`
+    }
+
+    // Return as-is if no pattern matched
+    return url
+}
+
 // Backward-compatible exports
 export const API_URL = typeof window !== 'undefined' ? getApiBaseUrl() : 'https://localhost:8000'
 export const AI_SERVICE_URL = typeof window !== 'undefined' ? getAiServiceUrl() : 'https://localhost:8001'

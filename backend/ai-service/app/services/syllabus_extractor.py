@@ -98,7 +98,7 @@ class SyllabusExtractor:
             
             self._initialized = True
             logger.info("[SYLLABUS] Services initialized successfully")
-            
+             
         except Exception as e:
             logger.error(f"[SYLLABUS] Failed to initialize services: {e}")
             raise
@@ -155,11 +155,88 @@ class SyllabusExtractor:
             
             # Step 1: Extract text and detect chapters
             print("[SYLLABUS] Step 1: Extracting text from PDF...")
-            processed = self.pdf_processor.process_pdf(pdf_path)
+            extraction_result = self.pdf_processor.extract_from_file(pdf_path)
             
-            full_text = processed.get("full_text", "")
-            chapters = processed.get("chapters", [])
-            all_chunks = processed.get("all_chunks", [])
+            if not extraction_result.success:
+                raise Exception(extraction_result.error or "Failed to extract PDF")
+            
+            # Get full text and create chunks from pages
+            full_text = self.pdf_processor.get_full_text(extraction_result)
+            pages_text = self.pdf_processor.get_pages_text(extraction_result)
+            
+            # First pass: Detect all chapter/topic headings
+            all_headings = []
+            heading_keywords = ["chapter", "unit", "module", "topic", "section", "part", "lesson"]
+            
+            for page_data in pages_text:
+                page_text = page_data.get("text", "")
+                page_num = page_data.get("page_number", 0)
+                
+                for line in page_text.split("\n"):
+                    line_clean = line.strip()
+                    if not line_clean or len(line_clean) < 3 or len(line_clean) > 150:
+                        continue
+                    
+                    # Check if it looks like a heading
+                    is_heading = False
+                    
+                    # Method 1: Contains heading keywords
+                    if any(kw in line_clean.lower() for kw in heading_keywords):
+                        is_heading = True
+                    
+                    # Method 2: Numbered like "1. Topic" or "1.1 Topic" or "I. Topic"
+                    elif re.match(r'^[\dIVXivx]+[\.\)]\s*\S', line_clean):
+                        is_heading = True
+                    
+                    # Method 3: All caps and short (likely a title)
+                    elif line_clean.isupper() and 5 < len(line_clean) < 60:
+                        is_heading = True
+                    
+                    if is_heading:
+                        # Clean the heading name
+                        name = re.sub(r'^[\dIVXivx]+[\.\):\s]+', '', line_clean)  # Remove numbering
+                        name = name.strip()
+                        if name and len(name) > 3:
+                            all_headings.append({
+                                "name": name,
+                                "page": page_num,
+                                "original": line_clean
+                            })
+            
+            # Deduplicate headings by name
+            seen_names = set()
+            chapters = []
+            for h in all_headings:
+                name_lower = h["name"].lower()
+                if name_lower not in seen_names:
+                    seen_names.add(name_lower)
+                    chapters.append(h)
+            
+            print(f"[SYLLABUS] Found {len(chapters)} unique headings/chapters")
+            
+            # Create chunks with proper topic assignment
+            all_chunks = []
+            current_chapter = "Introduction"
+            
+            for page_data in pages_text:
+                page_text = page_data.get("text", "")
+                page_num = page_data.get("page_number", 0)
+                
+                # Check if this page has a new chapter heading
+                for ch in chapters:
+                    if ch["page"] == page_num:
+                        current_chapter = ch["name"]
+                        break
+                
+                # Chunk by paragraphs
+                paragraphs = [p.strip() for p in page_text.split("\n\n") if p.strip()]
+                for para in paragraphs:
+                    if len(para) > 50:
+                        all_chunks.append({
+                            "content": para,
+                            "page": page_num,
+                            "chapter": current_chapter
+                        })
             
             print(f"[SYLLABUS] ✓ Extracted {len(full_text)} chars, {len(chapters)} chapters, {len(all_chunks)} chunks")
             
@@ -173,14 +250,29 @@ class SyllabusExtractor:
             )
             print(f"[SYLLABUS] ✓ Stored {chunks_stored} chunks in '{SYLLABUS_COLLECTION}'")
             
-            # Step 3: Extract topics using LLM
-            print("[SYLLABUS] Step 3: Extracting topics using LLM...")
-            topics = await self._extract_topics_with_llm(
-                full_text=full_text,
-                chapters=chapters,
-                subject_name=subject_name
+            # Step 3: Extract topics using robust multi-method extractor
+            print("[SYLLABUS] Step 3: Extracting topics with robust extractor...")
+            from .topic_extractor import get_topic_extractor
+            
+            topic_extractor = get_topic_extractor()
+            extracted_topics = topic_extractor.extract_topics(
+                pdf_path=pdf_path,
+                subject_name=subject_name,
+                prefer_ai=True  # Use Gemini if available
             )
-            print(f"[SYLLABUS] ✓ Extracted {len(topics)} topics")
+            
+            # Convert to ExtractedTopic format
+            topics = []
+            for et in extracted_topics:
+                topics.append(ExtractedTopic(
+                    name=et.name,
+                    description=et.description,
+                    subtopics=et.subtopics,
+                    difficulty=et.difficulty,
+                    estimated_hours=et.estimated_hours
+                ))
+            
+            print(f"[SYLLABUS] ✓ Extracted {len(topics)} topics (source: {extracted_topics[0].source if extracted_topics else 'none'})")
             
             # Step 4: Populate curriculum database
             print("[SYLLABUS] Step 4: Populating curriculum models...")
@@ -289,86 +381,153 @@ class SyllabusExtractor:
     ) -> List[ExtractedTopic]:
         """Use LLM to extract topics from syllabus content"""
         
-        # Prepare content for LLM - use chapters if available, else text sample
-        if chapters:
-            chapter_list = "\n".join([f"- {ch.get('title', 'Untitled')}" for ch in chapters])
-            content_for_llm = f"Chapters detected:\n{chapter_list}\n\nSample content:\n{full_text[:3000]}"
-        else:
-            content_for_llm = full_text[:4000]
-        
-        prompt = f"""Analyze this syllabus for {subject_name} and extract the main topics/lessons.
-
-SYLLABUS CONTENT:
-{content_for_llm}
-
-Return a JSON array of topics. Each topic should have:
-- name: The topic/lesson name
-- description: Brief description (1-2 sentences)
-- subtopics: Array of subtopic strings
-- difficulty: "easy", "medium", or "hard"
-- estimated_hours: Estimated study hours (number)
-- keywords: Array of key terms
-
-Example format:
-[
-  {{
-    "name": "Units & Measurements",
-    "description": "Physical quantities, units, and measurement techniques",
-    "subtopics": ["SI Units", "Dimensional Analysis", "Errors in Measurement"],
-    "difficulty": "easy",
-    "estimated_hours": 2,
-    "keywords": ["units", "measurement", "dimensions"]
-  }}
-]
-
-Return ONLY the JSON array, no other text."""
-
+        # First try using Gemini API directly (more reliable)
         try:
-            response = self.llm.invoke(prompt)
-            
-            # Parse JSON from response
-            text = response.strip()
-            if "```" in text:
-                text = text.split("```")[1].replace("json", "").strip()
-            
-            topics_data = json.loads(text)
-            
-            # Convert to ExtractedTopic objects
-            topics = []
-            for t in topics_data:
-                if isinstance(t, dict) and t.get("name"):
-                    topics.append(ExtractedTopic(
-                        name=t["name"],
-                        description=t.get("description"),
-                        subtopics=t.get("subtopics", []),
-                        difficulty=t.get("difficulty", "medium"),
-                        estimated_hours=float(t.get("estimated_hours", 2)),
-                        keywords=t.get("keywords", [])
-                    ))
-            
-            return topics
-            
-        except json.JSONDecodeError as e:
-            logger.warning(f"[SYLLABUS] Failed to parse LLM response as JSON: {e}")
-            
-            # Fallback: Extract topics from chapter titles
-            topics = []
-            for ch in chapters:
-                title = ch.get("title", "")
-                if title and len(title) > 3:
-                    topics.append(ExtractedTopic(
-                        name=title,
-                        description=None,
-                        subtopics=[],
-                        difficulty="medium",
-                        estimated_hours=2.0
-                    ))
-            
-            return topics
-        
+            topics = await self._extract_with_gemini(full_text, chapters, subject_name)
+            if topics:
+                return topics
         except Exception as e:
-            logger.error(f"[SYLLABUS] LLM extraction error: {e}")
-            return []
+            logger.warning(f"[SYLLABUS] Gemini extraction failed: {e}")
+        
+        # Fallback: Try regular LLM
+        try:
+            topics = self._extract_with_default_llm(full_text, chapters, subject_name)
+            if topics:
+                return topics
+        except Exception as e:
+            logger.warning(f"[SYLLABUS] Default LLM failed: {e}")
+        
+        # Final fallback: Extract from detected chapters
+        logger.info("[SYLLABUS] Using chapter-based fallback for topics")
+        return self._extract_from_chapters(chapters, full_text)
+    
+    async def _extract_with_gemini(
+        self,
+        full_text: str,
+        chapters: List[Dict],
+        subject_name: str
+    ) -> List[ExtractedTopic]:
+        """Use Gemini API for topic extraction"""
+        import google.generativeai as genai
+        
+        api_key = os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            raise ValueError("GEMINI_API_KEY not set")
+        
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        
+        # Prepare content
+        chapter_list = "\n".join([f"- {ch.get('name', ch.get('title', ''))}" for ch in chapters if ch]) if chapters else ""
+        content = f"Chapters:\n{chapter_list}\n\nContent:\n{full_text[:4000]}"
+        
+        prompt = f"""Extract the main topics from this {subject_name} syllabus.
+
+{content}
+
+Return a JSON array of topics:
+[{{"name": "Topic Name", "description": "Brief description", "subtopics": ["sub1"], "difficulty": "easy/medium/hard", "estimated_hours": 2}}]
+
+Return ONLY valid JSON, no markdown or other text."""
+
+        response = model.generate_content(prompt)
+        text = response.text.strip()
+        
+        # Clean JSON
+        if "```" in text:
+            text = text.split("```")[1].replace("json", "").strip()
+        
+        topics_data = json.loads(text)
+        
+        topics = []
+        for t in topics_data:
+            if isinstance(t, dict) and t.get("name"):
+                topics.append(ExtractedTopic(
+                    name=t["name"],
+                    description=t.get("description"),
+                    subtopics=t.get("subtopics", []),
+                    difficulty=t.get("difficulty", "medium"),
+                    estimated_hours=float(t.get("estimated_hours", 2)),
+                    keywords=t.get("keywords", [])
+                ))
+        
+        return topics
+    
+    def _extract_with_default_llm(
+        self,
+        full_text: str,
+        chapters: List[Dict],
+        subject_name: str
+    ) -> List[ExtractedTopic]:
+        """Try extracting with default LLM"""
+        chapter_list = "\n".join([f"- {ch.get('name', ch.get('title', ''))}" for ch in chapters if ch]) if chapters else ""
+        content = f"Chapters:\n{chapter_list}\n\nContent:\n{full_text[:3000]}"
+        
+        prompt = f"""Extract topics from this {subject_name} syllabus.
+{content}
+
+Return JSON array: [{{"name": "Topic", "description": "...", "difficulty": "medium", "estimated_hours": 2}}]
+JSON only:"""
+
+        response = self.llm.invoke(prompt)
+        text = response.strip()
+        if "```" in text:
+            text = text.split("```")[1].replace("json", "").strip()
+        
+        topics_data = json.loads(text)
+        return [
+            ExtractedTopic(
+                name=t["name"],
+                description=t.get("description"),
+                subtopics=t.get("subtopics", []),
+                difficulty=t.get("difficulty", "medium"),
+                estimated_hours=float(t.get("estimated_hours", 2))
+            )
+            for t in topics_data if isinstance(t, dict) and t.get("name")
+        ]
+    
+    def _extract_from_chapters(
+        self,
+        chapters: List[Dict],
+        full_text: str
+    ) -> List[ExtractedTopic]:
+        """Fallback: Create topics from detected chapter headings"""
+        topics = []
+        seen = set()
+        
+        # From chapters list
+        for ch in chapters:
+            name = ch.get("name", ch.get("title", ""))
+            if name and name not in seen and len(name) > 3:
+                seen.add(name)
+                topics.append(ExtractedTopic(
+                    name=name,
+                    description=None,
+                    subtopics=[],
+                    difficulty="medium",
+                    estimated_hours=2.0
+                ))
+        
+        # If no chapters found, extract from text headings
+        if not topics:
+            lines = full_text.split("\n")
+            for line in lines:
+                line = line.strip()
+                # Detect headings: short lines, title case or all caps
+                if 5 < len(line) < 80 and (line.isupper() or line.istitle()):
+                    if any(kw in line.lower() for kw in ["chapter", "unit", "module", "topic", "lesson", "section"]):
+                        name = line.strip("0123456789.:- ")
+                        if name and name not in seen:
+                            seen.add(name)
+                            topics.append(ExtractedTopic(
+                                name=name,
+                                description=None,
+                                subtopics=[],
+                                difficulty="medium",
+                                estimated_hours=2.0
+                            ))
+        
+        return topics
     
     async def _populate_curriculum(
         self,
@@ -594,26 +753,38 @@ Return ONLY the JSON array, no other text."""
         
         query_filter = Filter(must=must_conditions) if must_conditions else None
         
-        # Search
-        results = self.qdrant_client.search(
-            collection_name=SYLLABUS_COLLECTION,
-            query_vector=query_embedding,
-            query_filter=query_filter,
-            limit=top_k
-        )
+        # Search using query_points (newer Qdrant API)
+        try:
+            results = self.qdrant_client.query_points(
+                collection_name=SYLLABUS_COLLECTION,
+                query=query_embedding,
+                query_filter=query_filter,
+                limit=top_k
+            )
+            points = results.points if hasattr(results, 'points') else results
+        except AttributeError:
+            # Fallback for older Qdrant client
+            results = self.qdrant_client.search(
+                collection_name=SYLLABUS_COLLECTION,
+                query_vector=query_embedding,
+                query_filter=query_filter,
+                limit=top_k
+            )
+            points = results
         
         # Format results
         return [
             {
                 "id": str(r.id),
-                "score": r.score,
+                "score": getattr(r, 'score', 0),
                 "text": r.payload.get("chunk_text", ""),
                 "chapter": r.payload.get("chapter", ""),
+                "content": r.payload.get("chunk_text", ""),
                 "subject": r.payload.get("subject", ""),
                 "syllabus_id": r.payload.get("syllabus_id", ""),
                 "page_number": r.payload.get("page_number", 0)
             }
-            for r in results
+            for r in points
         ]
 
 

@@ -96,7 +96,9 @@ export function RecordingsList({ classroomId, accessToken }: RecordingsListProps
         <>
             <div className="space-y-3">
                 {recordings.map(recording => {
-                    const streamUrl = `${getApiBaseUrl()}/api/recordings/${recording.id}/stream`
+                    const apiBase = getApiBaseUrl()
+                    const streamUrl = `${apiBase}/api/recordings/${recording.id}/stream`
+                    console.log('[Recording] API Base:', apiBase, 'Stream URL:', streamUrl)
 
                     return (
                         <div

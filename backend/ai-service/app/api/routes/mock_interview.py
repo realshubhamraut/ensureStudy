@@ -364,6 +364,24 @@ async def get_interview_summary(session_id: str):
     
     duration = (datetime.now() - session["started_at"]).total_seconds() / 60
     
+    # ========================================================================
+    # Record score for curriculum tracking
+    # ========================================================================
+    try:
+        from app.api.routes.topic_scores import record_interview_score
+        user_id = session.get("user_id", "demo-user")
+        topic_name = session.get("chapter", session.get("subject", ""))
+        if topic_name:
+            await record_interview_score(
+                user_id=user_id,
+                topic_name=topic_name,
+                score=avg_score
+            )
+            logger.info(f"Recorded mock interview score {avg_score} for topic '{topic_name}'")
+    except Exception as e:
+        logger.warning(f"Failed to record interview score: {e}")
+    # ========================================================================
+    
     return InterviewSummary(
         session_id=session_id,
         subject=session["subject"],

@@ -143,6 +143,10 @@ class ClassroomMaterial(db.Model):
     # Uploader
     uploaded_by = db.Column(db.String(36), db.ForeignKey("users.id"), nullable=False)
     
+    # Source tracking (for web-downloaded PDFs)
+    source = db.Column(db.String(20), default='upload')  # 'upload' or 'web'
+    source_url = db.Column(db.String(500))  # Original web URL before download
+    
     # Timestamps
     uploaded_at = db.Column(db.DateTime, default=datetime.utcnow)
     
@@ -172,6 +176,9 @@ class ClassroomMaterial(db.Model):
             "uploaded_by": self.uploaded_by,
             "uploaded_at": self.uploaded_at.isoformat() if self.uploaded_at else None,
             "is_active": self.is_active,
+            # Source tracking
+            "source": self.source or "upload",  # 'upload' or 'web'
+            "source_url": self.source_url,  # Original web URL
             # Indexing status for RAG
             "indexing_status": self.indexing_status,
             "indexed_at": self.indexed_at.isoformat() if self.indexed_at else None,

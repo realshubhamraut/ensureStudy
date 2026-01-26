@@ -148,3 +148,4 @@ data/softskills-gestures/
 data/models-pretrained/
 *.parquet
 
+.env.production.example
