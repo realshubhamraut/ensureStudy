@@ -94,3 +94,49 @@ def get_file(filename):
         return send_from_directory(UPLOAD_DIR, filename)
     except Exception as e:
         return jsonify({'error': 'File not found'}), 404
+
+
+@files_bp.route('/material/<material_id>', methods=['GET'])
+def get_material_file(material_id):
+    """
+    Serve a classroom material file by its ID.
+    Looks up the material in the database and serves/redirects to the actual file.
+    """
+    try:
+        from app.models.classroom import ClassroomMaterial
+        from flask import redirect
+        
+        # Find the material
+        material = ClassroomMaterial.query.get(material_id)
+        
+        if not material:
+            return jsonify({'error': 'Material not found'}), 404
+        
+        if not material.file_url:
+            return jsonify({'error': 'File URL not available'}), 404
+        
+        # If file_url is a local path, extract filename and serve
+        file_url = material.file_url
+        
+        if '/api/files/' in file_url:
+            # Extract filename from URL and serve directly
+            filename = file_url.split('/api/files/')[-1]
+            return send_from_directory(UPLOAD_DIR, filename)
+        elif file_url.startswith('http'):
+            # External URL - redirect to it
+            return redirect(file_url)
+        elif os.path.isfile(file_url):
+            # Local file path - serve directory
+            directory = os.path.dirname(file_url)
+            filename = os.path.basename(file_url)
+            return send_from_directory(directory, filename)
+        else:
+            # Try to find in uploads with material ID as prefix
+            for f in os.listdir(UPLOAD_DIR):
+                if f.startswith(material_id) or material_id in f:
+                    return send_from_directory(UPLOAD_DIR, f)
+            
+            return jsonify({'error': 'File not found on disk'}), 404
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500

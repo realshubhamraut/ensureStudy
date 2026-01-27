@@ -11,9 +11,22 @@ users_bp = Blueprint("users", __name__, url_prefix="/api/users")
 
 
 def require_auth(f):
-    """Decorator to require authentication"""
+    """Decorator to require authentication.
+    
+    Supports two auth methods:
+    1. Bearer token (for user requests)
+    2. X-Service-Key header (for internal service-to-service calls)
+    """
     @wraps(f)
     def decorated(*args, **kwargs):
+        # Check for internal service key first (AI service calls)
+        service_key = request.headers.get("X-Service-Key")
+        if service_key == "internal-ai-service":
+            # Internal service call - set a system user context
+            request.user_id = "system"
+            request.user_role = "teacher"  # Give teacher permissions for creating resources
+            return f(*args, **kwargs)
+        
         auth_header = request.headers.get("Authorization")
         if not auth_header:
             return jsonify({"error": "Missing authorization header"}), 401

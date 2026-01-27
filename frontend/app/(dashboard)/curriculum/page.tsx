@@ -70,6 +70,7 @@ export default function CurriculumPage() {
     const [loading, setLoading] = useState(true)
     const [scheduleLoading, setScheduleLoading] = useState(false)
     const [weekOffset, setWeekOffset] = useState(0)
+    const [mounted, setMounted] = useState(false)  // Client-side only guard
 
     // Modal states
     const [showLearningStyleQuiz, setShowLearningStyleQuiz] = useState(false)
@@ -170,6 +171,7 @@ export default function CurriculumPage() {
 
     // Effects
     useEffect(() => {
+        setMounted(true)  // Mark as client-side mounted
         fetchCurricula()
     }, [])
 
@@ -199,7 +201,8 @@ export default function CurriculumPage() {
     // Render
     // ========================================================================
 
-    if (loading) {
+    // Show loading until mounted on client to prevent hydration mismatch
+    if (!mounted || loading) {
         return (
             <div className="flex items-center justify-center h-64">
                 <ArrowPathIcon className="w-8 h-8 animate-spin text-gray-400" />
@@ -208,7 +211,7 @@ export default function CurriculumPage() {
     }
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-6" suppressHydrationWarning>
             {/* Header */}
             <div className="flex items-center justify-between flex-wrap gap-4">
                 <div>
@@ -247,8 +250,8 @@ export default function CurriculumPage() {
                                 setWeekOffset(0)
                             }}
                             className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors ${selectedCurriculumId === c.id
-                                    ? 'bg-primary-100 text-primary-700'
-                                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                                ? 'bg-primary-100 text-primary-700'
+                                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                                 }`}
                         >
                             {c.subject_name}
@@ -338,7 +341,7 @@ export default function CurriculumPage() {
                                 console.log('Learning style:', primary, secondary)
                                 setShowLearningStyleQuiz(false)
                             }}
-                            onClose={() => setShowLearningStyleQuiz(false)}
+                            onSkip={() => setShowLearningStyleQuiz(false)}
                         />
                     </div>
                 </div>

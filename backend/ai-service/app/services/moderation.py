@@ -41,6 +41,14 @@ OFF_TOPIC_PATTERNS = [
     r'\b(weather|sports score|movie|celebrity|gossip|news)\b',
     r'\b(recipe|cooking|gaming|entertainment)\b',
     r'\b(relationship|dating|personal advice)\b',
+    r'\b(joke|funny|meme|lol|lmao|haha)\b',
+    r'\b(music|song|lyrics|artist|band|singer)\b',
+    r'\b(travel|vacation|hotel|flight|booking)\b',
+    r'\b(shopping|buy|price|discount|sale|amazon)\b',
+    r'\b(social media|instagram|twitter|facebook|tiktok|snapchat)\b',
+    r'\b(who are you|what are you|are you ai|are you human|your name)\b',
+    r'\b(hello|hi there|hey|good morning|good night|how are you)\b',
+    r'\b(thanks|thank you|bye|goodbye|see you)\b',
 ]
 
 ACADEMIC_INDICATORS = [
@@ -170,22 +178,29 @@ def moderate_query(user_id: str, question: str) -> ModerationResult:
     # Step 5: Detect subject
     subject = _detect_subject(question)
     
-    # Step 6: Make decision - BE PERMISSIVE, only block harmful
-    # Allow almost everything - users can ask any question they want
-    if is_academic or academic_conf >= 0.2:  # Very low threshold
+    # Step 6: Make decision - STRICT moderation for academic content only
+    if is_academic and academic_conf >= 0.5:
         return ModerationResult(
             decision="allow",
-            confidence=max(academic_conf, 0.5),
+            confidence=academic_conf,
             category=subject if subject != "general" else "other",
             reason=None
         )
-    else:
-        # Even if not clearly academic, still allow it
+    elif academic_conf >= 0.3 and subject != "general":
+        # Has subject keywords but borderline academic phrasing
         return ModerationResult(
             decision="allow",
-            confidence=0.5,
-            category="general",
+            confidence=academic_conf,
+            category=subject,
             reason=None
+        )
+    else:
+        # Not clearly academic - block it
+        return ModerationResult(
+            decision="block",
+            confidence=max(0.6, 1.0 - academic_conf),
+            category="off_topic",
+            reason="Please ask questions related to your studies. I'm here to help you learn academic subjects like Math, Science, History, and more."
         )
 
 

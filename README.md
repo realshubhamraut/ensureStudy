@@ -1,6 +1,6 @@
 # ensureStudy
 
-An AI-first learning platform that combines intelligent tutoring, real-time proctoring, and soft skills evaluation. Built with RAG-powered conversations, Kafka streaming, PyTorch ML models, and PySpark data pipelines.
+An AI-first learning platform combining intelligent multi-agent tutoring, real-time proctoring, and soft skills evaluation. Built with LangGraph orchestration, RAG-powered conversations, Kafka streaming, PyTorch ML models, and PySpark data pipelines.
 
 ---
 
@@ -15,18 +15,21 @@ graph TB
         Web --> Soft[Soft Skills Practice]
     end
     
-    subgraph "AI Intelligence"
-        Chat --> RAG[RAG Engine]
-        Chat --> Agent[Tutor Agent]
+    subgraph "Multi-Agent System"
+        Chat --> Orchestrator[Orchestrator Agent]
+        Orchestrator --> Tutor[Tutor Agent]
+        Orchestrator --> Research[Research Agent]
+        Orchestrator --> Curriculum[Curriculum Agent]
         Assess --> Proctor[Proctoring System]
         Soft --> Vision[Computer Vision]
     end
     
-    subgraph "Data Platform"
+    subgraph "Intelligence Layer"
+        Tutor --> RAG[RAG Engine]
+        Research --> WebSearch[Web Crawler]
+        Curriculum --> Planner[Learning Paths]
         RAG --> Vector[(Vector DB)]
-        Agent --> LLM[Mistral LLM]
-        Proctor --> ML[ML Models]
-        Vision --> Stream[Kafka Streams]
+        Tutor --> LLM[Mistral LLM]
     end
 ```
 
@@ -36,12 +39,303 @@ graph TB
 
 | Feature | Description | Technology |
 |---------|-------------|------------|
-| AI Tutoring | Context-aware conversations with document understanding | LangGraph, Mistral, RAG |
+| Multi-Agent Tutoring | Orchestrated AI agents for learning, research, and content creation | LangGraph, Mistral, RAG |
 | Smart Proctoring | Real-time exam monitoring with violation detection | YOLO, MediaPipe, PyTorch |
 | Soft Skills | Fluency, grammar, eye contact, and posture analysis | Whisper, FaceMesh, NLP |
 | Virtual Classrooms | Live meetings with recordings and transcripts | WebRTC, MongoDB |
 | Learning Analytics | Progress tracking and personalized recommendations | PySpark, Cassandra |
 | Document Processing | PDF/image ingestion with OCR and chunking | PyMuPDF, Qdrant |
+
+---
+
+## Multi-Agent Architecture
+
+The platform uses a **Supervisor Pattern** orchestration where a central Orchestrator Agent routes requests to specialized sub-agents based on user intent.
+
+### Agent System Overview
+
+```mermaid
+flowchart TB
+    subgraph "User Request"
+        Query[Student Query]
+    end
+    
+    subgraph "Orchestrator Layer"
+        Orch[Orchestrator Agent]
+        Intent[Intent Classification]
+    end
+    
+    subgraph "Specialized Agents"
+        Tutor[Tutor Agent]
+        Research[Research Agent]
+        Curriculum[Curriculum Agent]
+        Document[Document Agent]
+        Notes[Notes Agent]
+        Assessment[Assessment Agent]
+    end
+    
+    subgraph "Support Services"
+        Moderation[Content Moderation]
+        WebEnrich[Web Enrichment]
+    end
+    
+    Query --> Orch
+    Orch --> Intent
+    Intent --> |Learn| Tutor
+    Intent --> |Research| Research
+    Intent --> |Create| Curriculum
+    Intent --> |Evaluate| Assessment
+    
+    Tutor --> Moderation
+    Research --> WebEnrich
+    Document --> Notes
+```
+
+---
+
+## Agent Descriptions
+
+### 1. Orchestrator Agent (Supervisor Pattern)
+
+The central coordinator that receives all user queries and routes them to appropriate sub-agents.
+
+**Capabilities:**
+- Intent classification (Learn, Research, Create, Evaluate, Mixed)
+- Multi-agent coordination and parallel execution
+- Response synthesis from multiple agent outputs
+- Session state management
+
+**Intent Classification Flow:**
+
+```mermaid
+stateDiagram-v2
+    [*] --> Analyze: User Query
+    Analyze --> LEARN: "What is...", "Explain..."
+    Analyze --> RESEARCH: "Find...", "Search..."
+    Analyze --> CREATE: "Generate...", "Make..."
+    Analyze --> EVALUATE: "Check...", "Assess..."
+    
+    LEARN --> TutorAgent
+    RESEARCH --> ResearchAgent
+    CREATE --> ContentGeneration
+    EVALUATE --> AssessmentAgent
+    
+    TutorAgent --> Synthesize
+    ResearchAgent --> Synthesize
+    ContentGeneration --> Synthesize
+    AssessmentAgent --> Synthesize
+    
+    Synthesize --> [*]: Final Response
+```
+
+---
+
+### 2. Tutor Agent (ABCR + TAL + MCP)
+
+The primary learning assistant with advanced context management.
+
+**Core Components:**
+
+| Component | Full Name | Function |
+|-----------|-----------|----------|
+| ABCR | Attention-Based Context Routing | Detects follow-up vs new topic queries |
+| TAL | Topic Anchor Layer | Maintains topic continuity across turns |
+| MCP | Memory Context Processor | Isolates web vs classroom content |
+
+**Processing Flow:**
+
+```mermaid
+stateDiagram-v2
+    [*] --> Receive: User message
+    Receive --> Moderate: Content check
+    Moderate --> ABCR: Classify query type
+    
+    ABCR --> FollowUp: Follow-up detected
+    ABCR --> NewTopic: New topic
+    
+    FollowUp --> KeepAnchor: Use existing context
+    NewTopic --> TAL: Extract and anchor topic
+    
+    KeepAnchor --> Retrieve
+    TAL --> Retrieve: Vector search with anchor
+    
+    Retrieve --> MCP: Apply context isolation
+    MCP --> Generate: Build prompt with filtered context
+    Generate --> [*]: Return response
+```
+
+**Features:**
+- Session-aware conversation memory
+- Topic anchoring for multi-turn coherence
+- Web content isolation (MCP rules)
+- Confidence scoring for answers
+- Source attribution with page numbers
+
+---
+
+### 3. Research Agent (Web + PDF + YouTube)
+
+Discovers and indexes educational content from multiple sources.
+
+**Capabilities:**
+- Web search for educational articles
+- PDF discovery and download
+- YouTube video search
+- Automatic content indexing into Qdrant
+
+**Research Pipeline:**
+
+```mermaid
+flowchart LR
+    Query[User Query] --> Analyze[Analyze Intent]
+    
+    Analyze --> Web[Web Search]
+    Analyze --> PDF[PDF Search]
+    Analyze --> YT[YouTube Search]
+    
+    Web --> Articles[Article Results]
+    PDF --> Download[Download PDFs]
+    YT --> Videos[Video Results]
+    
+    Download --> Index[Index in Qdrant]
+    
+    Articles --> Compile[Compile Results]
+    Index --> Compile
+    Videos --> Compile
+    
+    Compile --> Summary[Research Summary]
+```
+
+---
+
+### 4. Curriculum Agent (Personalized Learning Paths)
+
+Creates adaptive learning schedules from syllabus documents.
+
+**Pipeline:**
+
+```mermaid
+flowchart LR
+    Syllabus[Syllabus Topics] --> Dependencies[Analyze Dependencies]
+    Dependencies --> Knowledge[Assess Knowledge]
+    Knowledge --> Order[Topological Sort]
+    Order --> Schedule[Generate Schedule]
+    Schedule --> Milestones[Add Milestones]
+    Milestones --> Curriculum[Final Curriculum]
+```
+
+**Features:**
+- Topic dependency analysis using LLM
+- Prerequisite chain detection
+- Adaptive scheduling based on hours/day
+- Milestone generation for progress tracking
+- Integration with knowledge assessment service
+
+---
+
+### 5. Document Processing Agent (7-Stage Pipeline)
+
+Ingests and indexes documents for RAG retrieval.
+
+**Pipeline Stages:**
+
+```mermaid
+flowchart LR
+    Upload[Document] --> Validate[1. Validate]
+    Validate --> Preprocess[2. Preprocess]
+    Preprocess --> OCR[3. OCR Extract]
+    OCR --> Chunk[4. Semantic Chunking]
+    Chunk --> Embed[5. Generate Embeddings]
+    Embed --> Index[6. Index in Qdrant]
+    Index --> Complete[7. Complete]
+```
+
+**Supported Formats:**
+- PDF (text and scanned with OCR)
+- Images (PNG, JPG with OCR)
+- Word documents (DOCX)
+- PowerPoint (PPTX)
+
+---
+
+### 6. Notes Agent
+
+Generates study notes from classroom materials.
+
+**Output Types:**
+- Summary notes
+- Key concepts extraction
+- Q&A generation
+- Flashcard creation
+
+---
+
+### 7. Assessment Agent
+
+Handles evaluation and grading tasks.
+
+**Capabilities:**
+- Question generation from content
+- Answer evaluation with rubrics
+- Feedback generation
+- Score calculation
+
+---
+
+### 8. Web Enrichment Agent
+
+Enhances responses with web content.
+
+**Features:**
+- Article crawling and summarization
+- Image search (Brave API)
+- YouTube video discovery
+- Trust score calculation for sources
+
+---
+
+## Base Agent Architecture
+
+All agents inherit from `BaseAgent` with Model Context Protocol (MCP) support:
+
+**Standard Agent Interface:**
+- `execute(input_data)` - Main execution method
+- `validate_input()` - Input validation
+- `format_output()` - Standardized MCP output format
+- `log_execution()` - Monitoring and logging
+
+**Agent Contexts:**
+- TUTOR - Q&A and explanations
+- STUDY_PLANNER - Learning paths
+- ASSESSMENT - Evaluation
+- NOTES_GENERATOR - Content creation
+- MODERATION - Safety checks
+- SCRAPER - Web content
+
+---
+
+## LangGraph State Machines
+
+Each agent uses LangGraph's StateGraph for workflow orchestration:
+
+```mermaid
+graph LR
+    subgraph "LangGraph Workflow"
+        Start[START] --> N1[Node 1]
+        N1 --> Router{Conditional}
+        Router --> |Path A| N2[Node 2]
+        Router --> |Path B| N3[Node 3]
+        N2 --> End[END]
+        N3 --> End
+    end
+```
+
+**Benefits:**
+- Visual workflow definition
+- Conditional routing
+- Parallel execution
+- Checkpointing and recovery
+- State persistence
 
 ---
 
@@ -54,8 +348,8 @@ flowchart LR
     end
     
     subgraph Backend
-        Core[Core Service<br/>Flask]
-        AI[AI Service<br/>FastAPI]
+        Core[Core Service<br/>Flask:8000]
+        AI[AI Service<br/>FastAPI:8001]
     end
     
     subgraph Databases
@@ -68,7 +362,6 @@ flowchart LR
     
     subgraph ML
         Models[PyTorch Models]
-        Train[Training Pipelines]
     end
     
     subgraph Streaming
@@ -98,7 +391,7 @@ flowchart LR
 |-----------|------------|---------|
 | Frontend | Next.js 14, TypeScript, TailwindCSS | Web application |
 | Core API | Flask, SQLAlchemy, JWT | Auth, users, classrooms |
-| AI API | FastAPI, LangChain, LangGraph | RAG, agents, inference |
+| AI API | FastAPI, LangGraph, LangChain | Agents, RAG, inference |
 | Real-time | WebSocket, WebRTC | Live features |
 
 ### AI and ML Layer
@@ -109,7 +402,7 @@ flowchart LR
 | Embeddings | all-MiniLM-L6-v2 | Semantic search |
 | Object Detection | YOLOv11 | Proctoring objects |
 | Face Analysis | MediaPipe FaceMesh | Gaze, expressions |
-| Temporal Models | LSTM, GRU | Behavior patterns |
+| Agent Framework | LangGraph | Workflow orchestration |
 
 ### Data Layer
 
@@ -121,98 +414,6 @@ flowchart LR
 | MongoDB | Document | Transcripts, logs, reports |
 | Cassandra | Time-Series | Analytics, event streams |
 | Kafka | Message Queue | Event streaming |
-
----
-
-## Project Structure
-
-```
-ensureStudy/
-├── frontend/                    # Next.js web application
-│   ├── app/                     # App router pages
-│   │   ├── (dashboard)/         # Student routes
-│   │   ├── (teacher)/           # Teacher routes
-│   │   └── (admin)/             # Admin routes
-│   └── components/              # React components
-│
-├── backend/
-│   ├── ai-service/              # FastAPI AI service
-│   │   ├── agents/              # LangGraph agents
-│   │   ├── rag/                 # Retrieval system
-│   │   ├── proctor/             # Proctoring logic
-│   │   └── services/            # Business services
-│   │
-│   ├── core-service/            # Flask core service
-│   │   ├── models/              # SQLAlchemy models
-│   │   ├── routes/              # API endpoints
-│   │   └── services/            # Business logic
-│   │
-│   ├── data-pipelines/          # PySpark ETL
-│   │   ├── etl/                 # Batch processing
-│   │   └── streaming/           # Kafka consumers
-│   │
-│   └── kafka/                   # Event streaming
-│       ├── producers/           # Event publishers
-│       └── consumers/           # Event processors
-│
-├── ml/                          # Machine learning
-│   ├── models/                  # Trained weights
-│   ├── training/                # Training scripts
-│   ├── notebooks/               # Jupyter experiments
-│   └── softskills/              # Soft skills ML
-│
-├── data/                        # Unified datasets
-│   ├── models-pretrained/       # Model weights
-│   ├── proctoring-features/     # Proctoring data
-│   ├── softskills-fluency/      # Audio datasets
-│   └── softskills-gestures/     # Gesture datasets
-│
-├── datadir/                     # Database schemas
-│   ├── postgresql/              # SQL migrations
-│   ├── qdrant/                  # Vector collections
-│   ├── mongodb/                 # Document schemas
-│   └── cassandra/               # Time-series tables
-│
-├── docs/                        # Documentation
-│   ├── architecture.md
-│   ├── ai-service.md
-│   ├── proctoring.md
-│   └── ...
-│
-└── scripts/                     # Utility scripts
-```
-
----
-
-## AI Tutor Architecture
-
-The tutor uses a multi-component approach for context-aware conversations:
-
-```mermaid
-stateDiagram-v2
-    [*] --> Receive: User message
-    Receive --> ABCR: Classify query type
-    
-    ABCR --> FollowUp: Follow-up detected
-    ABCR --> NewTopic: New topic
-    
-    FollowUp --> Context: Retrieve conversation context
-    NewTopic --> TAL: Extract and anchor topic
-    
-    TAL --> RAG: Vector search
-    RAG --> Generate: Build prompt
-    
-    Context --> Generate
-    Generate --> MCP: Update memory
-    MCP --> [*]: Return response
-```
-
-| Component | Full Name | Function |
-|-----------|-----------|----------|
-| ABCR | Attention-Based Context Routing | Detects follow-up vs new queries |
-| TAL | Topic Anchor Layer | Maintains topic continuity |
-| MCP | Memory Context Processor | Long-term conversation memory |
-| RAG | Retrieval Augmented Generation | Document-grounded answers |
 
 ---
 
@@ -248,13 +449,10 @@ flowchart LR
 | Mobile phone | YOLO cell phone | confidence > 0.5 |
 | Gaze deviation | Eye landmarks | > 30 degrees |
 | Face absence | FaceLandmarker | > 3 seconds |
-| Head rotation | Face mesh | > 45 degrees |
 
 ---
 
 ## Soft Skills Evaluation
-
-Communication assessment for interview preparation:
 
 | Metric | Weight | Analysis Method |
 |--------|--------|-----------------|
@@ -269,8 +467,6 @@ Communication assessment for interview preparation:
 ---
 
 ## Data Pipeline
-
-Event-driven analytics with Kafka and Spark:
 
 ```mermaid
 flowchart TB
@@ -305,80 +501,6 @@ flowchart TB
     Batch --> Analytics
 ```
 
-| Kafka Topic | Partitions | Retention | Purpose |
-|-------------|------------|-----------|---------|
-| user.events | 6 | 7 days | Activity tracking |
-| meeting.events | 4 | 30 days | Meeting lifecycle |
-| assessment.events | 4 | 30 days | Submissions |
-| proctoring.violations | 4 | 90 days | Integrity alerts |
-
----
-
-## Database Schema Overview
-
-### PostgreSQL (Core Data)
-
-| Table | Description |
-|-------|-------------|
-| users | User accounts and profiles |
-| classrooms | Virtual classroom definitions |
-| classroom_members | Student-classroom relationships |
-| meetings | Scheduled and completed meetings |
-| assessments | Tests and assignments |
-| submissions | Student responses |
-| progress | Learning progress tracking |
-
-### Qdrant (Vectors)
-
-| Collection | Vectors | Purpose |
-|------------|---------|---------|
-| documents | 384-dim | Classroom materials |
-| web_content | 384-dim | Web-crawled content |
-
-### Cassandra (Time-Series)
-
-| Table | Partition Key | Purpose |
-|-------|---------------|---------|
-| page_view_stats | date | Page analytics |
-| user_engagement | user_id | Engagement metrics |
-| learning_progress | user_id, subject | Progress over time |
-
----
-
-## ML Models
-
-| Model | Architecture | Input | Output |
-|-------|--------------|-------|--------|
-| Proctoring YOLO | YOLOv11n | Video frame | Object boxes |
-| Temporal Proctor | LSTM | Feature sequence | Cheating probability |
-| Engagement | MLP | Session features | Engagement score |
-| Fluency | Whisper + Custom | Audio | Filler word timestamps |
-| Gesture | MobileNetV3 | Hand image | Gesture class |
-
----
-
-## API Endpoints Summary
-
-### Core Service (Flask)
-
-| Group | Base Path | Endpoints |
-|-------|-----------|-----------|
-| Auth | /api/auth | login, register, refresh, logout |
-| Users | /api/users | profile, preferences |
-| Classrooms | /api/classrooms | CRUD, join, members |
-| Meetings | /api/meetings | schedule, start, end |
-| Assessments | /api/assessments | create, submit, grade |
-
-### AI Service (FastAPI)
-
-| Group | Base Path | Endpoints |
-|-------|-----------|-----------|
-| Tutor | /api/tutor | chat, history |
-| Indexing | /api/indexing | upload, status |
-| Grading | /api/grading | grade, feedback |
-| Proctor | /api/proctor | start, stream, end |
-| Softskills | /api/softskills | evaluate, results |
-
 ---
 
 ## Quick Start
@@ -391,9 +513,7 @@ Prerequisites: Docker, Node.js 20+, Python 3.11+
 | 2 | Add HuggingFace API key |
 | 3 | Configure database passwords |
 | 4 | Run `docker-compose up -d` |
-| 5 | Wait 30 seconds for services |
-| 6 | Run `make db-init` |
-| 7 | Run `make dev` |
+| 5 | Run `make dev` |
 
 | Service | Port | URL |
 |---------|------|-----|
@@ -401,58 +521,20 @@ Prerequisites: Docker, Node.js 20+, Python 3.11+
 | Core API | 8000 | http://localhost:8000 |
 | AI API | 8001 | http://localhost:8001 |
 | Qdrant | 6333 | http://localhost:6333 |
-| PostgreSQL | 5432 | localhost:5432 |
-
----
-
-## Environment Variables
-
-| Variable | Description |
-|----------|-------------|
-| HUGGINGFACE_API_KEY | HuggingFace inference API key |
-| LLM_MODEL | Mistral model identifier |
-| EMBEDDING_MODEL | Sentence transformer model |
-| DATABASE_URL | PostgreSQL connection string |
-| QDRANT_HOST | Qdrant vector database host |
-| REDIS_URL | Redis connection string |
-| KAFKA_BOOTSTRAP_SERVERS | Kafka broker addresses |
-
----
-
-## User Roles
-
-| Role | Capabilities |
-|------|--------------|
-| Student | Join classrooms, take assessments, chat with tutor |
-| Teacher | Create classrooms, schedule meetings, grade work |
-| Admin | Manage users, view analytics, system configuration |
-| Parent | View child progress, receive notifications |
-
----
-
-## Deployment
-
-| Environment | Infrastructure |
-|-------------|----------------|
-| Development | Docker Compose, local services |
-| Staging | Kubernetes, managed databases |
-| Production | Kubernetes, auto-scaling, CDN |
 
 ---
 
 ## Documentation
 
-Detailed documentation available in the `docs/` directory:
-
 | Document | Contents |
 |----------|----------|
 | architecture.md | System design and patterns |
 | ai-service.md | Tutor agent and RAG pipeline |
-| proctoring.md | Computer vision detection system |
+| agent-possibilities.md | Future agent capabilities |
+| proctoring.md | Computer vision detection |
 | softskills.md | Communication evaluation |
 | data-pipelines.md | Kafka and Spark processing |
 | databases.md | Schema definitions |
-| deployment.md | Docker and Kubernetes configs |
 | api-reference.md | Complete API documentation |
 
 ---
@@ -469,4 +551,4 @@ MIT
 2. Create a feature branch
 3. Submit a pull request
 
-For major changes, please open an issue first to discuss the proposed changes.
+For major changes, please open an issue first.

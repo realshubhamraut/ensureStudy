@@ -172,7 +172,8 @@ async def process_syllabus_from_classroom(request: ProcessFromClassroomRequest):
     
     try:
         # Fetch classroom data from core service (internal service call)
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        # Use verify=False for local development with self-signed certificates
+        async with httpx.AsyncClient(timeout=30.0, verify=False) as client:
             print(f"[SYLLABUS API] Fetching classroom data from {core_service_url}...")
             resp = await client.get(
                 f"{core_service_url}/api/classroom/{request.classroom_id}/syllabus",
@@ -200,9 +201,45 @@ async def process_syllabus_from_classroom(request: ProcessFromClassroomRequest):
         )
         print(f"[SYLLABUS API] Subject determined: {subject_name}")
         
-        # Generate syllabus ID
-        syllabus_id = str(uuid4())
+        # Check for existing Syllabus or create one via Core API
+        async with httpx.AsyncClient(timeout=30.0, verify=False) as client:
+            # First try to find existing syllabus for this classroom
+            resp = await client.get(
+                f"{core_service_url}/api/topics/syllabus?classroom_id={request.classroom_id}",
+                headers={"X-Service-Key": "internal-ai-service"}
+            )
+            
+            syllabus_id = None
+            if resp.status_code == 200:
+                syllabi = resp.json().get("syllabi", [])
+                for s in syllabi:
+                    if s.get("classroom_id") == request.classroom_id:
+                        syllabus_id = s.get("id")
+                        print(f"[SYLLABUS API] Found existing syllabus: {syllabus_id}")
+                        break
+            
+            # If no syllabus exists, create one
+            if not syllabus_id:
+                print(f"[SYLLABUS API] Creating new syllabus record in Core DB...")
+                create_resp = await client.post(
+                    f"{core_service_url}/api/topics/syllabus",
+                    json={
+                        "classroom_id": request.classroom_id,
+                        "title": classroom_data.get("syllabus_filename", "Syllabus"),
+                        "file_url": syllabus_url,
+                        "description": f"Syllabus for {subject_name}"
+                    },
+                    headers={"Content-Type": "application/json", "X-Service-Key": "internal-ai-service"}
+                )
+                if create_resp.status_code in [200, 201]:
+                    syllabus_id = create_resp.json().get("syllabus", {}).get("id")
+                    print(f"[SYLLABUS API] ✓ Created syllabus record: {syllabus_id}")
+                else:
+                    # Fallback: use UUID (won't be linked but extraction will still work)
+                    syllabus_id = str(uuid4())
+                    print(f"[SYLLABUS API] ⚠ Could not create syllabus record, using temp ID: {syllabus_id}")
         
+        print(f"[SYLLABUS API] Syllabus ID: {syllabus_id}")
         print(f"[SYLLABUS API] Syllabus URL: {syllabus_url}")
         print(f"[SYLLABUS API] Subject: {subject_name}")
         
@@ -393,9 +430,16 @@ async def get_collection_info():
 async def _download_pdf(url: str) -> Optional[str]:
     """Download PDF from URL to temp file."""
     import aiohttp
+    import ssl
     
     try:
-        async with aiohttp.ClientSession() as session:
+        # Create SSL context that doesn't verify certificates (for local dev with self-signed certs)
+        ssl_context = ssl.create_default_context()
+        ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_NONE
+        
+        connector = aiohttp.TCPConnector(ssl=ssl_context)
+        async with aiohttp.ClientSession(connector=connector) as session:
             async with session.get(url) as response:
                 if response.status != 200:
                     logger.error(f"Failed to download PDF: HTTP {response.status}")

@@ -349,7 +349,7 @@ def retrieve_with_mcp(state: TutorState) -> TutorState:
 
 
 def generate_answer(state: TutorState) -> TutorState:
-    """Generate answer using LLM with anchor constraints"""
+    """Generate answer using LLM with anchor constraints and learning enhancement"""
     if state["blocked"]:
         state["answer"] = (
             "I'm here to help with academic questions. "
@@ -371,8 +371,10 @@ def generate_answer(state: TutorState) -> TutorState:
         # Get anchor prompt fragment
         anchor = tal.get_anchor(state["session_id"])
         anchor_prompt = ""
+        topic = state.get("topic_anchor_title", "general")
         if anchor:
             anchor_prompt = anchor.to_prompt_fragment()
+            topic = anchor.canonical_title
         
         # Check for insufficient context
         if not context and anchor:
@@ -380,11 +382,39 @@ def generate_answer(state: TutorState) -> TutorState:
             state["answer"] = get_insufficient_anchor_response(anchor.canonical_title)
             return state
         
-        # Build prompt
+        # === LEARNING ELEMENT: Fetch few-shot examples ===
+        few_shot_section = ""
+        try:
+            from app.learning.learning_element import get_learning_element
+            import asyncio
+            
+            learning = get_learning_element()
+            # Get examples for this topic (run sync in async context)
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # Already in async context, create task
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    future = executor.submit(
+                        asyncio.run,
+                        learning.get_examples(topic, limit=2)
+                    )
+                    examples = future.result(timeout=3)
+            else:
+                examples = asyncio.run(learning.get_examples(topic, limit=2))
+            
+            if examples:
+                few_shot_section = learning.build_few_shot_prompt(examples)
+                logger.info(f"[TUTOR/LEARNING] Injected {len(examples)} few-shot examples for '{topic}'")
+        except Exception as le:
+            logger.warning(f"[TUTOR/LEARNING] Could not fetch examples: {le}")
+        # === END LEARNING ELEMENT ===
+        
+        # Build prompt with few-shot enhancement
         system_prompt = f"""You are a helpful academic tutor.
 
 {anchor_prompt}
-
+{few_shot_section}
 Instructions:
 - Give a clear, educational answer
 - Explain concepts step by step
@@ -406,12 +436,35 @@ Answer:"""
         
         logger.info(f"[TUTOR] Generated answer: {len(answer)} chars")
         
+        # === EXPERIENCE REPLAY: Log interaction ===
+        try:
+            from app.learning.learning_element import get_experience_replay
+            import asyncio
+            
+            replay = get_experience_replay()
+            asyncio.create_task(replay.add_experience(
+                agent_type="tutor",
+                session_id=state["session_id"],
+                query=state["query"],
+                response=answer,
+                metadata={
+                    "topic": topic,
+                    "is_followup": state.get("is_followup", False),
+                    "sources_count": len(state.get("sources", [])),
+                    "few_shot_used": len(few_shot_section) > 0
+                }
+            ))
+        except Exception as re:
+            logger.warning(f"[TUTOR/REPLAY] Could not log experience: {re}")
+        # === END EXPERIENCE REPLAY ===
+        
     except Exception as e:
         logger.error(f"[TUTOR] Generation error: {e}", exc_info=True)
         state["answer"] = "I'm having trouble generating a response. Please try again."
         state["error"] = str(e)
     
     return state
+
 
 
 def route_moderation(state: TutorState) -> str:

@@ -1,6 +1,7 @@
 """
 Meeting RAG Service
 Answers questions about meeting content using RAG pipeline
+Uses Google Gemini (FREE) for response generation
 """
 import os
 import asyncio
@@ -8,13 +9,20 @@ from datetime import datetime
 from typing import List, Dict, Optional, Any
 from pydantic import BaseModel
 
-import openai
-
 from app.services.meeting_embedding_service import meeting_embedding_service
 from app.services.transcription_service import transcription_service
 
-openai.api_key = os.getenv('OPENAI_API_KEY')
-LLM_MODEL = os.getenv('LLM_MODEL', 'gpt-4')
+# Try to import Google Gemini
+try:
+    import google.generativeai as genai
+    GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
+    if GOOGLE_API_KEY:
+        genai.configure(api_key=GOOGLE_API_KEY)
+        GEMINI_AVAILABLE = True
+    else:
+        GEMINI_AVAILABLE = False
+except ImportError:
+    GEMINI_AVAILABLE = False
 
 
 class Citation(BaseModel):
@@ -46,7 +54,7 @@ class MeetingRAGService:
     2. Search Qdrant for relevant transcript chunks
     3. Fetch full context if needed from MongoDB
     4. Build prompt with speaker attribution
-    5. Generate answer with GPT-4
+    5. Generate answer with Gemini (FREE)
     6. Return answer with citations (timestamps for video seeking)
     """
     
@@ -117,35 +125,13 @@ class MeetingRAGService:
         
         context = '\n\n'.join(context_parts)
         
-        # Step 3: Generate answer with GPT-4
-        system_prompt = """You are an AI assistant that helps students find information from their class recordings.
-Answer the question based ONLY on the provided transcript excerpts.
-Always cite your sources using the [1], [2], etc. notation.
-If the question cannot be answered from the provided context, say so clearly.
-Be concise but thorough."""
-
-        user_prompt = f"""Based on the following excerpts from class recordings, answer this question:
-
-Question: {question}
-
-Transcript excerpts:
-{context}
-
-Answer the question, citing the relevant excerpts by their numbers (e.g., [1], [2])."""
-
+        # Step 3: Generate answer
         try:
-            response = await asyncio.to_thread(
-                openai.chat.completions.create,
-                model=LLM_MODEL,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                max_tokens=800,
-                temperature=0.3
-            )
-            
-            answer = response.choices[0].message.content
+            if GEMINI_AVAILABLE:
+                answer = await self._generate_with_gemini(question, context)
+            else:
+                # Fallback: Simple extractive response (no API needed)
+                answer = self._generate_simple_response(question, context, citations)
             
             # Calculate confidence based on average relevance scores
             avg_score = sum(c.relevance_score for c in citations) / len(citations)
@@ -160,12 +146,57 @@ Answer the question, citing the relevant excerpts by their numbers (e.g., [1], [
             
         except Exception as e:
             print(f"RAG generation error: {e}")
+            # Fallback to simple response on error
+            answer = self._generate_simple_response(question, context, citations)
             return MeetingQAResponse(
-                answer="I encountered an error while processing your question. Please try again.",
-                citations=[],
-                sources_count=0,
-                confidence=0.0
+                answer=answer,
+                citations=citations,
+                sources_count=len(citations),
+                confidence=0.5
             )
+    
+    async def _generate_with_gemini(self, question: str, context: str) -> str:
+        """Generate answer using Google Gemini (FREE)"""
+        prompt = f"""You are an AI assistant that helps students find information from their class recordings.
+Answer the question based ONLY on the provided transcript excerpts.
+Always cite your sources using the [1], [2], etc. notation.
+If the question cannot be answered from the provided context, say so clearly.
+Be concise but thorough.
+
+Based on the following excerpts from class recordings, answer this question:
+
+Question: {question}
+
+Transcript excerpts:
+{context}
+
+Answer the question, citing the relevant excerpts by their numbers (e.g., [1], [2])."""
+
+        def _call_gemini():
+            model = genai.GenerativeModel('gemini-pro')
+            response = model.generate_content(prompt)
+            return response.text
+        
+        return await asyncio.to_thread(_call_gemini)
+    
+    def _generate_simple_response(self, question: str, context: str, citations: List[Citation]) -> str:
+        """Generate a simple extractive response without any API"""
+        if not citations:
+            return "No relevant information found."
+        
+        # Build a simple response from the citations
+        response_parts = [f"Based on the class recordings, here's what was discussed:\n"]
+        
+        for i, citation in enumerate(citations[:3], 1):  # Top 3 most relevant
+            speaker = citation.speaker_name or "The instructor"
+            time = self._format_time(citation.timestamp_start)
+            text = citation.text
+            response_parts.append(f"[{i}] At {time}, {speaker} mentioned: \"{text}\"")
+        
+        if len(citations) > 3:
+            response_parts.append(f"\n...and {len(citations) - 3} more relevant excerpts.")
+        
+        return "\n\n".join(response_parts)
     
     def _format_time(self, seconds: float) -> str:
         """Format seconds as mm:ss or hh:mm:ss"""

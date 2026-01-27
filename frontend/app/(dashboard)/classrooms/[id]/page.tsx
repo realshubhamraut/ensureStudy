@@ -369,36 +369,58 @@ export default function StudentClassroomDetailPage() {
         setChatImage(null)
         setChatLoading(true)
 
-        // Simulate AI response (in production, call AI API with meeting transcript context)
-        await new Promise(resolve => setTimeout(resolve, 1500))
+        try {
+            // Call the actual Meeting AI API
+            const AI_SERVICE_URL = process.env.NEXT_PUBLIC_AI_SERVICE_URL || 'https://localhost:8001'
 
-        // Generate contextual response based on the question and options
-        let aiResponse = ''
-        const lowerQ = userMessage.toLowerCase()
+            // Get the recording ID for this meeting if available
+            const meetingRecordings = recordings.filter(r => r.meeting_id === selectedMeeting.id)
+            const meetingIds = meetingRecordings.length > 0
+                ? meetingRecordings.map(r => r.meeting_id)
+                : [selectedMeeting.id]
 
-        // Add context based on options
-        let contextNote = ''
-        if (findResources) contextNote += '📚 Found related resources. '
-        if (useClassroomNotes) contextNote += '📝 Referenced classroom notes. '
+            const response = await fetch(`${AI_SERVICE_URL}/api/meeting/ask`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
+                },
+                body: JSON.stringify({
+                    question: userMessage,
+                    classroom_id: classroomId,
+                    meeting_ids: meetingIds
+                })
+            })
 
-        if (lowerQ.includes('summary') || lowerQ.includes('about')) {
-            aiResponse = responseLength === 'detailed'
-                ? `${contextNote}This lecture "${selectedMeeting.title}" covered key concepts including the main topic discussion, practical examples, and a Q&A session. The lecture lasted ${selectedMeeting.duration_minutes} minutes.\n\nKey Points:\n• Introduction to the topic\n• Core concepts explained\n• Practical examples demonstrated\n• Student questions addressed\n• Summary and next steps`
-                : `${contextNote}This lecture "${selectedMeeting.title}" covered key concepts including the main topic discussion and examples. Duration: ${selectedMeeting.duration_minutes} min.`
-        } else if (lowerQ.includes('example') || lowerQ.includes('problem')) {
-            aiResponse = responseLength === 'detailed'
-                ? `${contextNote}In this lecture, several examples were discussed:\n\n1. Basic concept examples\n2. Numerical problems with step-by-step solutions\n3. Real-world applications\n4. Practice problems for homework\n\nWould you like me to explain any specific example in more detail?`
-                : `${contextNote}Several examples were discussed including numerical problems and real-world applications.`
-        } else if (chatImage) {
-            aiResponse = `${contextNote}I can see the image you shared. Based on the lecture "${selectedMeeting.title}", this appears to be related to the concepts we covered. Would you like me to explain how this connects to the lecture material?`
-        } else {
-            aiResponse = responseLength === 'detailed'
-                ? `${contextNote}Based on the lecture "${selectedMeeting.title}", here's what I found relevant to your question:\n\n• The topic was covered comprehensively with explanations\n• Multiple examples were provided\n• Key formulas and concepts were explained\n\nIs there anything specific you'd like me to clarify?`
-                : `${contextNote}Based on the lecture, the topic was covered with explanations and examples. What would you like to know more about?`
+            if (!response.ok) {
+                throw new Error('Failed to get AI response')
+            }
+
+            const data = await response.json()
+
+            // Format the response with citations
+            let aiResponse = data.answer || 'I could not find relevant information for your question.'
+
+            // Add citation info if available
+            if (data.citations && data.citations.length > 0) {
+                aiResponse += '\n\n📎 Sources: '
+                data.citations.forEach((citation: any, i: number) => {
+                    const time = formatDuration(citation.timestamp_start)
+                    aiResponse += `\n[${i + 1}] ${citation.speaker_name || 'Speaker'} at ${time}`
+                })
+            }
+
+            setChatMessages(prev => [...prev, { role: 'ai', text: aiResponse }])
+        } catch (error) {
+            console.error('AI chat error:', error)
+            // Fallback to simple response on error
+            setChatMessages(prev => [...prev, {
+                role: 'ai',
+                text: `I encountered an error processing your question about "${selectedMeeting.title}". Please try again or check if the recording has been transcribed.`
+            }])
+        } finally {
+            setChatLoading(false)
         }
-
-        setChatMessages(prev => [...prev, { role: 'ai', text: aiResponse }])
-        setChatLoading(false)
     }
 
     // Handle image upload for chat
@@ -661,7 +683,7 @@ export default function StudentClassroomDetailPage() {
                         {tab.label}
                     </button>
                 ))}
-                {/* Digitize Notes - separate link */}
+                {/* Digitize Notes - disabled for now, will be enabled in future
                 <Link
                     href={`/classrooms/${classroomId}/notes`}
                     className="px-4 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 text-purple-600 hover:bg-purple-50 ml-2"
@@ -669,6 +691,7 @@ export default function StudentClassroomDetailPage() {
                     <SparklesIcon className="w-4 h-4" />
                     Digitize Notes
                 </Link>
+                */}
             </div>
 
             {/* Stream Tab (Announcements) */}
@@ -1017,21 +1040,14 @@ export default function StudentClassroomDetailPage() {
                                                         </p>
                                                     </div>
 
-                                                    {/* Right side: Stacked buttons (Transcript on top, AI on bottom) */}
-                                                    <div className="w-40 shrink-0 flex flex-col border-l border-gray-200">
+                                                    {/* Right side: Transcript button only */}
+                                                    <div className="w-32 shrink-0 flex flex-col border-l border-gray-200">
                                                         <button
                                                             onClick={() => openTranscript(m)}
-                                                            className="flex-1 bg-gray-50 hover:bg-gray-100 text-gray-600 flex items-center justify-center gap-2 transition-colors border-b border-gray-200 px-3"
+                                                            className="flex-1 bg-gray-50 hover:bg-gray-100 text-gray-600 flex items-center justify-center gap-2 transition-colors px-3"
                                                         >
                                                             <DocumentTextIcon className="w-4 h-4 text-gray-500" />
                                                             <span className="text-xs font-medium">Transcript</span>
-                                                        </button>
-                                                        <button
-                                                            onClick={() => openAIChat(m)}
-                                                            className="flex-1 bg-purple-50 hover:bg-purple-100 text-purple-700 flex items-center justify-center gap-2 transition-colors px-3"
-                                                        >
-                                                            <SparklesIcon className="w-4 h-4 text-purple-500" />
-                                                            <span className="text-xs font-medium">Ask AI</span>
                                                         </button>
                                                     </div>
                                                 </div>

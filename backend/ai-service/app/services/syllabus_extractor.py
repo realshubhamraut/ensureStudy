@@ -34,6 +34,11 @@ class ExtractedTopic:
     estimated_hours: float = 2.0
     keywords: List[str] = None
     page_numbers: List[int] = None
+    
+    def __post_init__(self):
+        # Truncate name to 200 chars (DB limit) to prevent StringDataRightTruncation errors
+        if self.name and len(self.name) > 200:
+            self.name = self.name[:197] + "..."
 
 
 @dataclass
@@ -555,7 +560,8 @@ JSON only:"""
         logger.info(f"[SYLLABUS] Topics to create: {len(topics)}")
         
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            # Use verify=False for local development with self-signed certificates
+            async with httpx.AsyncClient(timeout=30.0, verify=False) as client:
                 # Step 1: Create or get Subject
                 subject_id = None
                 
@@ -563,7 +569,7 @@ JSON only:"""
                 try:
                     resp = await client.get(
                         f"{core_service_url}/api/topics/subjects",
-                        headers={"Content-Type": "application/json"}
+                        headers={"Content-Type": "application/json", "X-Service-Key": "internal-ai-service"}
                     )
                     if resp.status_code == 200:
                         subjects_data = resp.json()
@@ -588,7 +594,7 @@ JSON only:"""
                                 "color": self._get_subject_color(subject_name),
                                 "is_active": True
                             },
-                            headers={"Content-Type": "application/json"}
+                            headers={"Content-Type": "application/json", "X-Service-Key": "internal-ai-service"}
                         )
                         if resp.status_code in [200, 201]:
                             subject_data = resp.json().get("subject", {})
@@ -608,7 +614,7 @@ JSON only:"""
                     resp = await client.put(
                         f"{core_service_url}/api/topics/syllabus/{syllabus_id}",
                         json={"subject_id": subject_id},
-                        headers={"Content-Type": "application/json"}
+                        headers={"Content-Type": "application/json", "X-Service-Key": "internal-ai-service"}
                     )
                     if resp.status_code in [200, 201]:
                         logger.info(f"[SYLLABUS] ✓ Linked syllabus to subject")
@@ -622,9 +628,9 @@ JSON only:"""
                     try:
                         logger.info(f"[SYLLABUS] Creating topic {i+1}/{len(topics)}: {topic.name}")
                         
-                        # Create topic
+                        # Create topic (POST /api/topics/ with subject_id)
                         topic_resp = await client.post(
-                            f"{core_service_url}/api/topics/topics",
+                            f"{core_service_url}/api/topics/",
                             json={
                                 "name": topic.name,
                                 "description": topic.description or f"Topic from {subject_name} syllabus",
@@ -634,7 +640,7 @@ JSON only:"""
                                 "order": i + 1,
                                 "is_active": True
                             },
-                            headers={"Content-Type": "application/json"}
+                            headers={"Content-Type": "application/json", "X-Service-Key": "internal-ai-service"}
                         )
                         
                         if topic_resp.status_code in [200, 201]:
@@ -647,15 +653,14 @@ JSON only:"""
                             for j, subtopic_name in enumerate(topic.subtopics):
                                 try:
                                     subtopic_resp = await client.post(
-                                        f"{core_service_url}/api/topics/subtopics",
+                                        f"{core_service_url}/api/topics/{topic_id}/subtopics",
                                         json={
                                             "name": subtopic_name,
                                             "description": f"Subtopic of {topic.name}",
-                                            "topic_id": topic_id,
                                             "order": j + 1,
                                             "is_active": True
                                         },
-                                        headers={"Content-Type": "application/json"}
+                                        headers={"Content-Type": "application/json", "X-Service-Key": "internal-ai-service"}
                                     )
                                     if subtopic_resp.status_code in [200, 201]:
                                         logger.info(f"[SYLLABUS]   ✓ Created subtopic: {subtopic_name}")

@@ -55,6 +55,8 @@ graph TB
 | Document | Description |
 |----------|-------------|
 | [architecture.md](architecture.md) | System architecture and design patterns |
+| [agents.md](agents.md) | Multi-agent AI architecture and LangGraph workflows |
+| [learning-agents.md](learning-agents.md) | Type 5 Learning Agent system with feedback loop |
 | [frontend.md](frontend.md) | Next.js frontend application |
 | [core-service.md](core-service.md) | Flask backend for auth and data management |
 | [ai-service.md](ai-service.md) | FastAPI service for RAG and AI agents |
@@ -66,6 +68,7 @@ graph TB
 | [databases.md](databases.md) | Database schemas and usage |
 | [deployment.md](deployment.md) | Docker and CI/CD configuration |
 | [api-reference.md](api-reference.md) | REST API endpoints |
+
 
 ### Technology Stack
 

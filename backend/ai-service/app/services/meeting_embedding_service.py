@@ -24,21 +24,33 @@ QDRANT_HOST = os.getenv('QDRANT_HOST', 'localhost')
 QDRANT_PORT = int(os.getenv('QDRANT_PORT', 6333))
 COLLECTION_NAME = 'meeting_transcripts'
 # Use same model as AI tutor retrieval for consistency
-EMBEDDING_MODEL = os.getenv('EMBEDDING_MODEL', 'sentence-transformers/all-mpnet-base-v2')
-EMBEDDING_DIMENSIONS = 768  # For sentence-transformers/all-mpnet-base-v2
+# all-MiniLM-L6-v2 = 384 dims, all-mpnet-base-v2 = 768 dims
+EMBEDDING_MODEL = os.getenv('EMBEDDING_MODEL', 'all-MiniLM-L6-v2')
 
 # Lazy-loaded embedding model (shared)
 _embedding_model: Optional[SentenceTransformer] = None
+_embedding_dimensions: int = 384  # Will be set when model loads
 
 
 def get_embedding_model() -> SentenceTransformer:
     """Lazy-load Sentence-Transformers model (FREE, LOCAL)"""
-    global _embedding_model
+    global _embedding_model, _embedding_dimensions
     if _embedding_model is None:
         model_name = EMBEDDING_MODEL.replace('sentence-transformers/', '')
         print(f"[MeetingEmbedding] Loading model: {model_name}")
         _embedding_model = SentenceTransformer(model_name)
+        # Get actual dimensions from the model
+        _embedding_dimensions = _embedding_model.get_sentence_embedding_dimension()
+        print(f"[MeetingEmbedding] Model dimensions: {_embedding_dimensions}")
     return _embedding_model
+
+
+def get_embedding_dimensions() -> int:
+    """Get embedding dimensions (loads model if needed)"""
+    global _embedding_dimensions
+    if _embedding_model is None:
+        get_embedding_model()  # This will set _embedding_dimensions
+    return _embedding_dimensions
 
 
 @dataclass
@@ -85,7 +97,7 @@ class MeetingEmbeddingService:
                 print(f"Warning: Qdrant not available - {e}")
                 self._client = None
         return self._client
-    
+        
     def _ensure_collection(self):
         """Ensure Qdrant collection exists with correct dimensions"""
         if self._client is None:
@@ -96,14 +108,16 @@ class MeetingEmbeddingService:
             collection_names = [c.name for c in collections]
             
             if COLLECTION_NAME not in collection_names:
+                # Get dimensions from actual model
+                dims = get_embedding_dimensions()
                 self._client.create_collection(
                     collection_name=COLLECTION_NAME,
                     vectors_config=VectorParams(
-                        size=EMBEDDING_DIMENSIONS,  # 768 for sentence-transformers
+                        size=dims,
                         distance=Distance.COSINE
                     )
                 )
-                print(f"Created collection: {COLLECTION_NAME} (dim={EMBEDDING_DIMENSIONS})")
+                print(f"Created collection: {COLLECTION_NAME} (dim={dims})")
         except Exception as e:
             print(f"Warning: Could not ensure Qdrant collection - {e}")
     
@@ -304,14 +318,25 @@ class MeetingEmbeddingService:
             print("Warning: Qdrant not available for search")
             return []
         
-        # Search
-        results = self.client.search(
-            collection_name=COLLECTION_NAME,
-            query_vector=query_embedding,
-            query_filter=search_filter,
-            limit=limit,
-            with_payload=True
-        )
+        # Search using query_points (newer Qdrant API)
+        try:
+            # Try new API first (qdrant-client >= 1.7.0)
+            results = self.client.query_points(
+                collection_name=COLLECTION_NAME,
+                query=query_embedding,
+                query_filter=search_filter,
+                limit=limit,
+                with_payload=True
+            ).points
+        except AttributeError:
+            # Fall back to old API (qdrant-client < 1.7.0)
+            results = self.client.search(
+                collection_name=COLLECTION_NAME,
+                query_vector=query_embedding,
+                query_filter=search_filter,
+                limit=limit,
+                with_payload=True
+            )
         
         return [
             {

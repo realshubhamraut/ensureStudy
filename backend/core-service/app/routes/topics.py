@@ -479,17 +479,64 @@ def get_topics_for_classroom(classroom_id):
     """
     user_id = request.user_id
     
+    print(f"\n[TOPICS] ===== GET /for-classroom/{classroom_id} =====")
+    
     # Get syllabus for this classroom
     syllabus = Syllabus.query.filter_by(classroom_id=classroom_id).first()
+    print(f"[TOPICS] Syllabus found: {syllabus.id if syllabus else 'None'}")
+    print(f"[TOPICS] Syllabus.subject_id: {syllabus.subject_id if syllabus else 'N/A'}")
     
-    if not syllabus or not syllabus.subject_id:
-        # Fallback: return all topics
-        topics = Topic.query.filter_by(is_active=True).order_by(Topic.order).all()
-    else:
-        topics = Topic.query.filter_by(
-            subject_id=syllabus.subject_id,
-            is_active=True
-        ).order_by(Topic.order).all()
+    subject_id = syllabus.subject_id if syllabus else None
+    
+    # Fallback: If syllabus exists but subject_id is NULL, try to find subject
+    if syllabus and not subject_id:
+        from app.models.classroom import Classroom
+        
+        print(f"[TOPICS] Syllabus has no subject_id - trying fallback methods...")
+        
+        # Method 1: Find Subject by classroom_id in description (most reliable)
+        matching_subject = Subject.query.filter(
+            Subject.description.ilike(f"%{classroom_id}%")
+        ).first()
+        print(f"[TOPICS] Method 1 (by classroom_id in desc): {matching_subject.name if matching_subject else 'Not found'}")
+        
+        # Method 2: Try matching by classroom's subject name
+        if not matching_subject:
+            classroom = Classroom.query.get(classroom_id)
+            if classroom:
+                classroom_subject = classroom.subject or classroom.name
+                print(f"[TOPICS] Method 2 searching for: '{classroom_subject}'")
+                if classroom_subject:
+                    matching_subject = Subject.query.filter(
+                        Subject.name.ilike(f"%{classroom_subject}%")
+                    ).first()
+                    print(f"[TOPICS] Method 2 result: {matching_subject.name if matching_subject else 'Not found'}")
+        
+        if matching_subject:
+            subject_id = matching_subject.id
+            print(f"[TOPICS] ✓ Found matching subject: {matching_subject.name} ({subject_id})")
+            # Also update the syllabus for future queries
+            syllabus.subject_id = matching_subject.id
+            db.session.commit()
+            print(f"[TOPICS] ✓ Updated syllabus.subject_id")
+    
+    if not subject_id:
+        # No syllabus or subject linked - return empty (don't show other classroom's topics!)
+        print(f"[TOPICS] ❌ No subject_id found - returning empty topics")
+        return jsonify({
+            "topics": [],
+            "count": 0,
+            "classroom_id": classroom_id,
+            "has_syllabus": syllabus is not None,
+            "needs_extraction": syllabus is not None and not subject_id
+        }), 200
+    
+    topics = Topic.query.filter_by(
+        subject_id=subject_id,
+        is_active=True
+    ).order_by(Topic.order).all()
+    
+    print(f"[TOPICS] ✓ Found {len(topics)} topics for subject_id={subject_id}")
     
     result = []
     for topic in topics:

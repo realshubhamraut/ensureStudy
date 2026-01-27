@@ -218,21 +218,45 @@ export default function AITutorPage() {
     const messagesEndRef = useRef<HTMLDivElement>(null)
     const inputRef = useRef<HTMLTextAreaElement>(null)
 
-    // Load conversations from localStorage
+    // Load conversations from server
     useEffect(() => {
-        const saved = localStorage.getItem('ai_tutor_conversations')
-        if (saved) {
-            const parsed = JSON.parse(saved)
-            setConversations(parsed.map((c: any) => ({
-                ...c,
-                createdAt: new Date(c.createdAt),
-                updatedAt: new Date(c.updatedAt),
-                messages: c.messages.map((m: any) => ({
-                    ...m,
-                    timestamp: new Date(m.timestamp)
-                }))
-            })))
+        const fetchConversations = async () => {
+            try {
+                const res = await fetch(`${getApiBaseUrl()}/api/chat/conversations`, {
+                    headers: {
+                        'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
+                    }
+                })
+                if (res.ok) {
+                    const data = await res.json()
+                    if (data.success && data.conversations) {
+                        setConversations(data.conversations.map((c: any) => ({
+                            ...c,
+                            createdAt: new Date(c.created_at),
+                            updatedAt: new Date(c.updated_at),
+                            messages: [] // Messages loaded on demand
+                        })))
+                    }
+                }
+            } catch (error) {
+                console.error('Failed to fetch conversations:', error)
+                // Fallback to localStorage for offline support
+                const saved = localStorage.getItem('ai_tutor_conversations')
+                if (saved) {
+                    const parsed = JSON.parse(saved)
+                    setConversations(parsed.map((c: any) => ({
+                        ...c,
+                        createdAt: new Date(c.createdAt),
+                        updatedAt: new Date(c.updatedAt),
+                        messages: c.messages.map((m: any) => ({
+                            ...m,
+                            timestamp: new Date(m.timestamp)
+                        }))
+                    })))
+                }
+            }
         }
+        fetchConversations()
     }, [])
 
     // Fetch classrooms
@@ -255,7 +279,7 @@ export default function AITutorPage() {
         fetchClassrooms()
     }, [])
 
-    // Save conversations
+    // Save conversations to localStorage as backup (server is primary)
     useEffect(() => {
         if (conversations.length > 0) {
             localStorage.setItem('ai_tutor_conversations', JSON.stringify(conversations))
@@ -267,9 +291,47 @@ export default function AITutorPage() {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
     }, [activeConversation?.messages])
 
-    // Create new conversation
-    const createNewConversation = () => {
+    // Create new conversation (server-side)
+    const createNewConversation = async () => {
         logClick('new_conversation_btn', 'Creating new conversation')
+
+        try {
+            const res = await fetch(`${getApiBaseUrl()}/api/chat/conversations`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
+                },
+                body: JSON.stringify({
+                    title: 'New Conversation',
+                    subject: subject !== 'general' ? subject : undefined,
+                    classroom_id: selectedClassroom || undefined
+                })
+            })
+
+            if (res.ok) {
+                const data = await res.json()
+                if (data.success && data.conversation) {
+                    const newConv: Conversation = {
+                        id: data.conversation.id,
+                        title: data.conversation.title,
+                        messages: [],
+                        pinned: false,
+                        createdAt: new Date(data.conversation.created_at),
+                        updatedAt: new Date(data.conversation.updated_at)
+                    }
+                    setConversations(prev => [newConv, ...prev])
+                    setActiveConversation(newConv)
+                    setSources([])
+                    setShowSources(false)
+                    return
+                }
+            }
+        } catch (error) {
+            console.error('Failed to create conversation on server:', error)
+        }
+
+        // Fallback to local-only conversation
         const newConv: Conversation = {
             id: `conv_${Date.now()}`,
             title: 'New Conversation',
@@ -280,21 +342,64 @@ export default function AITutorPage() {
         }
         setConversations(prev => [newConv, ...prev])
         setActiveConversation(newConv)
-        setSources([])  // Clear sources for new conversation
+        setSources([])
         setShowSources(false)
     }
 
-    // Select conversation and restore sources
-    const selectConversation = (conv: Conversation) => {
+    // Select conversation and load messages from server
+    const selectConversation = async (conv: Conversation) => {
         setActiveConversation(conv)
-        // Restore sources from the conversation
-        if (conv.sources && conv.sources.length > 0) {
-            setSources(conv.sources)
-            setShowSources(true)
-        } else {
-            setSources([])
-            setShowSources(false)
+
+        // Load full conversation with messages from server
+        try {
+            const res = await fetch(`${getApiBaseUrl()}/api/chat/conversations/${conv.id}`, {
+                headers: {
+                    'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
+                }
+            })
+
+            if (res.ok) {
+                const data = await res.json()
+                if (data.success && data.conversation) {
+                    const fullConv: Conversation = {
+                        ...conv,
+                        messages: (data.conversation.messages || []).map((m: any) => ({
+                            id: m.id,
+                            type: m.type,
+                            content: m.content,
+                            response: m.response,
+                            timestamp: new Date(m.timestamp),
+                            subject: m.subject
+                        })),
+                        sources: data.conversation.sources || []
+                    }
+                    setActiveConversation(fullConv)
+
+                    // Update in list
+                    setConversations(prev => prev.map(c => c.id === conv.id ? fullConv : c))
+
+                    // Restore sources
+                    if (fullConv.sources && fullConv.sources.length > 0) {
+                        setSources(fullConv.sources)
+                        setShowSources(true)
+                    } else {
+                        setSources([])
+                        setShowSources(false)
+                    }
+                }
+            }
+        } catch (error) {
+            console.error('Failed to load conversation:', error)
+            // Use locally cached data
+            if (conv.sources && conv.sources.length > 0) {
+                setSources(conv.sources)
+                setShowSources(true)
+            } else {
+                setSources([])
+                setShowSources(false)
+            }
         }
+
         setActiveSource(null)
         setViewerMode('list')
     }
@@ -322,19 +427,52 @@ export default function AITutorPage() {
         }
     }
 
-    // Toggle pin
-    const togglePin = (convId: string) => {
+    // Toggle pin (server-side)
+    const togglePin = async (convId: string) => {
         logClick('pin_conversation', `Toggling pin for ${convId}`)
+        const conv = conversations.find(c => c.id === convId)
+        if (!conv) return
+
+        const newPinned = !conv.pinned
+
+        // Optimistic update
         setConversations(prev => prev.map(c =>
-            c.id === convId ? { ...c, pinned: !c.pinned } : c
+            c.id === convId ? { ...c, pinned: newPinned } : c
         ))
+
+        // Sync to server
+        try {
+            await fetch(`${getApiBaseUrl()}/api/chat/conversations/${convId}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
+                },
+                body: JSON.stringify({ pinned: newPinned })
+            })
+        } catch (error) {
+            console.error('Failed to update pin status:', error)
+        }
     }
 
-    // Delete conversation
-    const deleteConversation = (convId: string) => {
+    // Delete conversation (server-side)
+    const deleteConversation = async (convId: string) => {
+        // Optimistic update
         setConversations(prev => prev.filter(c => c.id !== convId))
         if (activeConversation?.id === convId) {
             setActiveConversation(null)
+        }
+
+        // Sync to server
+        try {
+            await fetch(`${getApiBaseUrl()}/api/chat/conversations/${convId}`, {
+                method: 'DELETE',
+                headers: {
+                    'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
+                }
+            })
+        } catch (error) {
+            console.error('Failed to delete conversation:', error)
         }
     }
 
@@ -536,8 +674,8 @@ export default function AITutorPage() {
                         relevance: Math.round(s.similarity_score * 100),
                         snippet: 'From your classroom materials',
                         source: 'Classroom Materials',
-                        // Add URL so PDF can be opened in sidebar - use document_id to construct file URL
-                        url: s.url || `${process.env.NEXT_PUBLIC_CORE_API_URL || 'http://localhost:8000'}/api/files/${s.document_id}.pdf`,
+                        // Use the new material endpoint that looks up and serves the file
+                        url: s.url && s.url.startsWith('http') ? s.url : `${getApiBaseUrl()}/api/files/material/${s.document_id}`,
                         documentId: s.document_id,
                         pageNumber: s.page_number || 1
                     }))
@@ -633,6 +771,51 @@ export default function AITutorPage() {
 
             setConversations(prev => prev.map(c => c.id === conv!.id ? finalConv : c))
             setActiveConversation(finalConv)
+
+            // Save messages to server (fire and forget)
+            try {
+                // Save user message
+                await fetch(`${getApiBaseUrl()}/api/chat/conversations/${conv!.id}/messages`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
+                    },
+                    body: JSON.stringify({
+                        type: 'user',
+                        content: userMessage.content,
+                        subject: userMessage.subject
+                    })
+                })
+
+                // Save assistant message
+                await fetch(`${getApiBaseUrl()}/api/chat/conversations/${conv!.id}/messages`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
+                    },
+                    body: JSON.stringify({
+                        type: 'assistant',
+                        content: assistantMessage.content,
+                        response: assistantMessage.response
+                    })
+                })
+
+                // Save sources if any
+                if (allSources.length > 0) {
+                    await fetch(`${getApiBaseUrl()}/api/chat/conversations/${conv!.id}/sources`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
+                        },
+                        body: JSON.stringify({ sources: allSources })
+                    })
+                }
+            } catch (saveError) {
+                console.error('Failed to save messages to server:', saveError)
+            }
 
         } catch (error: any) {
             // Log the error
@@ -965,6 +1148,77 @@ export default function AITutorPage() {
                                                                 : 'bg-red-100 text-red-700'
                                                             }`}>
                                                             {Math.round(msg.response.confidence_score * 100)}% confident
+                                                        </div>
+                                                    </div>
+                                                )}
+
+                                                {/* Feedback Buttons - Learning Agent */}
+                                                {msg.type === 'assistant' && msg.response && (
+                                                    <div className="mt-3 flex items-center gap-3">
+                                                        <span className="text-xs text-gray-400">Was this helpful?</span>
+                                                        <div className="flex items-center gap-1">
+                                                            <button
+                                                                onClick={async () => {
+                                                                    try {
+                                                                        // Submit positive feedback
+                                                                        await fetch(`${getApiBaseUrl()}/api/feedback/submit`, {
+                                                                            method: 'POST',
+                                                                            headers: {
+                                                                                'Content-Type': 'application/json',
+                                                                                'Authorization': `Bearer ${localStorage.getItem('token')}`
+                                                                            },
+                                                                            body: JSON.stringify({
+                                                                                interaction_id: msg.id,
+                                                                                feedback_type: 'thumbs',
+                                                                                feedback_value: 1
+                                                                            })
+                                                                        });
+                                                                        // Visual feedback
+                                                                        const btn = document.getElementById(`feedback-up-${msg.id}`);
+                                                                        if (btn) btn.classList.add('bg-green-100', 'text-green-600');
+                                                                    } catch (e) {
+                                                                        console.error('Feedback error:', e);
+                                                                    }
+                                                                }}
+                                                                id={`feedback-up-${msg.id}`}
+                                                                className="p-1.5 rounded-lg hover:bg-green-50 text-gray-400 hover:text-green-600 transition-colors"
+                                                                title="This was helpful"
+                                                            >
+                                                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 10h4.764a2 2 0 011.789 2.894l-3.5 7A2 2 0 0115.263 21h-4.017c-.163 0-.326-.02-.485-.06L7 20m7-10V5a2 2 0 00-2-2h-.095c-.5 0-.905.405-.905.905 0 .714-.211 1.412-.608 2.006L7 11v9m7-10h-2M7 20H5a2 2 0 01-2-2v-6a2 2 0 012-2h2.5" />
+                                                                </svg>
+                                                            </button>
+                                                            <button
+                                                                onClick={async () => {
+                                                                    try {
+                                                                        // Submit negative feedback
+                                                                        await fetch(`${getApiBaseUrl()}/api/feedback/submit`, {
+                                                                            method: 'POST',
+                                                                            headers: {
+                                                                                'Content-Type': 'application/json',
+                                                                                'Authorization': `Bearer ${localStorage.getItem('token')}`
+                                                                            },
+                                                                            body: JSON.stringify({
+                                                                                interaction_id: msg.id,
+                                                                                feedback_type: 'thumbs',
+                                                                                feedback_value: -1
+                                                                            })
+                                                                        });
+                                                                        // Visual feedback
+                                                                        const btn = document.getElementById(`feedback-down-${msg.id}`);
+                                                                        if (btn) btn.classList.add('bg-red-100', 'text-red-600');
+                                                                    } catch (e) {
+                                                                        console.error('Feedback error:', e);
+                                                                    }
+                                                                }}
+                                                                id={`feedback-down-${msg.id}`}
+                                                                className="p-1.5 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-600 transition-colors"
+                                                                title="This wasn't helpful"
+                                                            >
+                                                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14H5.236a2 2 0 01-1.789-2.894l3.5-7A2 2 0 018.736 3h4.018a2 2 0 01.485.06l3.76.94m-7 10v5a2 2 0 002 2h.095c.5 0 .905-.405.905-.904 0-.715.211-1.413.608-2.008L17 13V4m-7 10h2m5-10h2a2 2 0 012 2v6a2 2 0 01-2 2h-2.5" />
+                                                                </svg>
+                                                            </button>
                                                         </div>
                                                     </div>
                                                 )}
@@ -1937,8 +2191,8 @@ export default function AITutorPage() {
                                                         {/* Trust score badge */}
                                                         {source.trustScore && (
                                                             <span className={`text-xs px-2 py-0.5 rounded-full flex-shrink-0 ${source.trustScore >= 0.9 ? 'bg-green-100 text-green-700' :
-                                                                    source.trustScore >= 0.8 ? 'bg-blue-100 text-blue-700' :
-                                                                        'bg-gray-100 text-gray-600'
+                                                                source.trustScore >= 0.8 ? 'bg-blue-100 text-blue-700' :
+                                                                    'bg-gray-100 text-gray-600'
                                                                 }`}>
                                                                 {Math.round(source.trustScore * 100)}%
                                                             </span>
