@@ -1,0 +1,32 @@
+
+flowchart TB
+    subgraph "Orchestration Layer"
+        Orch[Orchestrator Agent<br/>Supervisor Pattern]
+    end
+    
+    subgraph "Specialized Agents"
+        Tutor[Tutor Agent<br/>Type 5 Learning]
+        Research[Research Agent<br/>Web + PDF + YouTube]
+        Curriculum[Curriculum Agent<br/>Learning Paths]
+        Document[Document Agent<br/>7-Stage Pipeline]
+        Notes[Notes Agent]
+        Assessment[Assessment Agent]
+        WebEnrich[Web Enrichment Agent]
+    end
+    
+    subgraph "Support Services"
+        Moderate[Content Moderation]
+        ABCR[ABCR Routing]
+        TAL[Topic Anchoring]
+        MCP[Memory Context]
+    end
+    
+    Orch --> Tutor
+    Orch --> Research
+    Orch --> Curriculum
+    Orch --> Assessment
+    
+    Tutor --> Moderate
+    Tutor --> ABCR
+    Tutor --> TAL
+    Tutor --> MCP

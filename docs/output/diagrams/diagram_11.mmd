@@ -1,0 +1,20 @@
+
+flowchart LR
+    Camera[Webcam] --> Frames[Frame Capture]
+    Frames --> WS[WebSocket]
+    
+    WS --> YOLO[YOLO Detector]
+    WS --> Face[FaceMesh]
+    
+    YOLO --> Phone[Phone Detection]
+    YOLO --> Person[Person Count]
+    
+    Face --> Gaze[Gaze Tracking]
+    Face --> Head[Head Pose]
+    
+    Phone --> Score[Integrity Score]
+    Person --> Score
+    Gaze --> Score
+    Head --> Score
+    
+    Score --> Report[Session Report]

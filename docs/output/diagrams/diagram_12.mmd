@@ -1,0 +1,27 @@
+
+flowchart TB
+    subgraph "Audio Analysis"
+        Audio[Audio Stream] --> STT[Whisper STT]
+        STT --> Transcript[Transcript]
+        Transcript --> Fluency[Fluency Analysis]
+        Transcript --> Grammar[Grammar Check]
+        Transcript --> Vocab[Vocabulary Analysis]
+    end
+    
+    subgraph "Video Analysis"
+        Video[Video Stream] --> Face[FaceMesh]
+        Face --> Eye[Eye Contact]
+        Face --> Express[Expression]
+        Video --> Pose[Pose Detection]
+        Pose --> Posture[Posture Analysis]
+    end
+    
+    subgraph "Scoring"
+        Fluency --> Score[Weighted Score]
+        Grammar --> Score
+        Vocab --> Score
+        Eye --> Score
+        Express --> Score
+        Posture --> Score
+        Score --> Feedback[Detailed Feedback]
+    end

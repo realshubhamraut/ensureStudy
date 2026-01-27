@@ -437,7 +437,10 @@ def upload_material(classroom_id):
         file_size=data.get("size", 0),
         subject=data.get("subject", ""),
         description=data.get("description", ""),
-        uploaded_by=user.id
+        uploaded_by=user.id,
+        source='teacher',
+        visibility='public',
+        uploaded_by_role='teacher'
     )
     
     db.session.add(material)
@@ -487,8 +490,9 @@ def upload_material(classroom_id):
 
 @classroom_bp.route("/<classroom_id>/materials", methods=["GET"])
 def list_materials(classroom_id):
-    """Get materials for a classroom (teacher or enrolled student)"""
+    """Get materials for a classroom (teacher or enrolled student) with source filtering"""
     from app.models.classroom import ClassroomMaterial
+    from sqlalchemy import or_
     user = get_current_user()
     
     if not user:
@@ -510,10 +514,40 @@ def list_materials(classroom_id):
     if not (is_teacher or is_enrolled):
         return jsonify({"error": "Access denied"}), 403
     
-    materials = ClassroomMaterial.query.filter_by(
+    # Get filter params from query string
+    source_filter = request.args.get('source')  # 'teacher', 'student', 'web', or None for all
+    
+    # Base query
+    query = ClassroomMaterial.query.filter_by(
         classroom_id=classroom_id,
         is_active=True
-    ).order_by(ClassroomMaterial.uploaded_at.desc()).all()
+    )
+    
+    # Visibility logic
+    if is_teacher:
+        # Teachers see all materials
+        pass
+    else:
+        # Students see:
+        # 1. Public materials (teacher-uploaded, web-crawled)
+        # 2. Their own private materials
+        query = query.filter(
+            or_(
+                ClassroomMaterial.visibility == 'public',
+                ClassroomMaterial.uploaded_by == user.id
+            )
+        )
+    
+    # Source filtering
+    if source_filter:
+        if source_filter == 'teacher':
+            query = query.filter(ClassroomMaterial.source == 'teacher')
+        elif source_filter == 'student':
+            query = query.filter(ClassroomMaterial.source == 'student')
+        elif source_filter == 'web':
+            query = query.filter(ClassroomMaterial.source == 'web')
+    
+    materials = query.order_by(ClassroomMaterial.uploaded_at.desc()).all()
     
     return jsonify({
         "materials": [m.to_dict() for m in materials],
@@ -579,6 +613,115 @@ def update_material_status(material_id):
         "material": material.to_dict(),
         "message": "Status updated"
     }), 200
+
+
+# ==================== Student Materials: Private Uploads ====================
+
+@classroom_bp.route("/<classroom_id>/student-materials", methods=["POST"])
+@student_required
+def student_upload_material(classroom_id):
+    """Student uploads a private material to classroom (only visible to them)"""
+    from app.models.classroom import ClassroomMaterial
+    user = request.current_user
+    
+    # Check if student is enrolled
+    is_enrolled = StudentClassroom.query.filter_by(
+        student_id=user.id,
+        classroom_id=classroom_id,
+        is_active=True
+    ).first() is not None
+    
+    if not is_enrolled:
+        return jsonify({"error": "You are not enrolled in this classroom"}), 403
+    
+    data = request.get_json()
+    
+    if not data.get("name") or not data.get("url"):
+        return jsonify({"error": "Name and URL are required"}), 400
+    
+    material = ClassroomMaterial(
+        classroom_id=classroom_id,
+        name=data["name"],
+        file_url=data["url"],
+        file_type=data.get("type", "application/octet-stream"),
+        file_size=data.get("size", 0),
+        subject=data.get("subject", ""),
+        description=data.get("description", ""),
+        uploaded_by=user.id,
+        source='student',
+        visibility='private',  # Only this student can see it
+        uploaded_by_role='student'
+    )
+    
+    db.session.add(material)
+    db.session.commit()
+    
+    print(f"[CLASSROOM] Student {user.id} uploaded private material: {material.name}")
+    
+    return jsonify({
+        "material": material.to_dict(),
+        "message": "Material uploaded successfully (visible only to you)"
+    }), 201
+
+
+@classroom_bp.route("/<classroom_id>/web-materials", methods=["POST"])
+def store_web_material(classroom_id):
+    """Store web-crawled PDF material (called by AI service Worker-6B)"""
+    from app.models.classroom import ClassroomMaterial
+    
+    # Check for internal service key
+    service_key = request.headers.get("X-Service-Key")
+    if service_key != "internal-ai-service":
+        return jsonify({"error": "Internal service access required"}), 403
+    
+    classroom = Classroom.query.get(classroom_id)
+    if not classroom:
+        return jsonify({"error": "Classroom not found"}), 404
+    
+    data = request.get_json()
+    
+    if not data.get("name") or not data.get("url"):
+        return jsonify({"error": "Name and URL are required"}), 400
+    
+    # Check for duplicate (same source_url)
+    existing = ClassroomMaterial.query.filter_by(
+        classroom_id=classroom_id,
+        source_url=data.get("source_url"),
+        is_active=True
+    ).first()
+    
+    if existing:
+        print(f"[WORKER-6B] ⚠ Duplicate web material skipped: {data.get('source_url')[:50]}...")
+        return jsonify({
+            "material": existing.to_dict(),
+            "message": "Material already exists",
+            "duplicate": True
+        }), 200
+    
+    material = ClassroomMaterial(
+        classroom_id=classroom_id,
+        name=data["name"],
+        file_url=data["url"],
+        file_type=data.get("type", "application/pdf"),
+        file_size=data.get("size", 0),
+        subject=classroom.subject or data.get("subject", ""),
+        description=data.get("description", f"Downloaded from: {data.get('source_url', 'web')}"),
+        uploaded_by=classroom.teacher_id,  # Associate with teacher for indexing
+        source='web',
+        source_url=data.get("source_url"),
+        visibility='public',  # Everyone in classroom can see web materials
+        uploaded_by_role='system'
+    )
+    
+    db.session.add(material)
+    db.session.commit()
+    
+    print(f"[WORKER-6B] ✅ Stored web material in classroom {classroom.name}: {material.name}")
+    
+    return jsonify({
+        "material": material.to_dict(),
+        "message": "Web material stored successfully"
+    }), 201
 
 
 # ==================== Announcements: Stream Posts ====================

@@ -338,6 +338,40 @@ def retrieve_with_mcp(state: TutorState) -> TutorState:
             f"web_filtered={mcp_result.web_filtered_count}"
         )
         
+        # === AGENTIC WEB ENRICHMENT ===
+        # Trigger background web crawling + PDF search when local results are insufficient
+        mcp_chunk_count = len(mcp_result.chunks)
+        avg_similarity = sum(c.get("similarity", 0) for c in state["mcp_chunks"]) / max(mcp_chunk_count, 1)
+        
+        if mcp_chunk_count < 3 or avg_similarity < 0.5:
+            try:
+                import asyncio
+                from app.services.web_ingest_service import ingest_web_resources
+                
+                topic = state.get("topic_anchor_title") or state["query"][:50]
+                user_id = state.get("user_id", "")
+                
+                logger.info(
+                    f"[TUTOR/ENRICH] Triggering background web+PDF enrichment "
+                    f"(chunks={mcp_chunk_count}, avg_sim={avg_similarity:.2f})"
+                )
+                
+                # Fire and forget - don't block on completion
+                asyncio.create_task(
+                    ingest_web_resources(
+                        query=topic,
+                        max_sources=3,
+                        search_pdfs=True,  # Enable PDF search with '+ pdf download'
+                        user_id=user_id
+                    )
+                )
+                
+                logger.info(f"[TUTOR/ENRICH] Background enrichment task started for '{topic}'")
+                
+            except Exception as enrich_error:
+                logger.warning(f"[TUTOR/ENRICH] Could not start enrichment: {enrich_error}")
+        # === END AGENTIC WEB ENRICHMENT ===
+        
     except Exception as e:
         logger.error(f"[TUTOR] Retrieval error: {e}", exc_info=True)
         state["mcp_chunks"] = []

@@ -587,6 +587,109 @@ async def delete_curriculum(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+class ReconfigureRequest(BaseModel):
+    """Request to reconfigure curriculum schedule"""
+    user_id: str = Field(..., description="User ID")
+    hours_per_day: float = Field(default=2.0, ge=0.5, le=8, description="Study hours per day")
+    deadline_days: int = Field(default=14, ge=7, le=90, description="Target days to complete")
+
+
+@router.post("/{curriculum_id}/reconfigure")
+async def reconfigure_curriculum(
+    curriculum_id: str,
+    request: ReconfigureRequest
+):
+    """
+    Reconfigure an existing curriculum's schedule.
+    
+    Keeps the same topics but regenerates the schedule with new parameters:
+    - hours_per_day: Daily study time
+    - deadline_days: Target completion time
+    
+    This allows students to adjust their study plan without re-uploading the syllabus.
+    """
+    try:
+        from app.services.curriculum_storage import get_curriculum_storage
+        
+        storage = get_curriculum_storage()
+        
+        # Get existing curriculum
+        curriculum = storage.get_curriculum(curriculum_id)
+        if not curriculum:
+            raise HTTPException(status_code=404, detail="Curriculum not found")
+        
+        # Verify ownership
+        if curriculum.get("user_id") != request.user_id:
+            raise HTTPException(status_code=403, detail="Not authorized")
+        
+        logger.info(f"[CURRICULUM-API] Reconfiguring {curriculum_id}: hours={request.hours_per_day}, days={request.deadline_days}")
+        
+        # Get existing topics
+        topics = curriculum.get("topics", [])
+        if not topics:
+            raise HTTPException(status_code=400, detail="Curriculum has no topics to reschedule")
+        
+        # Regenerate schedule with new parameters
+        from datetime import datetime, timedelta
+        
+        start_date = datetime.now()
+        end_date = start_date + timedelta(days=request.deadline_days)
+        
+        # Calculate topic distribution
+        total_hours = request.hours_per_day * request.deadline_days
+        hours_per_topic = total_hours / len(topics) if topics else 1
+        
+        # Redistribute topics across the schedule
+        current_date = start_date
+        schedule = {}
+        topics_per_day = max(1, int(request.hours_per_day / hours_per_topic)) if hours_per_topic > 0 else 1
+        
+        for i, topic in enumerate(topics):
+            date_str = current_date.strftime("%Y-%m-%d")
+            
+            if date_str not in schedule:
+                schedule[date_str] = []
+            
+            schedule[date_str].append({
+                "topic_id": topic.get("id", f"topic_{i}"),
+                "topic_name": topic.get("name", f"Topic {i+1}"),
+                "status": "scheduled",
+                "confidence_score": topic.get("confidence_score", 0)
+            })
+            
+            # Move to next day after topics_per_day topics
+            if len(schedule[date_str]) >= topics_per_day:
+                current_date += timedelta(days=1)
+                # Skip weekends if configured
+                while current_date.weekday() >= 5:  # Sat=5, Sun=6
+                    current_date += timedelta(days=1)
+        
+        # Update curriculum with new schedule and parameters
+        curriculum["schedule"] = schedule
+        curriculum["hours_per_day"] = request.hours_per_day
+        curriculum["deadline_days"] = request.deadline_days
+        curriculum["start_date"] = start_date.strftime("%Y-%m-%d")
+        curriculum["end_date"] = end_date.strftime("%Y-%m-%d")
+        curriculum["updated_at"] = datetime.now().isoformat()
+        
+        # Save updated curriculum
+        storage.save_curriculum(curriculum)
+        
+        logger.info(f"[CURRICULUM-API] Reconfigured {curriculum_id}: {len(topics)} topics over {request.deadline_days} days")
+        
+        return {
+            "success": True,
+            "curriculum": curriculum,
+            "message": f"Schedule updated for {len(topics)} topics over {request.deadline_days} days"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[CURRICULUM-API] Reconfigure error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/storage/stats")
 async def get_storage_stats():
     """Get storage statistics for debugging."""
@@ -1351,7 +1454,8 @@ async def upload_syllabus_and_generate(
     user_id: str = Form(...),
     subject_name: str = Form(...),
     hours_per_day: float = Form(default=2.0),
-    deadline_days: int = Form(default=14)
+    deadline_days: int = Form(default=14),
+    curriculum_id: str = Form(default=None)  # If provided, reconfigure existing curriculum
 ):
     """
     Upload a syllabus PDF and generate curriculum automatically.
@@ -1361,6 +1465,8 @@ async def upload_syllabus_and_generate(
     2. Extract topics using SyllabusExtractor
     3. Generate personalized curriculum
     4. Return curriculum with learning path
+    
+    If curriculum_id is provided, the existing curriculum will be replaced (reconfiguration mode).
     
     Accepts PDF files up to 10MB.
     """
@@ -1378,6 +1484,14 @@ async def upload_syllabus_and_generate(
         raise HTTPException(status_code=400, detail="File size exceeds 10MB limit")
     
     try:
+        # If reconfiguring, delete the old curriculum first
+        is_reconfiguring = bool(curriculum_id)
+        if is_reconfiguring:
+            logger.info(f"[CURRICULUM-API] Reconfiguring curriculum {curriculum_id}")
+            from app.services.curriculum_storage import get_curriculum_storage
+            storage = get_curriculum_storage()
+            storage.delete_curriculum(curriculum_id, user_id)
+        
         # Save to temp file
         syllabus_id = f"syllabus_{uuid.uuid4().hex[:12]}"
         temp_dir = tempfile.gettempdir()

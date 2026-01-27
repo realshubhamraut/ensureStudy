@@ -54,6 +54,9 @@ class TutorQueryRequest(BaseModel):
         None, 
         description="Previous messages for context (enables follow-up questions)"
     )
+    # Chat persistence fields
+    conversation_id: Optional[str] = Field(None, description="Conversation ID for chat history storage")
+    auth_token: Optional[str] = Field(None, description="JWT auth token for API calls")
     
     @field_validator('question')
     @classmethod
@@ -116,6 +119,7 @@ class TutorResponseData(BaseModel):
     metadata: ResponseMetadata
     web_resources: Optional[dict] = Field(None, description="Web resources (videos, images, articles)")
     flowchart_mermaid: Optional[str] = Field(None, description="Mermaid flowchart code for visual explanation")
+    follow_up_questions: Optional[List[str]] = Field(None, description="AI-generated follow-up questions")
 
 
 class TutorQueryResponse(BaseModel):

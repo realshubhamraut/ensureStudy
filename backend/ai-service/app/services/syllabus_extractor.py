@@ -600,6 +600,20 @@ JSON only:"""
                             subject_data = resp.json().get("subject", {})
                             subject_id = subject_data.get("id")
                             logger.info(f"[SYLLABUS] ✓ Created subject: {subject_name} (ID: {subject_id})")
+                        elif resp.status_code == 400 and "already exists" in resp.text.lower():
+                            # Subject already exists, fetch it from the list again
+                            logger.info(f"[SYLLABUS] Subject already exists, fetching existing ID...")
+                            subjects_resp = await client.get(
+                                f"{core_service_url}/api/topics/subjects",
+                                headers={"X-Service-Key": "internal-ai-service"}
+                            )
+                            if subjects_resp.status_code == 200:
+                                subjects_list = subjects_resp.json().get("subjects", [])
+                                for subj in subjects_list:
+                                    if subj.get("name", "").lower() == subject_name.lower():
+                                        subject_id = subj.get("id")
+                                        logger.info(f"[SYLLABUS] ✓ Found existing subject: {subject_name} (ID: {subject_id})")
+                                        break
                         else:
                             logger.error(f"[SYLLABUS] Failed to create subject: {resp.status_code} - {resp.text}")
                     except Exception as e:

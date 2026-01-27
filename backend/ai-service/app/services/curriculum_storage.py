@@ -223,11 +223,27 @@ class CurriculumStorageService:
         return curricula
     
     def delete_curriculum(self, curriculum_id: str, user_id: str) -> bool:
-        """Delete a curriculum"""
+        """Delete a curriculum and all associated progress data"""
+        # First, get the curriculum to find all topics
+        curriculum = self.get_curriculum(curriculum_id)
+        topic_ids = []
+        if curriculum:
+            topics = curriculum.get("topics", [])
+            topic_ids = [t.get("id", t.get("name", "")) for t in topics]
+        
         if self.is_redis_available:
             try:
+                # Delete curriculum
                 self.client.delete(f"{PREFIX_CURRICULUM}{curriculum_id}")
+                # Remove from user's curriculum set
                 self.client.srem(f"{PREFIX_USER_CURRICULA}{user_id}", curriculum_id)
+                
+                # Delete all topic progress for this curriculum
+                for topic_id in topic_ids:
+                    progress_key = f"{PREFIX_PROGRESS}{curriculum_id}:{topic_id}"
+                    self.client.delete(progress_key)
+                
+                logger.info(f"[CURRICULUM-STORE] Deleted curriculum {curriculum_id[:8]}... and {len(topic_ids)} topic progress entries")
                 return True
             except Exception as e:
                 logger.error(f"[CURRICULUM-STORE] Redis delete failed: {e}")
@@ -239,6 +255,13 @@ class CurriculumStorageService:
             self._memory_user_curricula[user_id] = [
                 c for c in self._memory_user_curricula[user_id] if c != curriculum_id
             ]
+        # Delete topic progress from memory
+        for topic_id in topic_ids:
+            progress_key = f"{curriculum_id}:{topic_id}"
+            if progress_key in self._memory_progress:
+                del self._memory_progress[progress_key]
+        
+        logger.info(f"[CURRICULUM-STORE] Deleted curriculum from memory {curriculum_id[:8]}... and {len(topic_ids)} topic progress entries")
         return True
     
     # ========================================================================

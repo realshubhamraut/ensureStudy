@@ -1,0 +1,13 @@
+
+graph TD
+    App[Application] --> PG[(PostgreSQL)]
+    App --> Qdrant[(Qdrant)]
+    App --> Redis[(Redis)]
+    App --> Mongo[(MongoDB)]
+    App --> Cassandra[(Cassandra)]
+    
+    PG --> |"Users, Classrooms"| Primary[Relational Data]
+    Qdrant --> |"Document Chunks"| Vectors[Vector Search]
+    Redis --> |"Sessions, Cache"| Cache[Caching Layer]
+    Mongo --> |"Transcripts, Logs"| Docs[Document Storage]
+    Cassandra --> |"Analytics Events"| TimeSeries[Time-Series]

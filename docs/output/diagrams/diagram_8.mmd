@@ -1,0 +1,10 @@
+
+flowchart LR
+    Syllabus[Syllabus Document] --> Parse[Parse Topics]
+    Parse --> Deps[Analyze Dependencies]
+    Deps --> Graph[Build Dependency Graph]
+    Graph --> Sort[Topological Sort]
+    Sort --> Assess[Assess Prior Knowledge]
+    Assess --> Schedule[Generate Schedule]
+    Schedule --> Milestones[Add Milestones]
+    Milestones --> Curriculum[Final Learning Path]

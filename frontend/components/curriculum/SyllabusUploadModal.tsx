@@ -1,29 +1,77 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { getAiServiceUrl } from '@/utils/api'
 import {
     CloudArrowUpIcon,
     DocumentTextIcon,
     ArrowPathIcon,
     CheckCircleIcon,
-    XMarkIcon
+    XMarkIcon,
+    Cog6ToothIcon
 } from '@heroicons/react/24/outline'
 
 interface Props {
     onSuccess: (curriculum: any) => void
     onClose: () => void
+    curriculumId?: string  // If provided, we're reconfiguring an existing curriculum
+    subjectName?: string   // Pre-filled subject name for reconfiguration
 }
 
-export default function SyllabusUploadModal({ onSuccess, onClose }: Props) {
+interface Topic {
+    id: string
+    name: string
+    description?: string
+    estimated_hours?: number
+}
+
+export default function SyllabusUploadModal({ onSuccess, onClose, curriculumId, subjectName: initialSubjectName }: Props) {
     const [file, setFile] = useState<File | null>(null)
-    const [subjectName, setSubjectName] = useState('')
+    const [subjectName, setSubjectName] = useState(initialSubjectName || '')
     const [hoursPerDay, setHoursPerDay] = useState(2)
     const [deadlineDays, setDeadlineDays] = useState(14)
     const [step, setStep] = useState<'upload' | 'preview' | 'generating' | 'done'>('upload')
     const [previewTopics, setPreviewTopics] = useState<string[]>([])
+    const [existingTopics, setExistingTopics] = useState<Topic[]>([])
     const [error, setError] = useState('')
+    const [loadingTopics, setLoadingTopics] = useState(false)
     const fileRef = useRef<HTMLInputElement>(null)
+
+    // Check if we're in reconfigure mode
+    const isReconfiguring = !!curriculumId
+
+    // Fetch existing topics when reconfiguring
+    useEffect(() => {
+        if (isReconfiguring && curriculumId) {
+            fetchExistingTopics()
+        }
+    }, [curriculumId])
+
+    const fetchExistingTopics = async () => {
+        setLoadingTopics(true)
+        setError('')
+        try {
+            const res = await fetch(`${getAiServiceUrl()}/api/curriculum/${curriculumId}`, {
+                headers: { 'Authorization': `Bearer ${localStorage.getItem('accessToken')}` }
+            })
+            if (res.ok) {
+                const data = await res.json()
+                const curriculum = data.curriculum || data
+                const topics = curriculum.topics || []
+                setExistingTopics(topics)
+                setPreviewTopics(topics.map((t: Topic) => t.name))
+                // Set existing schedule settings
+                if (curriculum.hours_per_day) setHoursPerDay(curriculum.hours_per_day)
+                if (curriculum.deadline_days) setDeadlineDays(curriculum.deadline_days)
+                setStep('preview')  // Skip directly to preview
+            } else {
+                setError('Failed to load existing topics')
+            }
+        } catch (e) {
+            setError('Failed to fetch curriculum data')
+        }
+        setLoadingTopics(false)
+    }
 
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const f = e.target.files?.[0]
@@ -70,33 +118,61 @@ export default function SyllabusUploadModal({ onSuccess, onClose }: Props) {
     }
 
     const generateCurriculum = async () => {
-        if (!file) return
+        if (!isReconfiguring && !file) return
 
         setStep('generating')
         setError('')
 
         try {
             const userId = localStorage.getItem('userId') || 'demo-user'
-            const formData = new FormData()
-            formData.append('file', file)
-            formData.append('user_id', userId)
-            formData.append('subject_name', subjectName)
-            formData.append('hours_per_day', hoursPerDay.toString())
-            formData.append('deadline_days', deadlineDays.toString())
 
-            const res = await fetch(`${getAiServiceUrl()}/api/curriculum/syllabus/upload`, {
-                method: 'POST',
-                body: formData
-            })
+            if (isReconfiguring) {
+                // Reconfigure existing curriculum - just update schedule with new params
+                const res = await fetch(`${getAiServiceUrl()}/api/curriculum/${curriculumId}/reconfigure`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
+                    },
+                    body: JSON.stringify({
+                        user_id: userId,
+                        hours_per_day: hoursPerDay,
+                        deadline_days: deadlineDays
+                    })
+                })
 
-            if (res.ok) {
-                const data = await res.json()
-                setStep('done')
-                setTimeout(() => onSuccess(data.curriculum), 1500)
+                if (res.ok) {
+                    const data = await res.json()
+                    setStep('done')
+                    setTimeout(() => onSuccess(data.curriculum), 1500)
+                } else {
+                    const err = await res.json()
+                    setError(err.detail || 'Failed to reconfigure curriculum')
+                    setStep('preview')
+                }
             } else {
-                const err = await res.json()
-                setError(err.detail || 'Failed to generate curriculum')
-                setStep('preview')
+                // New curriculum - upload file and generate
+                const formData = new FormData()
+                formData.append('file', file!)
+                formData.append('user_id', userId)
+                formData.append('subject_name', subjectName)
+                formData.append('hours_per_day', hoursPerDay.toString())
+                formData.append('deadline_days', deadlineDays.toString())
+
+                const res = await fetch(`${getAiServiceUrl()}/api/curriculum/syllabus/upload`, {
+                    method: 'POST',
+                    body: formData
+                })
+
+                if (res.ok) {
+                    const data = await res.json()
+                    setStep('done')
+                    setTimeout(() => onSuccess(data.curriculum), 1500)
+                } else {
+                    const err = await res.json()
+                    setError(err.detail || 'Failed to generate curriculum')
+                    setStep('preview')
+                }
             }
         } catch (e) {
             setError('Failed to generate curriculum')
@@ -110,18 +186,37 @@ export default function SyllabusUploadModal({ onSuccess, onClose }: Props) {
                 {/* Header */}
                 <div className="p-6 border-b flex items-center justify-between">
                     <div className="flex items-center gap-3">
-                        <div className="p-2 bg-primary-100 rounded-lg">
-                            <CloudArrowUpIcon className="w-6 h-6 text-primary-600" />
+                        <div className={`p-2 rounded-lg ${isReconfiguring ? 'bg-gray-100' : 'bg-primary-100'}`}>
+                            {isReconfiguring ? (
+                                <Cog6ToothIcon className="w-6 h-6 text-gray-600" />
+                            ) : (
+                                <CloudArrowUpIcon className="w-6 h-6 text-primary-600" />
+                            )}
                         </div>
-                        <h2 className="text-xl font-bold text-gray-900">Upload Syllabus</h2>
+                        <div>
+                            <h2 className="text-xl font-bold text-gray-900">
+                                {isReconfiguring ? 'Reconfigure Schedule' : 'Upload Syllabus'}
+                            </h2>
+                            {isReconfiguring && (
+                                <p className="text-sm text-gray-500">Adjust schedule for {initialSubjectName}</p>
+                            )}
+                        </div>
                     </div>
                     <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
                         <XMarkIcon className="w-6 h-6" />
                     </button>
                 </div>
 
-                {/* Upload Step */}
-                {step === 'upload' && (
+                {/* Loading Topics (for reconfigure mode) */}
+                {loadingTopics && (
+                    <div className="p-12 text-center">
+                        <ArrowPathIcon className="w-12 h-12 text-primary-500 animate-spin mx-auto mb-4" />
+                        <p className="text-gray-600">Loading existing topics...</p>
+                    </div>
+                )}
+
+                {/* Upload Step (only for new curriculum) */}
+                {step === 'upload' && !isReconfiguring && !loadingTopics && (
                     <div className="p-6 space-y-4">
                         {error && <div className="p-3 bg-red-50 text-red-700 rounded-lg text-sm">{error}</div>}
 
@@ -172,12 +267,14 @@ export default function SyllabusUploadModal({ onSuccess, onClose }: Props) {
                 )}
 
                 {/* Preview Step */}
-                {step === 'preview' && (
+                {step === 'preview' && !loadingTopics && (
                     <div className="p-6 space-y-4">
                         {error && <div className="p-3 bg-red-50 text-red-700 rounded-lg text-sm">{error}</div>}
 
                         <div>
-                            <h3 className="font-medium text-gray-900 mb-2">Extracted Topics ({previewTopics.length})</h3>
+                            <h3 className="font-medium text-gray-900 mb-2">
+                                {isReconfiguring ? 'Current Topics' : 'Extracted Topics'} ({previewTopics.length})
+                            </h3>
                             <div className="max-h-40 overflow-y-auto space-y-1">
                                 {previewTopics.map((t, i) => (
                                     <div key={i} className="flex items-center gap-2 p-2 bg-gray-50 rounded">
@@ -206,8 +303,12 @@ export default function SyllabusUploadModal({ onSuccess, onClose }: Props) {
                         </div>
 
                         <div className="flex gap-3">
-                            <button onClick={() => setStep('upload')} className="flex-1 btn-secondary">Back</button>
-                            <button onClick={generateCurriculum} className="flex-1 btn-primary">Generate Curriculum</button>
+                            {!isReconfiguring && (
+                                <button onClick={() => setStep('upload')} className="flex-1 btn-secondary">Back</button>
+                            )}
+                            <button onClick={generateCurriculum} className={`${isReconfiguring ? 'w-full' : 'flex-1'} btn-primary`}>
+                                {isReconfiguring ? 'Update Schedule' : 'Generate Curriculum'}
+                            </button>
                         </div>
                     </div>
                 )}
@@ -216,7 +317,9 @@ export default function SyllabusUploadModal({ onSuccess, onClose }: Props) {
                 {step === 'generating' && (
                     <div className="p-12 text-center">
                         <ArrowPathIcon className="w-12 h-12 text-primary-500 animate-spin mx-auto mb-4" />
-                        <p className="text-gray-600">Processing your syllabus...</p>
+                        <p className="text-gray-600">
+                            {isReconfiguring ? 'Updating schedule...' : 'Processing your syllabus...'}
+                        </p>
                     </div>
                 )}
 
@@ -224,7 +327,9 @@ export default function SyllabusUploadModal({ onSuccess, onClose }: Props) {
                 {step === 'done' && (
                     <div className="p-12 text-center">
                         <CheckCircleIcon className="w-16 h-16 text-green-500 mx-auto mb-4" />
-                        <p className="text-xl font-bold text-gray-900">Curriculum Generated!</p>
+                        <p className="text-xl font-bold text-gray-900">
+                            {isReconfiguring ? 'Schedule Updated!' : 'Curriculum Generated!'}
+                        </p>
                     </div>
                 )}
             </div>

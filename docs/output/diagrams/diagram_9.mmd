@@ -1,0 +1,8 @@
+
+flowchart LR
+    Upload[1. Upload] --> Validate[2. Validate]
+    Validate --> Extract[3. Extract Text]
+    Extract --> OCR[4. OCR if needed]
+    OCR --> Chunk[5. Semantic Chunking]
+    Chunk --> Embed[6. Generate Embeddings]
+    Embed --> Index[7. Index in Qdrant]

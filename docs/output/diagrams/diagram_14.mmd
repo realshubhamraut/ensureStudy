@@ -1,0 +1,31 @@
+
+flowchart TB
+    subgraph "Event Sources"
+        App[Application Events]
+        Meet[Meeting Events]
+        Learn[Learning Progress]
+    end
+    
+    subgraph "Kafka"
+        Topics[Kafka Topics]
+    end
+    
+    subgraph "Processing"
+        Stream[Spark Streaming]
+        Batch[Spark Batch]
+    end
+    
+    subgraph "Storage"
+        Cassandra[(Cassandra)]
+        Analytics[(Analytics DB)]
+    end
+    
+    App --> Topics
+    Meet --> Topics
+    Learn --> Topics
+    
+    Topics --> Stream
+    Stream --> Cassandra
+    
+    Cassandra --> Batch
+    Batch --> Analytics

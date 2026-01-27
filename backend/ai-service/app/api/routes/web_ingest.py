@@ -23,13 +23,15 @@ class WebIngestRequest(BaseModel):
     query: str
     subject: Optional[str] = None
     max_sources: int = 3
+    search_pdfs: bool = True  # Enable PDF search by default
     
     class Config:
         json_schema_extra = {
             "example": {
                 "query": "photosynthesis",
                 "subject": "biology",
-                "max_sources": 3
+                "max_sources": 3,
+                "search_pdfs": True
             }
         }
 
@@ -89,15 +91,25 @@ async def ingest_web_resources(request: WebIngestRequest):
     try:
         from app.services.web_ingest_service import ingest_web_resources as do_ingest
         
-        logger.info(f"Web ingest request: query='{request.query}', subject={request.subject}")
+        logger.info(f"Web ingest request: query='{request.query}', subject={request.subject}, search_pdfs={request.search_pdfs}")
+        print(f"\n{'='*60}")
+        print(f"[WEB-INGEST] 📥 Query: '{request.query}'")
+        print(f"[WEB-INGEST] 📚 Subject: {request.subject or 'General'}")
+        print(f"[WEB-INGEST] 📄 PDF Search: {'ENABLED' if request.search_pdfs else 'DISABLED'}")
+        print(f"{'='*60}")
         
         result = await do_ingest(
             query=request.query,
             subject=request.subject,
-            max_sources=request.max_sources
+            max_sources=request.max_sources,
+            search_pdfs=request.search_pdfs
         )
         
-        logger.info(f"Web ingest result: {len(result.resources)} resources, {result.total_chunks_stored} chunks stored")
+        # Log resource types
+        pdf_count = sum(1 for r in result.resources if r.source_type == 'web_pdf')
+        article_count = len(result.resources) - pdf_count
+        logger.info(f"Web ingest result: {len(result.resources)} resources ({pdf_count} PDFs, {article_count} articles), {result.total_chunks_stored} chunks stored")
+        print(f"[WEB-INGEST] ✅ Result: {pdf_count} PDFs, {article_count} articles found")
         
         return WebIngestResponse(
             success=result.success,

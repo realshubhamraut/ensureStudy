@@ -162,8 +162,8 @@ export default function LearningStyleQuiz({ onComplete, onSkip }: Props) {
                             key={option.id}
                             onClick={() => handleAnswer(question.id, option.style)}
                             className={`w-full text-left p-4 rounded-xl border-2 transition-all ${responses[question.id] === option.style
-                                    ? 'border-primary-500 bg-primary-50'
-                                    : 'border-gray-200 hover:border-gray-300'
+                                ? 'border-primary-500 bg-primary-50'
+                                : 'border-gray-200 hover:border-gray-300'
                                 }`}
                         >
                             {option.text}

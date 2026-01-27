@@ -33,6 +33,7 @@ from ...services.flowchart_generator import generate_concept_flowchart
 from ...services.response_cache import get_response_cache, generate_context_hash
 from ...services.image_service import search_images_brave
 from ...services.youtube_video_service import search_videos_youtube
+from ...services.followup_generator import generate_follow_up_questions
 from ...utils.logging import (
     generate_request_id,
     log_query_received,
@@ -249,7 +250,10 @@ async def process_tutor_query(request: TutorQueryRequest) -> TutorQueryResponse:
                         query=request.question,
                         subject=request.subject.value if request.subject else None,
                         max_sources=2,
-                        conversation_history=history_dicts
+                        conversation_history=history_dicts,
+                        search_pdfs=True,  # Enable PDF search with Worker-6B
+                        user_id=request.user_id,
+                        classroom_id=request.classroom_id  # Store PDFs in classroom
                     )
                     
                     if web_result.success and web_result.resources:
@@ -277,19 +281,37 @@ async def process_tutor_query(request: TutorQueryRequest) -> TutorQueryResponse:
                             print(f"[RAG] 💾 Stored in cache for future use!")
                         
                         # Also prepare for UI display
-                    web_resources_dict = {
-                        "articles": [
-                            {
-                                "id": r.id,
-                                "title": r.title,
-                                "url": r.url,
-                                "source": r.source_name,
-                                "snippet": r.summary[:200] if r.summary else "",
-                                "trustScore": r.trust_score
-                            }
-                            for r in web_result.resources if r.clean_content
-                        ]
-                    }
+                    # Separate articles and PDFs for proper frontend rendering
+                    articles = []
+                    pdfs = []
+                    for r in web_result.resources:
+                        if r.clean_content:
+                            if r.source_type == 'web_pdf':
+                                pdfs.append({
+                                    "id": r.id,
+                                    "type": "pdf",
+                                    "title": r.title,
+                                    "url": r.url,
+                                    "source": r.source_name,
+                                    "snippet": r.summary[:200] if r.summary else "",
+                                    "trustScore": r.trust_score,
+                                    "wordCount": r.word_count,
+                                    "chunkCount": r.chunk_count
+                                })
+                            else:
+                                articles.append({
+                                    "id": r.id,
+                                    "title": r.title,
+                                    "url": r.url,
+                                    "source": r.source_name,
+                                    "snippet": r.summary[:200] if r.summary else "",
+                                    "trustScore": r.trust_score
+                                })
+                    
+                    web_resources_dict = {"articles": articles}
+                    if pdfs:
+                        web_resources_dict["pdfs"] = pdfs
+                        print(f"[RAG] 📄 Added {len(pdfs)} PDFs to web resources")
                 
                 # Fetch images from Brave API (parallel with articles)
                 try:
@@ -413,6 +435,19 @@ async def process_tutor_query(request: TutorQueryRequest) -> TutorQueryResponse:
         except Exception as e:
             print(f"Flowchart generation error: {e}")
         
+        # ========================================
+        # Step 10.5: Generate Follow-Up Questions
+        # ========================================
+        follow_ups = []
+        try:
+            follow_ups = generate_follow_up_questions(
+                question=request.question,
+                answer_short=llm_response.answer_short,
+                topic=request.subject.value if request.subject else ""
+            )
+        except Exception as e:
+            print(f"Follow-up generation error: {e}")
+        
         response_data = TutorResponseData(
             answer_short=llm_response.answer_short,
             answer_detailed=llm_response.answer_detailed,
@@ -426,7 +461,8 @@ async def process_tutor_query(request: TutorQueryRequest) -> TutorQueryResponse:
                 request_id=request_id
             ),
             web_resources=web_resources_dict,
-            flowchart_mermaid=flowchart_code
+            flowchart_mermaid=flowchart_code,
+            follow_up_questions=follow_ups if follow_ups else None
         )
         
         # Log success (but NOT full prompt, context, or embeddings)
@@ -442,6 +478,68 @@ async def process_tutor_query(request: TutorQueryRequest) -> TutorQueryResponse:
             total_time_ms=total_time,
             success=True
         )
+        
+        # ========================================
+        # Step 11: Persist Chat to Database
+        # ========================================
+        if request.conversation_id and request.auth_token:
+            try:
+                from ...services.chat_persistence import save_chat_exchange
+                
+                # Prepare sources for storage
+                sources_for_db = [
+                    {
+                        "type": "article",
+                        "title": s.title,
+                        "url": s.url,
+                        "relevance": s.similarity_score,
+                        "source": "qdrant"
+                    }
+                    for s in sources
+                ]
+                
+                # Add web resources if available
+                if web_resources_dict:
+                    if web_resources_dict.get("articles"):
+                        for article in web_resources_dict["articles"]:
+                            sources_for_db.append({
+                                "type": "article",
+                                "title": article.get("title"),
+                                "url": article.get("url"),
+                                "snippet": article.get("snippet"),
+                                "source": article.get("source", "web")
+                            })
+                    if web_resources_dict.get("videos"):
+                        for video in web_resources_dict["videos"]:
+                            sources_for_db.append({
+                                "type": "video",
+                                "title": video.get("title"),
+                                "url": video.get("url"),
+                                "thumbnailUrl": video.get("thumbnailUrl"),
+                                "source": "YouTube"
+                            })
+                
+                # Save the exchange asynchronously (fire and forget)
+                import asyncio
+                asyncio.create_task(save_chat_exchange(
+                    conversation_id=request.conversation_id,
+                    user_id=request.user_id,
+                    user_message=request.question,
+                    ai_response=llm_response.answer_detailed or llm_response.answer_short,
+                    auth_token=request.auth_token,
+                    sources=sources_for_db,
+                    response_data={
+                        "answer_short": llm_response.answer_short,
+                        "answer_detailed": llm_response.answer_detailed,
+                        "confidence": llm_response.confidence,
+                        "flowchart": flowchart_code
+                    },
+                    subject=request.subject.value if request.subject else None,
+                    classroom_id=request.classroom_id
+                ))
+                print(f"[CHAT-PERSIST] ✅ Saving chat to conversation {request.conversation_id}")
+            except Exception as persist_error:
+                print(f"[CHAT-PERSIST] ⚠ Failed to save chat: {persist_error}")
         
         return TutorQueryResponse(success=True, data=response_data)
     

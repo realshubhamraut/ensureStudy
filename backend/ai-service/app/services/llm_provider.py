@@ -26,9 +26,10 @@ SAGEMAKER_COLD_TIMEOUT = int(os.getenv("SAGEMAKER_COLD_TIMEOUT", "30"))
 
 # Available HuggingFace models (fallback)
 MODELS = {
-    "default": "mistralai/Mistral-7B-Instruct-v0.2",
+    "default": "microsoft/Phi-3-mini-4k-instruct",  # More reliable on HF Inference API
     "fast": "microsoft/Phi-3-mini-4k-instruct",
     "small": "google/flan-t5-large",
+    "mistral": "mistralai/Mistral-7B-Instruct-v0.2",  # May have availability issues
 }
 
 
@@ -67,6 +68,7 @@ class HuggingFaceLLM:
                     huggingfacehub_api_token=self.api_key,
                     temperature=self.temperature,
                     max_new_tokens=self.max_tokens,
+                    task="text-generation",  # Explicitly set task type
                 )
                 logger.info(f"Initialized HuggingFace LLM: {self.model_name}")
             except Exception as e:

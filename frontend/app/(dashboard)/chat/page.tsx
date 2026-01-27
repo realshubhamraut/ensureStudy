@@ -60,6 +60,7 @@ interface TutorResponse {
     sources: Source[]
     confidence_score: number
     recommended_actions: string[]
+    follow_up_questions?: string[]
 }
 
 interface Message {
@@ -732,6 +733,21 @@ export default function AITutorPage() {
                         }))
                         allSources.push(...articleSources)
                     }
+
+                    // PDFs (from Worker-6B web search)
+                    if (wr.pdfs) {
+                        const pdfSources = wr.pdfs.map((pdf: { id: string; title: string; url: string; source: string; snippet: string; trustScore: number; wordCount?: number; chunkCount?: number }) => ({
+                            id: pdf.id,
+                            type: 'pdf' as const,
+                            title: pdf.title,
+                            url: pdf.url,
+                            relevance: Math.round((pdf.trustScore || 0.85) * 100),
+                            snippet: pdf.snippet || `${pdf.wordCount || 0} words`,
+                            source: pdf.source || 'Web PDF',
+                            fileSize: pdf.wordCount ? `${Math.round(pdf.wordCount / 250)} pages` : undefined
+                        }))
+                        allSources.push(...pdfSources)
+                    }
                 }
 
                 // Add flowchart if returned from API
@@ -879,9 +895,19 @@ export default function AITutorPage() {
                             // Convert API response to source items
                             webData.resources.forEach((resource: any, index: number) => {
                                 if (resource.clean_content && !resource.error) {
+                                    // Determine resource type based on URL or source_type
+                                    let resourceType: 'pdf' | 'article' | 'webpage' = 'article'
+                                    if (resource.url?.toLowerCase().endsWith('.pdf') || resource.source_type === 'pdf' || resource.source_type === 'web_pdf') {
+                                        resourceType = 'pdf'
+                                    } else if (resource.source_type === 'encyclopedia' || resource.source_type === 'academic') {
+                                        resourceType = 'article'
+                                    } else {
+                                        resourceType = 'webpage'
+                                    }
+
                                     mockSources.push({
                                         id: resource.id || `web_${index}`,
-                                        type: 'article',
+                                        type: resourceType,
                                         title: resource.title,
                                         url: resource.url,
                                         relevance: Math.round(resource.trust_score * 100),
@@ -1104,29 +1130,39 @@ export default function AITutorPage() {
                                                 {/* Source Chips - ChatGPT style */}
                                                 {sources.length > 0 && (
                                                     <div className="mt-4 flex flex-wrap gap-2">
-                                                        {sources.slice(0, 4).map((source, idx) => (
-                                                            <button
-                                                                key={source.id}
-                                                                onClick={() => {
-                                                                    openContentViewer(source)
-                                                                    setShowSources(true)
-                                                                }}
-                                                                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-gray-200 rounded-lg text-xs font-medium text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-colors shadow-sm"
-                                                            >
-                                                                <span className="w-4 h-4 rounded bg-gradient-to-br from-primary-500 to-secondary-500 text-white flex items-center justify-center text-[10px] font-bold">
-                                                                    {idx + 1}
-                                                                </span>
-                                                                <span className="truncate max-w-[150px]">{source.source || source.title.split(' - ')[0]}</span>
-                                                                {source.trustScore && (
-                                                                    <span className={`ml-1 px-1.5 py-0.5 rounded text-[10px] ${source.trustScore >= 0.9 ? 'bg-green-100 text-green-700' :
-                                                                        source.trustScore >= 0.8 ? 'bg-blue-100 text-blue-700' :
-                                                                            'bg-gray-100 text-gray-600'
-                                                                        }`}>
-                                                                        {Math.round(source.trustScore * 100)}%
+                                                        {sources.slice(0, 4).map((source, idx) => {
+                                                            const isWikiSource = source.url?.toLowerCase().includes('wikipedia.org')
+                                                            const isArticle = ['article', 'webpage'].includes(source.type)
+                                                            return (
+                                                                <button
+                                                                    key={source.id}
+                                                                    onClick={() => {
+                                                                        // Non-Wikipedia articles: open in new tab
+                                                                        if (isArticle && !isWikiSource && source.url && !source.cachedContent) {
+                                                                            window.open(source.url, '_blank', 'noopener,noreferrer')
+                                                                        } else {
+                                                                            openContentViewer(source)
+                                                                            setShowSources(true)
+                                                                        }
+                                                                    }}
+                                                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-gray-200 rounded-lg text-xs font-medium text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-colors shadow-sm"
+                                                                >
+                                                                    <span className="w-4 h-4 rounded bg-gradient-to-br from-primary-500 to-secondary-500 text-white flex items-center justify-center text-[10px] font-bold">
+                                                                        {idx + 1}
                                                                     </span>
-                                                                )}
-                                                            </button>
-                                                        ))}
+                                                                    <span className="truncate max-w-[150px]">{source.source || source.title.split(' - ')[0]}</span>
+                                                                    {source.trustScore && (
+                                                                        <span className={`ml-1 px-1.5 py-0.5 rounded text-[10px] ${source.trustScore >= 0.9 ? 'bg-green-100 text-green-700' :
+                                                                            source.trustScore >= 0.8 ? 'bg-blue-100 text-blue-700' :
+                                                                                'bg-gray-100 text-gray-600'
+                                                                            }`}>
+                                                                            {Math.round(source.trustScore * 100)}%
+                                                                        </span>
+                                                                    )}
+                                                                </button>
+                                                            )
+                                                        })}
+
                                                         {sources.length > 4 && (
                                                             <button
                                                                 onClick={() => setShowSources(true)}
@@ -1138,19 +1174,7 @@ export default function AITutorPage() {
                                                     </div>
                                                 )}
 
-                                                {/* Confidence Score */}
-                                                {msg.response && (
-                                                    <div className="mt-4 flex items-center gap-2">
-                                                        <div className={`px-2 py-1 rounded-full text-xs font-medium ${msg.response.confidence_score >= 0.8
-                                                            ? 'bg-green-100 text-green-700'
-                                                            : msg.response.confidence_score >= 0.6
-                                                                ? 'bg-yellow-100 text-yellow-700'
-                                                                : 'bg-red-100 text-red-700'
-                                                            }`}>
-                                                            {Math.round(msg.response.confidence_score * 100)}% confident
-                                                        </div>
-                                                    </div>
-                                                )}
+                                                {/* Confidence Score - Removed as per user request */}
 
                                                 {/* Feedback Buttons - Learning Agent */}
                                                 {msg.type === 'assistant' && msg.response && (
@@ -1260,29 +1284,27 @@ export default function AITutorPage() {
                                                             <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Students also ask</span>
                                                             <div className="flex flex-wrap gap-2">
                                                                 {(() => {
-                                                                    // Generate contextual follow-up questions based on the answer content
-                                                                    const content = (msg.response?.answer_detailed || msg.content).toLowerCase()
-                                                                    const followUpQuestions: string[] = []
+                                                                    // Use API-provided follow-up questions if available
+                                                                    let followUpQuestions: string[] = []
 
-                                                                    // Topic-specific patterns
-                                                                    if (content.includes('photosynthesis') || content.includes('plant')) {
-                                                                        followUpQuestions.push("What happens during the Calvin cycle?")
-                                                                        followUpQuestions.push("Why is chlorophyll green?")
-                                                                        followUpQuestions.push("How do plants respire at night?")
-                                                                    } else if (content.includes('equation') || content.includes('formula')) {
-                                                                        followUpQuestions.push("Can you show a worked example?")
-                                                                        followUpQuestions.push("What are the common mistakes to avoid?")
-                                                                    } else if (content.includes('history') || content.includes('war') || content.includes('century')) {
-                                                                        followUpQuestions.push("What were the main causes?")
-                                                                        followUpQuestions.push("What were the consequences?")
-                                                                    } else if (content.includes('python') || content.includes('code') || content.includes('programming')) {
-                                                                        followUpQuestions.push("Can you show a code example?")
-                                                                        followUpQuestions.push("What are common errors to avoid?")
+                                                                    if (msg.response?.follow_up_questions && msg.response.follow_up_questions.length > 0) {
+                                                                        // Use API-provided questions
+                                                                        followUpQuestions = msg.response.follow_up_questions
                                                                     } else {
-                                                                        // Generic follow-ups
-                                                                        followUpQuestions.push("Can you give an example?")
-                                                                        followUpQuestions.push("Why is this important?")
-                                                                        followUpQuestions.push("How is this used in real life?")
+                                                                        // Fallback: Generate contextual follow-up questions based on the answer content
+                                                                        const content = (msg.response?.answer_detailed || msg.content).toLowerCase()
+
+                                                                        if (content.includes('photosynthesis') || content.includes('plant')) {
+                                                                            followUpQuestions = ["What happens during the Calvin cycle?", "Why is chlorophyll green?"]
+                                                                        } else if (content.includes('equation') || content.includes('formula')) {
+                                                                            followUpQuestions = ["Can you show a worked example?", "What are the common mistakes?"]
+                                                                        } else if (content.includes('history') || content.includes('war') || content.includes('century')) {
+                                                                            followUpQuestions = ["What were the main causes?", "What were the consequences?"]
+                                                                        } else if (content.includes('python') || content.includes('code') || content.includes('programming')) {
+                                                                            followUpQuestions = ["Can you show a code example?", "What are common errors?"]
+                                                                        } else {
+                                                                            followUpQuestions = ["Can you give an example?", "Why is this important?", "How is this used in real life?"]
+                                                                        }
                                                                     }
 
                                                                     return followUpQuestions.slice(0, 3).map((q, idx) => (
@@ -2163,7 +2185,15 @@ export default function AITutorPage() {
                                                 return (
                                                     <div
                                                         key={source.id}
-                                                        onClick={() => openContentViewer(source)}
+                                                        onClick={() => {
+                                                            // Non-Wikipedia sites: open directly in new tab
+                                                            // Wikipedia or sites with cached content: use viewer
+                                                            if (!isWiki && source.url && !source.cachedContent) {
+                                                                window.open(source.url, '_blank', 'noopener,noreferrer')
+                                                            } else {
+                                                                openContentViewer(source)
+                                                            }
+                                                        }}
                                                         className={`flex items-start gap-3 p-3 rounded-lg cursor-pointer transition-all group ${activeSource?.id === source.id
                                                             ? 'bg-primary-50 border border-primary-200'
                                                             : 'hover:bg-gray-100 hover:shadow-sm'

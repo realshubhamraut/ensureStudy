@@ -1,0 +1,23 @@
+
+sequenceDiagram
+    participant U as User
+    participant F as Frontend
+    participant C as Core Service
+    participant A as AI Service
+    participant R as Redis
+    participant Q as Qdrant
+    participant L as Mistral LLM
+    
+    U->>F: Ask question
+    F->>C: Validate JWT
+    C-->>F: Session valid
+    F->>A: POST /api/ai-tutor/query
+    A->>R: Check cache
+    R-->>A: Cache miss
+    A->>Q: Vector search (top-k=5)
+    Q-->>A: Relevant chunks
+    A->>L: Generate response
+    L-->>A: Answer
+    A->>R: Cache response
+    A-->>F: Answer + sources
+    F-->>U: Display response

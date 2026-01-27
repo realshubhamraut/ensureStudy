@@ -1,0 +1,19 @@
+
+stateDiagram-v2
+    [*] --> Analyze: User Query
+    Analyze --> LEARN: "What is...", "Explain..."
+    Analyze --> RESEARCH: "Find...", "Search..."
+    Analyze --> CREATE: "Generate...", "Make..."
+    Analyze --> EVALUATE: "Check...", "Assess..."
+    
+    LEARN --> TutorAgent
+    RESEARCH --> ResearchAgent
+    CREATE --> ContentAgent
+    EVALUATE --> AssessmentAgent
+    
+    TutorAgent --> Synthesize
+    ResearchAgent --> Synthesize
+    ContentAgent --> Synthesize
+    AssessmentAgent --> Synthesize
+    
+    Synthesize --> [*]: Final Response

@@ -1,0 +1,12 @@
+
+flowchart TB
+    Query[Student Question] --> Embed1[Embed Query]
+    Embed1 --> Search[Vector Search<br/>Qdrant]
+    Search --> Filter[Filter by Classroom]
+    Filter --> Rerank[Rerank by Relevance]
+    Rerank --> Context[Build Context]
+    Context --> Prompt[Construct Prompt]
+    Prompt --> LLM[Mistral 7B]
+    LLM --> Answer[Generated Answer]
+    Answer --> Citations[Add Citations]
+    Citations --> Response[Final Response]

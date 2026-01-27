@@ -1,0 +1,20 @@
+
+stateDiagram-v2
+    [*] --> Receive: User message
+    Receive --> Moderate: Content check
+    Moderate --> ABCR: Classify query type
+    
+    ABCR --> FollowUp: Related query
+    ABCR --> NewTopic: New topic
+    
+    FollowUp --> KeepAnchor: Use existing context
+    NewTopic --> TAL: Create topic anchor
+    
+    KeepAnchor --> Retrieve
+    TAL --> Retrieve: Vector search
+    
+    Retrieve --> MCP: Apply isolation rules
+    MCP --> FetchExamples: Get learning examples
+    FetchExamples --> Generate: Few-shot enhanced prompt
+    Generate --> LogExperience: Store interaction
+    LogExperience --> [*]: Return response

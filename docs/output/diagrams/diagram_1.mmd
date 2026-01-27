@@ -1,0 +1,40 @@
+flowchart TB
+    subgraph "Client Layer"
+        Browser[Web Browser]
+        Mobile[Mobile App - Future]
+    end
+    
+    subgraph "Gateway Layer"
+        NGINX[NGINX / Load Balancer]
+        WAF[Web Application Firewall]
+    end
+    
+    subgraph "Application Layer"
+        Core[Core Service<br/>Flask:8000]
+        AI[AI Service<br/>FastAPI:8001]
+    end
+    
+    subgraph "Data Layer"
+        PG[(PostgreSQL)]
+        QD[(Qdrant)]
+        RD[(Redis)]
+        MG[(MongoDB)]
+        CS[(Cassandra)]
+    end
+    
+    subgraph "Streaming Layer"
+        KF[Apache Kafka]
+        SP[Spark Streaming]
+    end
+    
+    Browser --> NGINX
+    NGINX --> Core
+    NGINX --> AI
+    Core --> PG
+    Core --> RD
+    AI --> QD
+    AI --> RD
+    AI --> MG
+    Core --> KF
+    KF --> SP
+    SP --> CS

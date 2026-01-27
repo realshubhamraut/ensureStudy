@@ -1,0 +1,25 @@
+
+flowchart LR
+    Query[User Query] --> Analyze[Analyze Intent]
+    
+    Analyze --> Web[Web Search<br/>DuckDuckGo]
+    Analyze --> PDF[PDF Search<br/>Google Scholar]
+    Analyze --> YT[YouTube Search]
+    Analyze --> Wiki[Wikipedia API]
+    
+    Web --> Articles[Article Results]
+    PDF --> Download[Download PDFs]
+    YT --> Videos[Video Results]
+    Wiki --> Content[Full Articles]
+    
+    Download --> Process[Extract Text]
+    Process --> Chunk[Semantic Chunking]
+    Chunk --> Embed[Generate Embeddings]
+    Embed --> Index[Index in Qdrant]
+    
+    Articles --> Compile[Compile Summary]
+    Index --> Compile
+    Videos --> Compile
+    Content --> Compile
+    
+    Compile --> Response[Research Summary]

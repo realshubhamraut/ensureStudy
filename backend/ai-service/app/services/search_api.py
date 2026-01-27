@@ -19,6 +19,40 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
+# ============================================================================
+# Rate Limiting Configuration
+# ============================================================================
+
+# Global semaphore for API rate limiting (max 3 concurrent requests)
+_search_semaphore = asyncio.Semaphore(3)
+
+# Track last search time for grace period
+_last_search_time = 0.0
+_search_grace_period = 1.0  # 1 second between searches
+
+async def _rate_limited_request(coro):
+    """Execute a coroutine with rate limiting."""
+    global _last_search_time
+    import time
+    
+    async with _search_semaphore:
+        # Enforce grace period
+        elapsed = time.time() - _last_search_time
+        if elapsed < _search_grace_period:
+            await asyncio.sleep(_search_grace_period - elapsed)
+        
+        try:
+            result = await coro
+            _last_search_time = time.time()
+            return result
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 429:
+                # Rate limited - exponential backoff
+                logger.warning("[RateLimit] 429 received, backing off...")
+                await asyncio.sleep(5.0)  # Wait 5s on rate limit
+                _last_search_time = time.time()
+            raise
+
 
 # ============================================================================
 # Search Result Model

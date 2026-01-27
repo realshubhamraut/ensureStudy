@@ -11,7 +11,11 @@ import {
     BookOpenIcon,
     ArrowPathIcon,
     ChevronRightIcon,
-    UserCircleIcon
+    UserCircleIcon,
+    TrashIcon,
+    EyeIcon,
+    EyeSlashIcon,
+    Cog6ToothIcon
 } from '@heroicons/react/24/outline'
 import dynamic from 'next/dynamic'
 
@@ -76,6 +80,13 @@ export default function CurriculumPage() {
     const [showLearningStyleQuiz, setShowLearningStyleQuiz] = useState(false)
     const [showExamPrepModal, setShowExamPrepModal] = useState(false)
     const [showSyllabusUpload, setShowSyllabusUpload] = useState(false)
+
+    // Config modal state - which curriculum is being reconfigured
+    const [configCurriculumId, setConfigCurriculumId] = useState<string | null>(null)
+
+    // Hidden curricula state (for hiding subjects from calendar view)
+    const [hiddenCurricula, setHiddenCurricula] = useState<Set<string>>(new Set())
+    const [hoverCurriculumId, setHoverCurriculumId] = useState<string | null>(null)
 
     // ========================================================================
     // API Calls
@@ -223,13 +234,6 @@ export default function CurriculumPage() {
                 </div>
                 <div className="flex items-center gap-2">
                     <button
-                        onClick={() => setShowLearningStyleQuiz(true)}
-                        className="px-3 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 flex items-center gap-2"
-                    >
-                        <UserCircleIcon className="w-4 h-4" />
-                        Learning Style
-                    </button>
-                    <button
                         onClick={() => setShowSyllabusUpload(true)}
                         className="px-3 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 flex items-center gap-2"
                     >
@@ -240,23 +244,123 @@ export default function CurriculumPage() {
             </div>
 
             {/* Curriculum Selector (if multiple) */}
-            {curricula.length > 1 && (
-                <div className="flex gap-2 overflow-x-auto pb-2">
-                    {curricula.map(c => (
-                        <button
-                            key={c.id}
-                            onClick={() => {
-                                setSelectedCurriculumId(c.id)
-                                setWeekOffset(0)
-                            }}
-                            className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors ${selectedCurriculumId === c.id
-                                ? 'bg-primary-100 text-primary-700'
-                                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                                }`}
-                        >
-                            {c.subject_name}
-                        </button>
-                    ))}
+            {curricula.length >= 1 && (
+                <div className="flex gap-3 overflow-x-auto pb-2 items-center">
+                    {/* ALL button to show all subjects */}
+                    <button
+                        onClick={() => {
+                            // If any are hidden, show all; otherwise do nothing
+                            if (hiddenCurricula.size > 0) {
+                                setHiddenCurricula(new Set())
+                            }
+                        }}
+                        className={`px-3 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors ${hiddenCurricula.size === 0
+                            ? 'bg-primary-600 text-white'
+                            : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                            }`}
+                    >
+                        ALL
+                    </button>
+
+                    {/* Subject tabs with checkbox and delete */}
+                    {curricula.map(c => {
+                        const isHidden = hiddenCurricula.has(c.id)
+                        const isHovered = hoverCurriculumId === c.id
+                        return (
+                            <div
+                                key={c.id}
+                                className="relative flex items-center"
+                                onMouseEnter={() => setHoverCurriculumId(c.id)}
+                                onMouseLeave={() => setHoverCurriculumId(null)}
+                            >
+                                <div
+                                    onClick={() => {
+                                        setSelectedCurriculumId(c.id)
+                                    }}
+                                    className={`px-3 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-all flex items-center gap-2 cursor-pointer ${selectedCurriculumId === c.id
+                                        ? 'bg-primary-100 text-primary-700'
+                                        : isHidden
+                                            ? 'bg-gray-100 text-gray-400'
+                                            : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                                        }`}
+                                    role="button"
+                                    tabIndex={0}
+                                >
+                                    {/* Checkbox for visibility */}
+                                    <input
+                                        type="checkbox"
+                                        checked={!isHidden}
+                                        onClick={(e) => e.stopPropagation()}
+                                        onChange={(e) => {
+                                            e.stopPropagation()
+                                            setHiddenCurricula(prev => {
+                                                const newSet = new Set(prev)
+                                                if (newSet.has(c.id)) {
+                                                    newSet.delete(c.id)
+                                                } else {
+                                                    newSet.add(c.id)
+                                                }
+                                                return newSet
+                                            })
+                                        }}
+                                        className="w-4 h-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 cursor-pointer"
+                                    />
+                                    <span className={isHidden ? 'line-through' : ''}>
+                                        {c.subject_name}
+                                    </span>
+
+                                    {/* Config and Delete buttons on right, visible on hover */}
+                                    <span
+                                        className={`transition-all duration-200 overflow-hidden flex items-center ${isHovered ? 'max-w-20 opacity-100 ml-1' : 'max-w-0 opacity-0'}`}
+                                    >
+                                        {/* Config/Reconfigure button */}
+                                        <button
+                                            onClick={(e) => {
+                                                e.stopPropagation()
+                                                setConfigCurriculumId(c.id)
+                                                setShowSyllabusUpload(true)
+                                            }}
+                                            className="p-1 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded"
+                                            title="Reconfigure topics"
+                                        >
+                                            <Cog6ToothIcon className="w-4 h-4" />
+                                        </button>
+                                        {/* Delete button */}
+                                        <button
+                                            onClick={(e) => {
+                                                e.stopPropagation()
+                                                if (confirm(`Delete "${c.subject_name}" and all its topics? This cannot be undone.`)) {
+                                                    const deleteCurriculum = async () => {
+                                                        try {
+                                                            const userId = localStorage.getItem('userId') || 'demo-user'
+                                                            await fetch(`${getAiServiceUrl()}/api/curriculum/${c.id}?user_id=${userId}`, {
+                                                                method: 'DELETE',
+                                                                headers: { 'Authorization': `Bearer ${localStorage.getItem('accessToken')}` }
+                                                            })
+                                                            setCurricula(prev => prev.filter(curr => curr.id !== c.id))
+                                                            if (selectedCurriculumId === c.id) {
+                                                                setSelectedCurriculumId(null)
+                                                                setWeeklySchedule(null)
+                                                                setTopicScores([])
+                                                            }
+                                                        } catch (error) {
+                                                            console.error('Failed to delete curriculum:', error)
+                                                            alert('Failed to delete curriculum')
+                                                        }
+                                                    }
+                                                    deleteCurriculum()
+                                                }
+                                            }}
+                                            className="p-1 text-red-500 hover:text-red-600 hover:bg-red-50 rounded"
+                                            title="Delete subject"
+                                        >
+                                            <TrashIcon className="w-4 h-4" />
+                                        </button>
+                                    </span>
+                                </div>
+                            </div>
+                        )
+                    })}
                 </div>
             )}
 
@@ -306,13 +410,36 @@ export default function CurriculumPage() {
 
                     {/* Weekly Calendar */}
                     <div className="card">
-                        <WeeklyCalendar
-                            schedule={weeklySchedule}
-                            loading={scheduleLoading}
-                            onWeekChange={handleWeekChange}
-                            onReschedule={handleReschedule}
-                            weekOffset={weekOffset}
-                        />
+                        {selectedCurriculumId && hiddenCurricula.has(selectedCurriculumId) ? (
+                            <div className="p-8 text-center">
+                                <EyeSlashIcon className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                                <p className="text-gray-500 font-medium">Subject Hidden</p>
+                                <p className="text-sm text-gray-400 mt-1">
+                                    Topics for this subject are hidden from the calendar view.
+                                </p>
+                                <button
+                                    onClick={() => {
+                                        setHiddenCurricula(prev => {
+                                            const newSet = new Set(prev)
+                                            newSet.delete(selectedCurriculumId!)
+                                            return newSet
+                                        })
+                                    }}
+                                    className="mt-4 px-4 py-2 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 inline-flex items-center gap-2"
+                                >
+                                    <EyeIcon className="w-4 h-4" />
+                                    Show Topics
+                                </button>
+                            </div>
+                        ) : (
+                            <WeeklyCalendar
+                                schedule={weeklySchedule}
+                                loading={scheduleLoading}
+                                onWeekChange={handleWeekChange}
+                                onReschedule={handleReschedule}
+                                weekOffset={weekOffset}
+                            />
+                        )}
                     </div>
 
                     {/* Score Sources Info */}
@@ -359,11 +486,24 @@ export default function CurriculumPage() {
             {showSyllabusUpload && (
                 <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
                     <SyllabusUploadModal
-                        onClose={() => setShowSyllabusUpload(false)}
+                        onClose={() => {
+                            setShowSyllabusUpload(false)
+                            setConfigCurriculumId(null)
+                        }}
                         onSuccess={() => {
                             setShowSyllabusUpload(false)
+                            const currId = configCurriculumId
+                            setConfigCurriculumId(null)
                             fetchCurricula()
+                            // If reconfiguring current curriculum, refresh the schedule
+                            if (currId && currId === selectedCurriculumId) {
+                                setWeekOffset(0)
+                                fetchWeeklySchedule(currId, 0)
+                                fetchTopicScores()
+                            }
                         }}
+                        curriculumId={configCurriculumId || undefined}
+                        subjectName={configCurriculumId ? curricula.find(c => c.id === configCurriculumId)?.subject_name : undefined}
                     />
                 </div>
             )}

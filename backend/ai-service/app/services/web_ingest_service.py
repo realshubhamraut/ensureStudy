@@ -555,11 +555,187 @@ def worker2_duckduckgo_search(query: str, max_results: int = 5) -> List[Dict[str
         return []
 
 
+# ============================================================================
+# Worker-6B: PDF Search & Download (+ pdf download modifier)
+# ============================================================================
+
+async def worker6b_pdf_search(
+    topic: str,
+    user_id: str = "",
+    max_pdfs: int = 3,
+    classroom_id: str = None
+) -> List[Dict[str, Any]]:
+    """
+    WORKER-6B: Search for educational PDFs and download them.
+    
+    Appends '+ pdf download' to queries for better PDF discovery.
+    Uses existing pdf_downloader infrastructure.
+    
+    Args:
+        topic: Extracted topic/keyword from user query
+        user_id: User ID for tracking downloads
+        max_pdfs: Maximum number of PDFs to download (default 3)
+        classroom_id: Optional classroom to store downloaded PDFs in
+        
+    Returns:
+        List of downloaded PDF info with extracted text
+    """
+    import os
+    import httpx
+    
+    print(f"\n{'='*62}")
+    print(f"[WORKER-6B] 📄 PDF Search: '{topic}'")
+    print(f"[WORKER-6B] 📚 Classroom ID: {classroom_id or 'None (not storing)'}")
+    print(f"[WORKER-6B] 👤 User ID: {user_id or 'anonymous'}")
+    print(f"{'='*62}")
+    
+    try:
+        from .pdf_downloader import WebPDFDownloader
+        from .search_api import MultiSourceSearcher
+        from .pdf_extractor import pdf_extractor
+        
+        # Create enhanced query with '+ pdf download' modifier
+        pdf_query = f"{topic} + pdf download filetype:pdf"
+        print(f"[WORKER-6B] 🔍 Enhanced query: '{pdf_query}'")
+        
+        # Search for PDFs using multi-source searcher
+        print(f"[WORKER-6B] 🌐 Searching multiple sources...")
+        searcher = MultiSourceSearcher()
+        results = await searcher.search(pdf_query, num_results=max_pdfs * 2)
+        print(f"[WORKER-6B] 📊 Search returned {len(results)} results")
+        
+        # Filter to only PDF URLs
+        pdf_urls = []
+        for r in results:
+            url = r.url.lower()
+            print(f"[WORKER-6B] 🔗 Checking URL: {r.url[:80]}...")
+            if url.endswith('.pdf') or 'pdf' in url:
+                # Skip Wikipedia (user requested exclusion)
+                if 'wikipedia.org' not in url:
+                    pdf_urls.append(r.url)
+                    print(f"[WORKER-6B] ✓ Found PDF: {r.url[:60]}...")
+                    if len(pdf_urls) >= max_pdfs:
+                        break
+                else:
+                    print(f"[WORKER-6B] ⊘ Skipping Wikipedia PDF")
+            else:
+                print(f"[WORKER-6B] ⊘ Not a PDF, skipping")
+        
+        if not pdf_urls:
+            print(f"[WORKER-6B] ⚠ No PDFs found for: '{topic}'")
+            print(f"[WORKER-6B] 💡 Try a more specific query or different topic")
+            return []
+        
+        print(f"\n[WORKER-6B] 📥 Downloading {len(pdf_urls)} PDFs...")
+        
+        # Download PDFs
+        downloader = WebPDFDownloader()
+        download_results = await downloader.download_multiple(
+            urls=pdf_urls,
+            user_id=user_id,
+            topic=topic,
+            max_downloads=max_pdfs
+        )
+        
+        print(f"[WORKER-6B] 📦 Download complete: {len(download_results)} files")
+        
+        # Extract text from downloaded PDFs
+        pdf_documents = []
+        for i, result in enumerate(download_results, 1):
+            print(f"\n[WORKER-6B] Processing PDF {i}/{len(download_results)}: {result.file_name}")
+            
+            if not result.success:
+                print(f"[WORKER-6B] ❌ Download failed: {result.error or 'Unknown error'}")
+                continue
+                
+            if not result.file_path:
+                print(f"[WORKER-6B] ❌ No file path returned")
+                continue
+                
+            try:
+                print(f"[WORKER-6B] 📖 Extracting text from {result.file_name}...")
+                # Extract text from PDF (returns tuple: text, has_images, page_count)
+                text, has_images, page_count = pdf_extractor.extract_text_from_pdf(result.file_path)
+                
+                if text and len(text) > 100:
+                    pdf_doc = {
+                        'file_path': result.file_path,
+                        'file_name': result.file_name,
+                        'source_url': result.source_url,
+                        'file_size': result.file_size,
+                        'extracted_text': text[:50000],  # Limit text size
+                        'word_count': len(text.split()),
+                        'page_count': page_count,
+                        'has_images': has_images
+                    }
+                    pdf_documents.append(pdf_doc)
+                    print(f"[WORKER-6B] ✅ Extracted {len(text)} chars, {len(text.split())} words, {page_count} pages")
+                    
+                    # Store to classroom if classroom_id provided
+                    if classroom_id:
+                        try:
+                            core_service_url = os.getenv('CORE_SERVICE_URL', 'http://localhost:9000')
+                            
+                            # Build file URL for the downloaded PDF
+                            file_url = f"/api/files/pdfs/{result.file_name}"
+                            
+                            print(f"[WORKER-6B] 💾 Storing in classroom {classroom_id}...")
+                            
+                            async with httpx.AsyncClient(timeout=10.0) as client:
+                                response = await client.post(
+                                    f"{core_service_url}/api/classroom/{classroom_id}/web-materials",
+                                    headers={"X-Service-Key": "internal-ai-service"},
+                                    json={
+                                        "name": result.file_name,
+                                        "url": file_url,
+                                        "type": "application/pdf",
+                                        "size": result.file_size,
+                                        "source_url": result.source_url,
+                                        "description": f"Web search: {topic}"
+                                    }
+                                )
+                                
+                                if response.status_code in [200, 201]:
+                                    data = response.json()
+                                    if data.get('duplicate'):
+                                        print(f"[WORKER-6B] ⚠ Already exists in classroom")
+                                    else:
+                                        print(f"[WORKER-6B] ✅ Stored in classroom materials!")
+                                else:
+                                    print(f"[WORKER-6B] ⚠ Failed to store: {response.status_code}")
+                                    
+                        except Exception as store_err:
+                            print(f"[WORKER-6B] ⚠ Storage error (non-fatal): {store_err}")
+                else:
+                    print(f"[WORKER-6B] ⚠ Insufficient text in {result.file_name} ({len(text) if text else 0} chars)")
+                    
+            except Exception as e:
+                print(f"[WORKER-6B] ⚠ Text extraction failed for {result.file_name}: {e}")
+        
+        print(f"\n{'='*62}")
+        print(f"[WORKER-6B] ✅ COMPLETE: {len(pdf_documents)} PDFs processed successfully")
+        if classroom_id:
+            print(f"[WORKER-6B] 📚 Materials stored in classroom: {classroom_id}")
+        print(f"{'='*62}\n")
+        
+        return pdf_documents
+        
+    except ImportError as e:
+        print(f"[WORKER-6B] ⚠ Import error (optional dep): {e}")
+        logger.error(f"[WORKER-6B] Import error: {e}")
+        return []
+    except Exception as e:
+        print(f"[WORKER-6B] ❌ PDF search error: {e}")
+        logger.error(f"[WORKER-6B] PDF search error: {e}")
+        import traceback
+        traceback.print_exc()
+        return []
+
+
 def fetch_content(url: str, crawler_log=None) -> Optional[str]:
     """
     Fetch and extract clean content from URL.
     Uses trafilatura for robust extraction.
-    
     Args:
         url: URL to fetch
         crawler_log: Optional CrawlerLogger for debug output
@@ -707,7 +883,10 @@ async def ingest_web_resources(
     query: str,
     subject: Optional[str] = None,
     max_sources: int = 5,  # Increased for multi-source
-    conversation_history: list = None
+    conversation_history: list = None,
+    search_pdfs: bool = False,
+    user_id: str = "",
+    classroom_id: str = None  # Pass to worker6b for PDF storage
 ) -> IngestResult:
     """
     RATE-LIMIT SAFE Web Knowledge Ingest Pipeline.
@@ -946,6 +1125,52 @@ async def ingest_web_resources(
         print(f"[WORKER-6] ✅ COMPLETE: {len(resources)} sources, {total_tokens} total tokens")
         print(f"{'='*70}\n")
         
+        # WORKER-6B: Optional PDF Search & Indexing
+        if search_pdfs:
+            print(f"[WORKER-6B] PDF search enabled, searching for educational PDFs...")
+            try:
+                pdf_documents = await worker6b_pdf_search(
+                    topic=topic,
+                    user_id=user_id,
+                    max_pdfs=3,
+                    classroom_id=classroom_id  # Store PDFs in classroom materials
+                )
+                
+                # Process PDF content and add to chunks
+                for pdf_doc in pdf_documents:
+                    text = pdf_doc.get('extracted_text', '')
+                    if text and len(text) > 100:
+                        # Create chunks from PDF text
+                        pdf_chunks = chunk_for_qdrant(
+                            text=text,
+                            source_url=pdf_doc.get('source_url', ''),
+                            source_type='web_pdf',
+                            source_trust=0.85  # High trust for PDFs
+                        )
+                        
+                        all_chunks.extend(pdf_chunks)
+                        
+                        # Add to resources
+                        resources.append(IngestedResource(
+                            id=f"pdf_{hashlib.md5(pdf_doc['source_url'].encode()).hexdigest()[:12]}",
+                            url=pdf_doc.get('source_url', ''),
+                            title=pdf_doc.get('file_name', 'PDF Document'),
+                            source_name='Web PDF',
+                            source_type='web_pdf',
+                            trust_score=0.85,
+                            clean_content=text[:1000],
+                            summary=f"PDF with {pdf_doc.get('word_count', 0)} words",
+                            word_count=pdf_doc.get('word_count', 0),
+                            chunk_count=len(pdf_chunks),
+                            fetched_at=datetime.now().isoformat(),
+                            stored_in_qdrant=True
+                        ))
+                        
+                        print(f"[WORKER-6B] Added {len(pdf_chunks)} chunks from {pdf_doc.get('file_name', 'PDF')}")
+                        
+            except Exception as e:
+                print(f"[WORKER-6B] ⚠ PDF search failed (non-fatal): {e}")
+        
         # WORKER-7: Chunk + Embed
         total_stored = 0
         if all_chunks:
@@ -990,7 +1215,10 @@ async def ingest_web_resources(
 def ingest_web_resources_sync(
     query: str,
     subject: Optional[str] = None,
-    max_sources: int = 3
+    max_sources: int = 3,
+    search_pdfs: bool = False,
+    user_id: str = "",
+    classroom_id: str = None
 ) -> IngestResult:
     """Synchronous wrapper for ingest_web_resources."""
     import asyncio
@@ -1002,5 +1230,5 @@ def ingest_web_resources_sync(
         asyncio.set_event_loop(loop)
     
     return loop.run_until_complete(
-        ingest_web_resources(query, subject, max_sources)
+        ingest_web_resources(query, subject, max_sources, search_pdfs=search_pdfs, user_id=user_id, classroom_id=classroom_id)
     )

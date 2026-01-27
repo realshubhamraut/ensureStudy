@@ -42,6 +42,10 @@ interface Material {
     size: number
     url: string
     uploaded_at: string
+    source?: 'teacher' | 'student' | 'web'
+    visibility?: 'public' | 'private'
+    uploaded_by_role?: 'teacher' | 'student' | 'system'
+    source_url?: string
 }
 
 interface Announcement {
@@ -201,6 +205,13 @@ export default function StudentClassroomDetailPage() {
     const [showDocumentViewer, setShowDocumentViewer] = useState(false)
     const [viewingDocument, setViewingDocument] = useState<Material | null>(null)
 
+    // Source filter state for Materials tab (multi-select)
+    const [sourceFilters, setSourceFilters] = useState<Set<'teacher' | 'student' | 'web'>>(new Set())
+    const [showStudentUploadModal, setShowStudentUploadModal] = useState(false)
+    const [studentUploadFile, setStudentUploadFile] = useState<File | null>(null)
+    const [studentUploading, setStudentUploading] = useState(false)
+    const studentFileRef = useRef<HTMLInputElement>(null)
+
     // Fetch exam results for student
     const fetchResults = async () => {
         setLoadingResults(true)
@@ -311,11 +322,23 @@ export default function StudentClassroomDetailPage() {
     }
 
     const filterMaterials = () => {
-        if (dateFilter === 'all') return materials
+        let filtered = materials
+
+        // Apply source filter (multi-select)
+        if (sourceFilters.size > 0) {
+            filtered = filtered.filter(m => {
+                const source = m.source || 'teacher'
+                return sourceFilters.has(source as 'teacher' | 'student' | 'web')
+            })
+        }
+
+        // Apply date filter
+        if (dateFilter === 'all') return filtered
+
         const today = new Date()
         today.setHours(0, 0, 0, 0)
 
-        return materials.filter(m => {
+        return filtered.filter(m => {
             const uploadDate = new Date(m.uploaded_at)
             uploadDate.setHours(0, 0, 0, 0)
 
@@ -337,6 +360,19 @@ export default function StudentClassroomDetailPage() {
                 default:
                     return true
             }
+        })
+    }
+
+    // Toggle source filter
+    const toggleSourceFilter = (source: 'teacher' | 'student' | 'web') => {
+        setSourceFilters(prev => {
+            const newSet = new Set(prev)
+            if (newSet.has(source)) {
+                newSet.delete(source)
+            } else {
+                newSet.add(source)
+            }
+            return newSet
         })
     }
 
@@ -374,10 +410,7 @@ export default function StudentClassroomDetailPage() {
             const AI_SERVICE_URL = process.env.NEXT_PUBLIC_AI_SERVICE_URL || 'https://localhost:8001'
 
             // Get the recording ID for this meeting if available
-            const meetingRecordings = recordings.filter(r => r.meeting_id === selectedMeeting.id)
-            const meetingIds = meetingRecordings.length > 0
-                ? meetingRecordings.map(r => r.meeting_id)
-                : [selectedMeeting.id]
+            const meetingIds = [selectedMeeting.id]
 
             const response = await fetch(`${AI_SERVICE_URL}/api/meeting/ask`, {
                 method: 'POST',
@@ -405,7 +438,11 @@ export default function StudentClassroomDetailPage() {
             if (data.citations && data.citations.length > 0) {
                 aiResponse += '\n\n📎 Sources: '
                 data.citations.forEach((citation: any, i: number) => {
-                    const time = formatDuration(citation.timestamp_start)
+                    // Format timestamp as mm:ss
+                    const seconds = Math.floor(citation.timestamp_start || 0)
+                    const mins = Math.floor(seconds / 60)
+                    const secs = seconds % 60
+                    const time = `${mins}:${secs.toString().padStart(2, '0')}`
                     aiResponse += `\n[${i + 1}] ${citation.speaker_name || 'Speaker'} at ${time}`
                 })
             }
@@ -731,19 +768,66 @@ export default function StudentClassroomDetailPage() {
             {/* Materials Tab */}
             {activeTab === 'materials' && (
                 <div>
-                    {/* Header with Upload Button */}
-                    <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
-                        <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
-                            <FolderIcon className="w-5 h-5 text-gray-400" />
-                            Study Materials
-                        </h2>
+                    {/* Header with filters and Upload Button */}
+                    <div className="space-y-3 mb-4">
+                        <div className="flex items-center justify-between flex-wrap gap-3">
+                            <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                                <FolderIcon className="w-5 h-5 text-gray-400" />
+                                Study Materials
+                            </h2>
+                            {/* Student Upload Button */}
+                            <button
+                                onClick={() => setShowStudentUploadModal(true)}
+                                className="px-4 py-2 bg-purple-600 text-white rounded-lg font-medium hover:bg-purple-700 transition-colors flex items-center gap-2 text-sm"
+                            >
+                                <CloudArrowUpIcon className="w-4 h-4" />
+                                My Upload
+                            </button>
+                        </div>
+
+                        {/* Source Filter Chips */}
                         <div className="flex items-center gap-2 flex-wrap">
-                            {/* Upload button removed - only teachers can upload materials */}
+                            <span className="text-xs text-gray-500 font-medium">Source:</span>
+                            {[
+                                { key: 'teacher', label: 'Teacher', icon: AcademicCapIcon, color: 'blue' },
+                                { key: 'student', label: 'My Uploads', icon: UserCircleIcon, color: 'purple' },
+                                { key: 'web', label: 'Web', icon: GlobeAltIcon, color: 'green' },
+                            ].map(({ key, label, icon: Icon, color }) => (
+                                <button
+                                    key={key}
+                                    onClick={() => toggleSourceFilter(key as 'teacher' | 'student' | 'web')}
+                                    className={`px-3 py-1.5 text-xs rounded-full font-medium transition-all flex items-center gap-1.5 ${sourceFilters.has(key as 'teacher' | 'student' | 'web')
+                                        ? `bg-${color}-100 text-${color}-700 ring-2 ring-${color}-500`
+                                        : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                                        }`}
+                                    style={sourceFilters.has(key as 'teacher' | 'student' | 'web') ? {
+                                        backgroundColor: color === 'blue' ? '#dbeafe' : color === 'purple' ? '#f3e8ff' : '#dcfce7',
+                                        color: color === 'blue' ? '#1d4ed8' : color === 'purple' ? '#7c3aed' : '#15803d',
+                                        boxShadow: `0 0 0 2px ${color === 'blue' ? '#3b82f6' : color === 'purple' ? '#a855f7' : '#22c55e'}`
+                                    } : {}}
+                                >
+                                    <Icon className="w-3.5 h-3.5" />
+                                    {label}
+                                </button>
+                            ))}
+                            {sourceFilters.size > 0 && (
+                                <button
+                                    onClick={() => setSourceFilters(new Set())}
+                                    className="text-xs text-gray-400 hover:text-gray-600 underline"
+                                >
+                                    Clear
+                                </button>
+                            )}
+                        </div>
+
+                        {/* Date filters */}
+                        <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-xs text-gray-500 font-medium">Date:</span>
                             {['all', 'today', 'yesterday', 'week'].map((f) => (
                                 <button
                                     key={f}
                                     onClick={() => { setDateFilter(f as DateFilter); setShowDatePicker(false) }}
-                                    className={`px-3 py-1.5 text-sm rounded-lg font-medium transition-colors ${dateFilter === f ? 'bg-gray-800 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                                    className={`px-3 py-1.5 text-xs rounded-lg font-medium transition-colors ${dateFilter === f ? 'bg-gray-800 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                                         }`}
                                 >
                                     {f === 'all' ? 'All' : f === 'today' ? 'Today' : f === 'yesterday' ? 'Yesterday' : 'This Week'}
@@ -752,7 +836,7 @@ export default function StudentClassroomDetailPage() {
                             <div className="relative">
                                 <button
                                     onClick={() => setShowDatePicker(!showDatePicker)}
-                                    className={`px-3 py-1.5 text-sm rounded-lg font-medium flex items-center gap-1 ${dateFilter === 'custom' ? 'bg-gray-800 text-white' : 'bg-gray-100 text-gray-600'
+                                    className={`px-3 py-1.5 text-xs rounded-lg font-medium flex items-center gap-1 ${dateFilter === 'custom' ? 'bg-gray-800 text-white' : 'bg-gray-100 text-gray-600'
                                         }`}
                                 >
                                     <CalendarIcon className="w-4 h-4" />
@@ -800,10 +884,28 @@ export default function StudentClassroomDetailPage() {
                                         <div className="p-3 bg-gray-100 rounded-lg">
                                             {getFileIcon(material.type)}
                                         </div>
-                                        <div>
-                                            <p className="font-medium text-gray-900">{material.name}</p>
+                                        <div className="flex-1">
+                                            <div className="flex items-center gap-2">
+                                                <p className="font-medium text-gray-900">{material.name}</p>
+                                                {/* Source Badge */}
+                                                {material.source === 'web' && (
+                                                    <span className="px-1.5 py-0.5 text-xs bg-green-100 text-green-700 rounded flex items-center gap-1">
+                                                        <GlobeAltIcon className="w-3 h-3" />
+                                                        Web
+                                                    </span>
+                                                )}
+                                                {material.source === 'student' && (
+                                                    <span className="px-1.5 py-0.5 text-xs bg-purple-100 text-purple-700 rounded flex items-center gap-1">
+                                                        <UserCircleIcon className="w-3 h-3" />
+                                                        My Upload
+                                                    </span>
+                                                )}
+                                            </div>
                                             <p className="text-sm text-gray-500">
                                                 {formatSize(material.size)} • {new Date(material.uploaded_at).toLocaleDateString()}
+                                                {material.source === 'web' && material.source_url && (
+                                                    <span className="ml-1 text-green-600">• from web search</span>
+                                                )}
                                             </p>
                                         </div>
                                     </div>
@@ -1848,6 +1950,143 @@ export default function StudentClassroomDetailPage() {
                                 )}
                             </button>
                         </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Student Upload Modal */}
+            {showStudentUploadModal && (
+                <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+                    <div className="bg-white rounded-2xl w-full max-w-md p-6 space-y-4">
+                        <div className="flex items-center justify-between">
+                            <h3 className="text-lg font-semibold text-gray-900">Upload Your Material</h3>
+                            <button
+                                onClick={() => {
+                                    setShowStudentUploadModal(false)
+                                    setStudentUploadFile(null)
+                                }}
+                                className="p-2 hover:bg-gray-100 rounded-lg"
+                            >
+                                <XMarkIcon className="w-5 h-5 text-gray-500" />
+                            </button>
+                        </div>
+
+                        <div className="bg-purple-50 p-3 rounded-lg">
+                            <p className="text-sm text-purple-700">
+                                <strong>Private Upload:</strong> Only you will be able to see this material. Other students and teachers won't have access.
+                            </p>
+                        </div>
+
+                        {/* File Upload */}
+                        <div>
+                            <input
+                                type="file"
+                                ref={studentFileRef}
+                                onChange={(e) => {
+                                    const file = e.target.files?.[0]
+                                    if (file) setStudentUploadFile(file)
+                                }}
+                                accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt,.jpg,.jpeg,.png,.gif"
+                                className="hidden"
+                            />
+                            <button
+                                onClick={() => studentFileRef.current?.click()}
+                                className="w-full p-6 border-2 border-dashed border-gray-300 rounded-xl hover:border-purple-400 hover:bg-purple-50 transition-colors text-center"
+                            >
+                                {studentUploadFile ? (
+                                    <div className="flex items-center justify-center gap-3">
+                                        <DocumentTextIcon className="w-8 h-8 text-purple-600" />
+                                        <div className="text-left">
+                                            <p className="font-medium text-gray-900">{studentUploadFile.name}</p>
+                                            <p className="text-sm text-gray-500">
+                                                {(studentUploadFile.size / 1024 / 1024).toFixed(2)} MB
+                                            </p>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div>
+                                        <CloudArrowUpIcon className="w-10 h-10 text-gray-400 mx-auto mb-2" />
+                                        <p className="text-gray-600">Click to select a file</p>
+                                        <p className="text-xs text-gray-400 mt-1">PDF, DOC, PPT, Images, etc.</p>
+                                    </div>
+                                )}
+                            </button>
+                        </div>
+
+                        {/* Upload Button */}
+                        <button
+                            onClick={async () => {
+                                if (!studentUploadFile) return
+
+                                setStudentUploading(true)
+                                try {
+                                    // First upload the file
+                                    const formData = new FormData()
+                                    formData.append('file', studentUploadFile)
+
+                                    const uploadRes = await fetch(`${getApiBaseUrl()}/api/files/upload`, {
+                                        method: 'POST',
+                                        headers: {
+                                            'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
+                                        },
+                                        body: formData
+                                    })
+
+                                    if (!uploadRes.ok) throw new Error('File upload failed')
+
+                                    const uploadData = await uploadRes.json()
+
+                                    // Create student material record
+                                    const materialRes = await fetch(`${getApiBaseUrl()}/api/classroom/${classroomId}/student-materials`, {
+                                        method: 'POST',
+                                        headers: {
+                                            'Authorization': `Bearer ${localStorage.getItem('accessToken')}`,
+                                            'Content-Type': 'application/json'
+                                        },
+                                        body: JSON.stringify({
+                                            name: studentUploadFile.name,
+                                            url: uploadData.url,
+                                            type: studentUploadFile.type,
+                                            size: studentUploadFile.size
+                                        })
+                                    })
+
+                                    if (!materialRes.ok) throw new Error('Failed to save material')
+
+                                    // Refresh materials list
+                                    const materialsRes = await fetch(`${getApiBaseUrl()}/api/classroom/${classroomId}/materials`, {
+                                        headers: { 'Authorization': `Bearer ${localStorage.getItem('accessToken')}` }
+                                    })
+                                    if (materialsRes.ok) {
+                                        const data = await materialsRes.json()
+                                        setMaterials(data.materials || [])
+                                    }
+
+                                    setShowStudentUploadModal(false)
+                                    setStudentUploadFile(null)
+                                    alert('Material uploaded! Only you can see it.')
+                                } catch (error) {
+                                    console.error('Upload failed:', error)
+                                    alert('Upload failed. Please try again.')
+                                } finally {
+                                    setStudentUploading(false)
+                                }
+                            }}
+                            disabled={!studentUploadFile || studentUploading}
+                            className="w-full py-3 bg-purple-600 text-white rounded-xl font-medium hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                        >
+                            {studentUploading ? (
+                                <>
+                                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                    Uploading...
+                                </>
+                            ) : (
+                                <>
+                                    <CloudArrowUpIcon className="w-5 h-5" />
+                                    Upload (Private)
+                                </>
+                            )}
+                        </button>
                     </div>
                 </div>
             )}

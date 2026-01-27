@@ -1,0 +1,23 @@
+
+flowchart TB
+    subgraph "Performance Element"
+        Query[Student Query] --> Moderate[Moderation]
+        Moderate --> Retrieve[RAG Retrieval]
+        Retrieve --> Generate[LLM Generation]
+    end
+    
+    subgraph "Learning Element"
+        Examples[(Learning Examples)]
+        FewShot[Few-Shot Injection]
+        Examples --> FewShot
+        FewShot --> Generate
+    end
+    
+    subgraph "Critic (Feedback Loop)"
+        Generate --> Response[Response]
+        Response --> User[Student]
+        User --> Feedback{👍 / 👎}
+        Feedback --> Store[Store Feedback]
+        Store --> Analyze[Analyze Patterns]
+        Analyze --> Examples
+    end

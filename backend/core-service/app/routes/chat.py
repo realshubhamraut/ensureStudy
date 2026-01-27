@@ -137,7 +137,7 @@ def delete_conversation(conversation_id):
 @chat_bp.route('/conversations/<conversation_id>/messages', methods=['POST'])
 @token_required
 def add_message(conversation_id):
-    """Add a message to a conversation"""
+    """Add a message to a conversation (auto-creates conversation if needed)"""
     user_id = request.current_user.id
     data = request.get_json()
     
@@ -149,8 +149,17 @@ def add_message(conversation_id):
         user_id=user_id
     ).first()
     
+    # Auto-create conversation if it doesn't exist
     if not conversation:
-        return jsonify({'success': False, 'error': 'Conversation not found'}), 404
+        conversation = ChatConversation(
+            id=conversation_id,
+            user_id=user_id,
+            title=data.get('content', 'New Conversation')[:50] + ('...' if len(data.get('content', '')) > 50 else ''),
+            subject=data.get('subject'),
+            classroom_id=data.get('classroom_id')
+        )
+        db.session.add(conversation)
+        db.session.flush()  # Get the ID before committing
     
     # Create message
     message = ChatMessage(
@@ -173,14 +182,15 @@ def add_message(conversation_id):
     
     return jsonify({
         'success': True,
-        'message': message.to_dict()
+        'message': message.to_dict(),
+        'conversation_created': conversation is not None
     }), 201
 
 
 @chat_bp.route('/conversations/<conversation_id>/sources', methods=['POST'])
 @token_required
 def add_sources(conversation_id):
-    """Add sources to a conversation"""
+    """Add sources to a conversation (auto-creates conversation if needed)"""
     user_id = request.current_user.id
     data = request.get_json()
     
@@ -192,8 +202,15 @@ def add_sources(conversation_id):
         user_id=user_id
     ).first()
     
+    # Auto-create conversation if it doesn't exist
     if not conversation:
-        return jsonify({'success': False, 'error': 'Conversation not found'}), 404
+        conversation = ChatConversation(
+            id=conversation_id,
+            user_id=user_id,
+            title='New Conversation'
+        )
+        db.session.add(conversation)
+        db.session.flush()
     
     # Clear existing sources and add new ones
     ChatSource.query.filter_by(conversation_id=conversation_id).delete()
