@@ -539,9 +539,7 @@ Prerequisites: Docker, Node.js 20+, Python 3.11+
 
 ---
 
-## License
-
-MIT
+Copyright (c) [2026] [Shubham Raut]. All Rights Reserved.
 
 ---
 
