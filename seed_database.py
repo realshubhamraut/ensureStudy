@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Database seed script for ensureStudy
+Database seed script for ensureStudy for populating the database with test accounts.
 Creates default test accounts for all user types.
 
 Usage:
