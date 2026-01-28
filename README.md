@@ -1,4 +1,121 @@
-# ensureStudy
+# ensureStudy 🎓
+<strong>AI-First Learning Platform with Multi-Agent Tutoring & Real-Time Proctoring</strong>
+
+<div style="display: flex; gap: 10px; flex-wrap: wrap;">
+
+<!-- Languages & Frameworks -->
+<a href="https://www.python.org/">
+  <img src="https://img.shields.io/badge/-Python-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python">
+</a>
+<a href="https://www.typescriptlang.org/">
+  <img src="https://img.shields.io/badge/-TypeScript-3178C6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript">
+</a>
+<a href="https://flask.palletsprojects.com/">
+  <img src="https://img.shields.io/badge/-Flask-000000?style=flat-square&logo=flask&logoColor=white" alt="Flask">
+</a>
+<a href="https://fastapi.tiangolo.com/">
+  <img src="https://img.shields.io/badge/-FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white" alt="FastAPI">
+</a>
+<a href="https://nextjs.org/">
+  <img src="https://img.shields.io/badge/-Next.js-000000?style=flat-square&logo=next.js&logoColor=white" alt="Next.js">
+</a>
+
+
+<!-- AI/ML -->
+<a href="https://pytorch.org/">
+  <img src="https://img.shields.io/badge/-PyTorch-EE4C2C?style=flat-square&logo=pytorch&logoColor=white" alt="PyTorch">
+</a>
+<a href="https://python.langchain.com/">
+  <img src="https://img.shields.io/badge/-LangChain-65B54C?style=flat-square&logo=chainlink&logoColor=white" alt="LangChain">
+</a>
+<a href="https://www.langchain.com/langgraph">
+  <img src="https://img.shields.io/badge/-LangGraph-1C3C3C?style=flat-square&logo=chainlink&logoColor=white" alt="LangGraph">
+</a>
+<a href="https://huggingface.co/">
+  <img src="https://img.shields.io/badge/-Hugging%20Face-FFD21E?style=flat-square&logo=huggingface&logoColor=black" alt="Hugging Face">
+</a>
+<a href="https://github.com/openai/whisper">
+  <img src="https://img.shields.io/badge/-Whisper-412991?style=flat-square&logo=openai&logoColor=white" alt="Whisper">
+</a>
+<a href="https://scikit-learn.org/">
+  <img src="https://img.shields.io/badge/-scikit--learn-F7931E?style=flat-square&logo=scikit-learn&logoColor=white" alt="Scikit-Learn">
+</a>
+<a href="https://www.pinecone.io/learn/retrieval-augmented-generation/">
+  <img src="https://img.shields.io/badge/-RAG-4D4D4D?style=flat-square&logo=openai&logoColor=white" alt="RAG">
+</a>
+
+<!-- Computer Vision -->
+<a href="https://github.com/ultralytics/yolov5">
+  <img src="https://img.shields.io/badge/-YOLO-00FFFF?style=flat-square&logo=yolo&logoColor=black" alt="YOLO">
+</a>
+<a href="https://mediapipe.dev/">
+  <img src="https://img.shields.io/badge/-MediaPipe-0097A7?style=flat-square&logo=google&logoColor=white" alt="MediaPipe">
+</a>
+<a href="https://opencv.org/">
+  <img src="https://img.shields.io/badge/-OpenCV-5C3EE8?style=flat-square&logo=opencv&logoColor=white" alt="OpenCV">
+</a>
+
+<!-- Databases -->
+<a href="https://www.postgresql.org/">
+  <img src="https://img.shields.io/badge/-PostgreSQL-4169E1?style=flat-square&logo=postgresql&logoColor=white" alt="PostgreSQL">
+</a>
+<a href="https://qdrant.tech/">
+  <img src="https://img.shields.io/badge/-Qdrant-DC382D?style=flat-square&logo=qdrant&logoColor=white" alt="Qdrant">
+</a>
+<a href="https://www.mongodb.com/">
+  <img src="https://img.shields.io/badge/-MongoDB-47A248?style=flat-square&logo=mongodb&logoColor=white" alt="MongoDB">
+</a>
+<a href="https://cassandra.apache.org/">
+  <img src="https://img.shields.io/badge/-Cassandra-1287B1?style=flat-square&logo=apache-cassandra&logoColor=white" alt="Cassandra">
+</a>
+<a href="https://redis.io/">
+  <img src="https://img.shields.io/badge/-Redis-DC382D?style=flat-square&logo=redis&logoColor=white" alt="Redis">
+</a>
+
+<!-- Streaming & Data -->
+<a href="https://kafka.apache.org/">
+  <img src="https://img.shields.io/badge/-Kafka-231F20?style=flat-square&logo=apache-kafka&logoColor=white" alt="Kafka">
+</a>
+<a href="https://spark.apache.org/">
+  <img src="https://img.shields.io/badge/-PySpark-E25A1C?style=flat-square&logo=apache-spark&logoColor=white" alt="PySpark">
+</a>
+<a href="https://mlflow.org/">
+  <img src="https://img.shields.io/badge/-MLflow-0194E2?style=flat-square&logo=mlflow&logoColor=white" alt="MLflow">
+</a>
+
+<!-- Real-Time Communication -->
+<a href="https://webrtc.org/">
+  <img src="https://img.shields.io/badge/-WebRTC-333333?style=flat-square&logo=webrtc&logoColor=white" alt="WebRTC">
+</a>
+<a href="https://livekit.io/">
+  <img src="https://img.shields.io/badge/-LiveKit-FF6B6B?style=flat-square&logo=webrtc&logoColor=white" alt="LiveKit">
+</a>
+
+<!-- DevOps & Infrastructure -->
+<a href="https://www.docker.com/">
+  <img src="https://img.shields.io/badge/-Docker-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker">
+</a>
+<a href="https://docs.github.com/en/actions">
+  <img src="https://img.shields.io/badge/-GitHub%20Actions-2088FF?style=flat-square&logo=github-actions&logoColor=white" alt="GitHub Actions">
+</a>
+<a href="https://aws.amazon.com/s3/">
+  <img src="https://img.shields.io/badge/-AWS%20S3-569A31?style=flat-square&logo=amazon-s3&logoColor=white" alt="AWS S3">
+</a>
+<a href="https://aws.amazon.com/rds/">
+  <img src="https://img.shields.io/badge/-AWS%20RDS-527FFF?style=flat-square&logo=amazon-rds&logoColor=white" alt="AWS RDS">
+</a>
+
+<!-- Auth & Utilities -->
+<a href="https://next-auth.js.org/">
+  <img src="https://img.shields.io/badge/-NextAuth.js-000000?style=flat-square&logo=next.js&logoColor=white" alt="NextAuth.js">
+</a>
+<a href="https://jwt.io/">
+  <img src="https://img.shields.io/badge/-JWT-000000?style=flat-square&logo=json-web-tokens&logoColor=white" alt="JWT">
+</a>
+
+</div>
+
+<br/>
 
 An AI-first learning platform combining intelligent multi-agent tutoring, real-time proctoring, and soft skills evaluation. Built with LangGraph orchestration, RAG-powered conversations, Kafka streaming, PyTorch ML models, and PySpark data pipelines.
 
