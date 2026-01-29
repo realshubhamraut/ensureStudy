@@ -17,6 +17,13 @@ UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file
 # Create upload directory if it doesn't exist
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
+# Web resources directory (for AI-downloaded PDFs from web searches)
+WEB_RESOURCES_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))),
+    'data', 'web_resources'
+)
+os.makedirs(WEB_RESOURCES_DIR, exist_ok=True)
+
 
 def get_current_user():
     """Get current user from JWT token"""
@@ -96,6 +103,18 @@ def get_file(filename):
         return jsonify({'error': 'File not found'}), 404
 
 
+@files_bp.route('/web/<path:filename>', methods=['GET'])
+def get_web_resource(filename):
+    """Serve a web-downloaded resource (PDF from AI Tutor web search)"""
+    try:
+        from urllib.parse import unquote
+        # Handle URL-encoded filenames (spaces, special chars)
+        decoded_filename = unquote(filename)
+        return send_from_directory(WEB_RESOURCES_DIR, decoded_filename)
+    except Exception as e:
+        return jsonify({'error': 'Web resource not found'}), 404
+
+
 @files_bp.route('/material/<material_id>', methods=['GET'])
 def get_material_file(material_id):
     """
@@ -118,7 +137,12 @@ def get_material_file(material_id):
         # If file_url is a local path, extract filename and serve
         file_url = material.file_url
         
-        if '/api/files/' in file_url:
+        if '/api/files/web/' in file_url:
+            # Web resource - extract filename and serve from WEB_RESOURCES_DIR
+            filename = file_url.split('/api/files/web/')[-1]
+            from urllib.parse import unquote
+            return send_from_directory(WEB_RESOURCES_DIR, unquote(filename))
+        elif '/api/files/' in file_url:
             # Extract filename from URL and serve directly
             filename = file_url.split('/api/files/')[-1]
             return send_from_directory(UPLOAD_DIR, filename)

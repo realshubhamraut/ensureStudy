@@ -144,31 +144,121 @@ IMPORTANT: Return ONLY valid JSON, no other text. Format:
 
 class TextClassifier:
     """
-    Zero-shot text classifier using Hugging Face
-    Used for moderation (no LLM needed, faster)
+    Zero-shot text classifier using Groq API with Llama 70B
+    
+    Uses groq cloud API with llama-3.3-70b-versatile for high accuracy
+    Falls back to distilbert only if Groq fails
     """
     
     def __init__(self, api_key: str = None):
-        self.api_key = api_key or os.getenv("HUGGINGFACE_API_KEY")
+        self.groq_api_key = os.getenv("GROQ_API_KEY")
+        self.hf_api_key = api_key or os.getenv("HUGGINGFACE_API_KEY") or os.getenv("HUGGINGFACE_TOKEN") or os.getenv("HF_TOKEN")
         self._pipeline = None
+        self._groq_client = None
+        self._model_name = "typeform/distilbert-base-uncased-mnli"  # Fallback only
+        
+        if self.groq_api_key:
+            logger.info("✅ Groq API key found - using llama-3.3-70b-versatile for classification")
+        else:
+            logger.warning("⚠️ No GROQ_API_KEY - will use local distilbert fallback")
+    
+    @property
+    def groq_client(self):
+        """Lazy load Groq client"""
+        if self._groq_client is None and self.groq_api_key:
+            try:
+                from groq import Groq
+                self._groq_client = Groq(api_key=self.groq_api_key)
+                logger.info("✅ Groq client initialized")
+            except Exception as e:
+                logger.error(f"❌ Failed to initialize Groq client: {e}")
+        return self._groq_client
     
     @property
     def pipeline(self):
-        """Lazy load classifier pipeline"""
+        """Lazy load the local classification pipeline (FALLBACK ONLY)"""
         if self._pipeline is None:
             try:
                 from transformers import pipeline
+                import torch
+                
+                device = -1  # CPU only
+                logger.info(f"Loading LOCAL fallback model: {self._model_name}...")
                 
                 self._pipeline = pipeline(
                     "zero-shot-classification",
-                    model="facebook/bart-large-mnli",
-                    device=-1  # CPU
+                    model=self._model_name,
+                    device=device
                 )
-                logger.info("Initialized text classifier")
+                logger.info(f"✅ Successfully loaded LOCAL fallback model")
+                
             except Exception as e:
-                logger.error(f"Failed to init classifier: {e}")
-                raise
+                logger.error(f"❌ Failed to load local model: {e}")
+                raise RuntimeError(f"Cannot load local classification model: {e}")
+        
         return self._pipeline
+    
+    def _classify_with_groq(
+        self,
+        text: str,
+        labels: List[str]
+    ) -> Dict[str, float]:
+        """
+        Use Groq API with Llama 70B for classification
+        """
+        try:
+            # Create a prompt for classification
+            labels_str = ", ".join(labels)
+            prompt = f"""You are a subject classifier for educational questions. 
+
+Analyze this question and determine which subject it belongs to: {labels_str}
+
+Question: "{text}"
+
+Think about the key concepts and terminology in the question. Consider:
+- Physics questions often involve forces, motion, energy, electricity, magnetism, optics, waves
+- Biology questions involve living things, cells, DNA, evolution, anatomy, ecology
+- Chemistry questions involve elements, compounds, reactions, molecules, acids, bases
+- Mathematics questions involve numbers, equations, calculations, geometry, algebra
+
+Respond with ONLY a JSON object containing confidence scores for each subject. The scores must sum to 1.0.
+
+Example format:
+{{"physics": 0.85, "biology": 0.05, "chemistry": 0.05, "mathematics": 0.05}}
+
+Your response (JSON only):"""
+
+            response = self.groq_client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.1,  # Low temperature for consistent classification
+                max_tokens=200
+            )
+            
+            result_text = response.choices[0].message.content.strip()
+            logger.debug(f"Groq raw response: {result_text}")
+            
+            # Parse JSON response
+            import json
+            # Extract JSON from response (handle markdown code blocks)
+            if "```json" in result_text:
+                result_text = result_text.split("```json")[1].split("```")[0].strip()
+            elif "```" in result_text:
+                result_text = result_text.split("```")[1].split("```")[0].strip()
+            
+            scores = json.loads(result_text)
+            
+            # Ensure all labels have scores
+            for label in labels:
+                if label not in scores:
+                    scores[label] = 0.0
+            
+            logger.info(f"✅ Groq classification: {scores}")
+            return scores
+            
+        except Exception as e:
+            logger.error(f"❌ Groq classification failed: {e}")
+            raise
     
     def classify(
         self, 
@@ -177,7 +267,7 @@ class TextClassifier:
         multi_label: bool = False
     ) -> Dict[str, float]:
         """
-        Classify text into labels
+        Classify text into labels using Groq API (70B model) with local fallback
         
         Args:
             text: Text to classify
@@ -188,16 +278,31 @@ class TextClassifier:
             Dict of label -> score
         """
         try:
+            # Try Groq API first (much better accuracy with 70B model)
+            if self.groq_client:
+                try:
+                    return self._classify_with_groq(text, labels)
+                except Exception as groq_error:
+                    logger.warning(f"⚠️ Groq failed, falling back to local model: {groq_error}")
+            
+            # Fallback to local model
+            logger.info("Using local distilbert fallback")
+            hypothesis_template = "This is a question about {}."
+            
             result = self.pipeline(
                 text, 
                 candidate_labels=labels,
+                hypothesis_template=hypothesis_template,
                 multi_label=multi_label
             )
             
-            return dict(zip(result["labels"], result["scores"]))
+            scores = dict(zip(result["labels"], result["scores"]))
+            logger.debug(f"Local classification scores: {scores}")
+            return scores
+            
         except Exception as e:
-            logger.error(f"Classification error: {e}")
-            return {label: 0.0 for label in labels}
+            logger.error(f"❌ Classification failed: {e}")
+            raise
 
 
 class SageMakerLLM:

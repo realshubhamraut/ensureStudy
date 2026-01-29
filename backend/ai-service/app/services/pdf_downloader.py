@@ -23,12 +23,15 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-# Directory for web-downloaded PDFs
-WEB_UPLOADS_DIR = os.path.join(
+# Base directory for web-downloaded PDFs
+WEB_UPLOADS_BASE = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))),
     'data', 'web_resources'
 )
-os.makedirs(WEB_UPLOADS_DIR, exist_ok=True)
+os.makedirs(WEB_UPLOADS_BASE, exist_ok=True)
+
+# Legacy: Keep WEB_UPLOADS_DIR for backwards compatibility
+WEB_UPLOADS_DIR = WEB_UPLOADS_BASE
 
 
 @dataclass
@@ -51,6 +54,8 @@ class WebPDFDownloader:
     - Size limit enforcement (max 50MB)
     - Filename extraction from URL/headers
     - Duplicate detection by URL
+    - Classroom-scoped storage (separate directories per classroom)
+    - Student-scoped storage (PDFs only visible to uploader)
     """
     
     MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
@@ -58,6 +63,21 @@ class WebPDFDownloader:
     
     def __init__(self):
         self.downloaded_urls = set()  # Track to avoid duplicates
+    
+    def _get_storage_dir(self, classroom_id: str = None, user_id: str = None) -> str:
+        """Get storage directory based on classroom and user context."""
+        if classroom_id and user_id:
+            # Student uploads: classroom_id/student_user_id/
+            storage_dir = os.path.join(WEB_UPLOADS_BASE, 'classrooms', classroom_id, 'students', user_id)
+        elif classroom_id:
+            # Classroom-wide: classroom_id/shared/
+            storage_dir = os.path.join(WEB_UPLOADS_BASE, 'classrooms', classroom_id, 'shared')
+        else:
+            # Legacy/fallback: root level
+            storage_dir = WEB_UPLOADS_BASE
+        
+        os.makedirs(storage_dir, exist_ok=True)
+        return storage_dir
     
     def _extract_filename(self, url: str, headers: dict) -> str:
         """Extract filename from Content-Disposition header or URL"""
@@ -83,7 +103,8 @@ class WebPDFDownloader:
         self, 
         url: str, 
         user_id: str,
-        topic: str = ""
+        topic: str = "",
+        classroom_id: str = None
     ) -> DownloadResult:
         """
         Download a PDF from URL and save locally.
@@ -92,6 +113,7 @@ class WebPDFDownloader:
             url: Source URL of the PDF
             user_id: User who triggered the download
             topic: Search topic (for naming)
+            classroom_id: Optional classroom context for scoped storage
             
         Returns:
             DownloadResult with file path and metadata
@@ -106,9 +128,19 @@ class WebPDFDownloader:
         try:
             print(f"[PDF-DL] Downloading: {url[:80]}...")
             
+            # Browser-like headers to avoid 403 Forbidden errors
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept": "application/pdf,*/*",
+                "Accept-Language": "en-US,en;q=0.9",
+                "Referer": "https://www.google.com/",
+                "DNT": "1"
+            }
+            
             async with httpx.AsyncClient(
                 timeout=self.DOWNLOAD_TIMEOUT,
-                follow_redirects=True
+                follow_redirects=True,
+                headers=headers
             ) as client:
                 # First, check headers with HEAD request
                 try:
@@ -155,11 +187,14 @@ class WebPDFDownloader:
                 # Extract filename
                 original_name = self._extract_filename(url, dict(response.headers))
                 
+                # Get appropriate storage directory
+                storage_dir = self._get_storage_dir(classroom_id, user_id)
+                
                 # Create unique filename
                 unique_id = uuid.uuid4().hex[:8]
                 safe_topic = "".join(c for c in topic if c.isalnum() or c in ' -_')[:30]
                 file_name = f"{safe_topic}_{unique_id}_{original_name}"
-                file_path = os.path.join(WEB_UPLOADS_DIR, file_name)
+                file_path = os.path.join(storage_dir, file_name)
                 
                 # Save file
                 with open(file_path, 'wb') as f:
@@ -196,7 +231,8 @@ class WebPDFDownloader:
         urls: List[str],
         user_id: str,
         topic: str = "",
-        max_downloads: int = 3
+        max_downloads: int = 3,
+        classroom_id: str = None
     ) -> List[DownloadResult]:
         """
         Download multiple PDFs concurrently.
@@ -206,6 +242,7 @@ class WebPDFDownloader:
             user_id: User who triggered the download
             topic: Search topic
             max_downloads: Maximum PDFs to download
+            classroom_id: Optional classroom context for scoped storage
             
         Returns:
             List of DownloadResult objects
@@ -220,7 +257,7 @@ class WebPDFDownloader:
         
         # Download concurrently
         tasks = [
-            self.download_pdf(url, user_id, topic)
+            self.download_pdf(url, user_id, topic, classroom_id)
             for url in urls
         ]
         

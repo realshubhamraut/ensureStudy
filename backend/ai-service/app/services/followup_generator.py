@@ -7,7 +7,7 @@ based on the topic and answer.
 import os
 import re
 import logging
-from typing import List
+from typing import List, Optional
 from functools import lru_cache
 
 import httpx
@@ -36,7 +36,8 @@ def _get_hf_token() -> str:
 def generate_follow_up_questions(
     question: str,
     answer_short: str,
-    topic: str = ""
+    topic: str = "",
+    subject: Optional[str] = None
 ) -> List[str]:
     """
     Generate contextual follow-up questions based on the Q&A.
@@ -45,14 +46,16 @@ def generate_follow_up_questions(
         question: Original user question
         answer_short: Short answer provided
         topic: Extracted topic (optional)
+        subject: Detected academic subject (e.g., 'biology', 'chemistry') - takes priority in fallback
         
     Returns:
         List of 2-3 follow-up questions
     """
     hf_token = _get_hf_token()
     
-    # Build prompt for generating follow-ups
-    prompt = f"""Given this educational Q&A, suggest 3 follow-up questions a student might ask:
+    # Build prompt with subject context if available
+    subject_info = f" ({subject})" if subject else ""
+    prompt = f"""Given this educational Q&A{subject_info}, suggest 3 follow-up questions a student might ask:
 
 Topic: {topic or 'General'}
 Question: {question}
@@ -99,8 +102,8 @@ Generate exactly 3 short follow-up questions (one per line):"""
     except Exception as e:
         logger.debug(f"[FOLLOWUP] Error: {e}, using fallback")
     
-    # Fallback to smart keyword-based questions
-    return _generate_fallback_questions(question, answer_short)
+    # Fallback with subject awareness
+    return _generate_fallback_questions(question, answer_short, subject)
 
 
 def _parse_questions(text: str) -> List[str]:
@@ -121,11 +124,83 @@ def _parse_questions(text: str) -> List[str]:
     return questions[:3]
 
 
-def _generate_fallback_questions(question: str, answer: str) -> List[str]:
-    """Generate smart fallback questions based on content keywords."""
+def _generate_fallback_questions(question: str, answer: str, subject: Optional[str] = None) -> List[str]:
+    """Generate smart fallback questions based on detected subject or content keywords."""
+    
+    # PRIORITY 1: Use detected subject if available
+    if subject:
+        subject_lower = subject.lower()
+        logger.debug(f"[FOLLOWUP FALLBACK] Using detected subject: {subject}")
+        
+        if 'math' in subject_lower:
+            return [
+                "Can you show a step-by-step example?",
+                "What are common mistakes to avoid?",
+                "When would I use this formula?"
+            ]
+        
+        if 'biology' in subject_lower:
+            return [
+                "How does this process work in detail?",
+                "What happens if this goes wrong?",
+                "Can you provide a diagram or example?"
+            ]
+        
+        if 'physics' in subject_lower:
+            return [
+                "Can you show a real-world example?",
+                "How is this measured in practice?",
+                "What's the mathematical formula?"
+            ]
+        
+        if 'chemistry' in subject_lower:
+            return [
+                "What are the products of this reaction?",
+                "Is this reaction reversible?",
+                "What conditions are needed?"
+            ]
+        
+        if 'history' in subject_lower:
+            return [
+                "What were the main causes?",
+                "What were the long-term effects?",
+                "Who were the key figures involved?"
+            ]
+        
+        if 'computer' in subject_lower or 'programming' in subject_lower:
+            return [
+                "Can you show a code example?",
+                "What are common bugs to avoid?",
+                "How can I optimize this?"
+            ]
+        
+        if 'geography' in subject_lower:
+            return [
+                "How does this affect people living there?",
+                "What are the environmental impacts?",
+                "How has this changed over time?"
+            ]
+        
+        if 'literature' in subject_lower or 'english' in subject_lower:
+            return [
+                "What are the main themes?",
+                "How does this relate to its historical context?",
+                "What literary devices are used?"
+            ]
+        
+        if 'economics' in subject_lower:
+            return [
+                "How does this affect consumers?",
+                "What are real-world examples?",
+                "What are the opposing views?"
+            ]
+    
+    # PRIORITY 2: Keyword-based detection (only if no subject detected)
     answer_lower = answer.lower()
     question_lower = question.lower()
     combined = answer_lower + " " + question_lower
+    
+    logger.debug(f"[FOLLOWUP FALLBACK] No subject detected, using keyword matching")
     
     # Topic-based smart fallbacks
     if any(w in combined for w in ['math', 'equation', 'formula', 'calculate', 'solve']):

@@ -83,6 +83,33 @@ async def process_tutor_query(request: TutorQueryRequest) -> TutorQueryResponse:
     
     try:
         # ========================================
+        # Step 1.5: Auto-detect subject if not provided
+        # ========================================
+        detected_subject = None
+        subject_confidence = 0.0
+        
+        if not request.subject:
+            from ...services.subject_classifier import get_subject_classifier
+            subject_classifier = get_subject_classifier()
+            classification = subject_classifier.classify_subject(request.question)
+            
+            detected_subject = classification["subject"]
+            subject_confidence = classification["confidence"]
+            
+            print(f"[SUBJECT] 🎯 Auto-detected: {classification['display_name']} "
+                  f"(confidence: {subject_confidence:.2f})")
+            
+            # Use detected subject if confidence is high enough
+            if subject_confidence >= 0.3:
+                # Override request.subject for downstream processing
+                from ...api.schemas.tutor import Subject
+                try:
+                    request.subject = Subject(detected_subject)
+                except:
+                    # If not a valid enum, keep as None
+                    pass
+        
+        # ========================================
         # Step 2: Academic Moderation (No LLM)
         # ========================================
         moderation_result = moderate_query(
@@ -130,15 +157,46 @@ async def process_tutor_query(request: TutorQueryRequest) -> TutorQueryResponse:
         transcript_chunks = []
         
         # Search classroom materials (PDFs, docs, etc.)
+        # Use detected subject to filter relevant materials
         try:
             from ...services.material_indexer import get_material_indexer
             indexer = get_material_indexer()
+            
+            # Get the subject for filtering (from request or auto-detected)
+            # Skip filtering for 'general' or 'general_knowledge' - these are too broad
+            search_subject = None
+            skip_subjects = {'general', 'general_knowledge'}
+            
+            if request.subject:
+                search_subject = request.subject.value
+            elif detected_subject and detected_subject.lower() not in skip_subjects:
+                search_subject = detected_subject
+            
+            if search_subject:
+                print(f"[TUTOR] 🎯 Searching materials with subject filter: {search_subject}")
+            else:
+                print(f"[TUTOR] 📚 Searching ALL materials (no subject filter)")
+            
             classroom_results = indexer.search_classroom_materials(
                 query=request.question,
                 classroom_id=request.classroom_id,  # None = search all
+                subject=search_subject,  # Filter by detected subject
                 top_k=5,
                 score_threshold=0.3
             )
+            
+            # FALLBACK: If subject filter returns 0 results, search without subject
+            if len(classroom_results) == 0 and search_subject:
+                print(f"[TUTOR] 🔄 No results with subject filter, retrying without subject...")
+                classroom_results = indexer.search_classroom_materials(
+                    query=request.question,
+                    classroom_id=request.classroom_id,
+                    subject=None,  # No subject filter
+                    top_k=5,
+                    score_threshold=0.3
+                )
+                print(f"[TUTOR] 📚 Fallback search found {len(classroom_results)} chunks")
+            
             # Convert to same format as regular chunks
             from ...services.retrieval import RetrievedChunk
             for r in classroom_results:
@@ -152,7 +210,8 @@ async def process_tutor_query(request: TutorQueryRequest) -> TutorQueryResponse:
                     url=r.get("url", "")
                 ))
             print(f"[TUTOR] 📚 Found {len(classroom_chunks)} classroom material chunks" + 
-                  (f" from classroom {request.classroom_id}" if request.classroom_id else " from ALL classrooms"))
+                  (f" from classroom {request.classroom_id}" if request.classroom_id else " from ALL classrooms") +
+                  (f" (subject: {search_subject})" if search_subject else ""))
         except Exception as e:
             print(f"[TUTOR] ⚠ Classroom material search failed: {e}")
         
@@ -282,8 +341,12 @@ async def process_tutor_query(request: TutorQueryRequest) -> TutorQueryResponse:
                         
                         # Also prepare for UI display
                     # Separate articles and PDFs for proper frontend rendering
+                    # IMPORTANT: Prioritize Wikipedia + 2 related articles for references
                     articles = []
+                    wikipedia_article = None
+                    other_articles = []
                     pdfs = []
+                    
                     for r in web_result.resources:
                         if r.clean_content:
                             if r.source_type == 'web_pdf':
@@ -299,14 +362,29 @@ async def process_tutor_query(request: TutorQueryRequest) -> TutorQueryResponse:
                                     "chunkCount": r.chunk_count
                                 })
                             else:
-                                articles.append({
+                                article_entry = {
                                     "id": r.id,
                                     "title": r.title,
                                     "url": r.url,
                                     "source": r.source_name,
                                     "snippet": r.summary[:200] if r.summary else "",
                                     "trustScore": r.trust_score
-                                })
+                                }
+                                # Prioritize Wikipedia
+                                if 'wikipedia.org' in r.url.lower():
+                                    if not wikipedia_article:  # Only take first Wikipedia
+                                        wikipedia_article = article_entry
+                                else:
+                                    other_articles.append(article_entry)
+                    
+                    # Build articles list: Wikipedia first, then up to 2 other articles
+                    if wikipedia_article:
+                        articles.append(wikipedia_article)
+                    # Add up to 2 other articles (for a total of 3 max)
+                    max_other_articles = 2 if wikipedia_article else 3
+                    articles.extend(other_articles[:max_other_articles])
+                    
+                    print(f"[RAG] 📚 Articles: {len(articles)} (Wiki: {'✓' if wikipedia_article else '✗'}, Others: {len(other_articles[:max_other_articles])})")
                     
                     web_resources_dict = {"articles": articles}
                     if pdfs:
@@ -324,16 +402,9 @@ async def process_tutor_query(request: TutorQueryRequest) -> TutorQueryResponse:
                 except Exception as img_err:
                     print(f"[RAG] ⚠ Brave image error: {img_err}")
                 
-                # Fetch videos from YouTube API
-                try:
-                    youtube_videos = await search_videos_youtube(request.question, max_results=3)
-                    if youtube_videos:
-                        if web_resources_dict is None:
-                            web_resources_dict = {}
-                        web_resources_dict["videos"] = youtube_videos
-                        print(f"[RAG] 🎬 Added {len(youtube_videos)} videos from YouTube")
-                except Exception as vid_err:
-                    print(f"[RAG] ⚠ YouTube video error: {vid_err}")
+                # NOTE: YouTube videos disabled per user request - resources should only show
+                # Wikipedia, articles, and related websites for reference
+                # Videos from YouTube are excluded from the resources sidebar
                     
             except Exception as e:
                 print(f"[RAG] ⚠ Web fetch error: {e}")
@@ -443,7 +514,8 @@ async def process_tutor_query(request: TutorQueryRequest) -> TutorQueryResponse:
             follow_ups = generate_follow_up_questions(
                 question=request.question,
                 answer_short=llm_response.answer_short,
-                topic=request.subject.value if request.subject else ""
+                topic=request.subject.value if request.subject else "",
+                subject=detected_subject  # Pass detected subject for better context
             )
         except Exception as e:
             print(f"Follow-up generation error: {e}")
@@ -458,7 +530,9 @@ async def process_tutor_query(request: TutorQueryRequest) -> TutorQueryResponse:
                 tokens_used=context.total_tokens,
                 retrieval_time_ms=retrieval_time,
                 llm_time_ms=llm_time,
-                request_id=request_id
+                request_id=request_id,
+                detected_subject=detected_subject if detected_subject else None,
+                subject_confidence=round(subject_confidence, 3) if detected_subject else None
             ),
             web_resources=web_resources_dict,
             flowchart_mermaid=flowchart_code,

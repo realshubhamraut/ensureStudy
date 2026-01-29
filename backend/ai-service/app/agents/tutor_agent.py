@@ -350,10 +350,12 @@ def retrieve_with_mcp(state: TutorState) -> TutorState:
                 
                 topic = state.get("topic_anchor_title") or state["query"][:50]
                 user_id = state.get("user_id", "")
+                classroom_id = state.get("classroom_id", "")
                 
                 logger.info(
                     f"[TUTOR/ENRICH] Triggering background web+PDF enrichment "
-                    f"(chunks={mcp_chunk_count}, avg_sim={avg_similarity:.2f})"
+                    f"(chunks={mcp_chunk_count}, avg_sim={avg_similarity:.2f}, "
+                    f"classroom={classroom_id or 'none'})"
                 )
                 
                 # Fire and forget - don't block on completion
@@ -362,7 +364,8 @@ def retrieve_with_mcp(state: TutorState) -> TutorState:
                         query=topic,
                         max_sources=3,
                         search_pdfs=True,  # Enable PDF search with '+ pdf download'
-                        user_id=user_id
+                        user_id=user_id,
+                        classroom_id=classroom_id  # Pass classroom context
                     )
                 )
                 

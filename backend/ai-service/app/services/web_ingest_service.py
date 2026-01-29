@@ -225,18 +225,29 @@ def worker1_extract_topic(query: str, conversation_history: list = None) -> str:
         'simple', 'simpler', 'terms', 'words', 'explanation', 'context', 'more'
     }
     
-    # Follow-up detection patterns
+    # Follow-up detection patterns - expanded to catch more cases
     followup_patterns = [
+        # Original patterns
         'what were', 'what are', 'what is', 'how does', 'why did', 'why is',
         'tell me more', 'explain more', 'elaborate', 'continue',
         'main causes', 'main effects', 'main reasons',
-        'their', 'its', 'them', 'they', 'it', 'this', 'that', 'these', 'those'
+        'their', 'its', 'them', 'they', 'it', 'this', 'that', 'these', 'those',
+        # NEW: Example/illustration requests
+        'give an example', 'give me an example', 'give example', 'for example',
+        'show me an example', 'can you give', 'provide an example', 'example of',
+        'example please', 'some examples', 'any examples', 'real-world example',
+        # NEW: Clarification requests
+        'what do you mean', 'clarify', 'be more specific', 'more details',
+        'explain that', 'what about', 'how about', 'and what about',
+        # NEW: Follow-on questions
+        'why is that', 'how so', 'in what way', 'like what',
+        'such as', 'go on', 'keep going', 'and then'
     ]
     
     # Check if query is a follow-up
     query_lower = query.lower().strip()
     is_followup = (
-        len(query.split()) <= 6 and  # Short query
+        len(query.split()) <= 8 and  # Increased from 6 to 8 words
         any(p in query_lower for p in followup_patterns)
     )
     
@@ -443,10 +454,14 @@ async def worker4_wikipedia_content(canonical_title: str) -> Optional[Dict[str, 
                     'timestamp': data.get('timestamp', '')
                 }
             else:
-                print(f"[WORKER-4] ❌ Wikipedia REST API returned {response.status_code}")
+                print(f"[WORKER-4] ❌ Wikipedia REST API returned {response.status_code}: {response.text[:200] if response.text else 'No body'}")
                 
+    except httpx.TimeoutException:
+        print(f"[WORKER-4] ⏱️ Wikipedia fetch timeout for: {canonical_title}")
+    except httpx.ConnectError as e:
+        print(f"[WORKER-4] 🔌 Wikipedia connection error: {type(e).__name__}")
     except Exception as e:
-        print(f"[WORKER-4] ❌ Wikipedia content fetch error: {e}")
+        print(f"[WORKER-4] ❌ Wikipedia content fetch error: {type(e).__name__}: {e}")
     
     return None
 
@@ -563,7 +578,8 @@ async def worker6b_pdf_search(
     topic: str,
     user_id: str = "",
     max_pdfs: int = 3,
-    classroom_id: str = None
+    classroom_id: str = None,
+    subject: str = None  # Subject from query classification
 ) -> List[Dict[str, Any]]:
     """
     WORKER-6B: Search for educational PDFs and download them.
@@ -576,6 +592,7 @@ async def worker6b_pdf_search(
         user_id: User ID for tracking downloads
         max_pdfs: Maximum number of PDFs to download (default 3)
         classroom_id: Optional classroom to store downloaded PDFs in
+        subject: Optional subject for tagging (e.g., 'physics', 'biology')
         
     Returns:
         List of downloaded PDF info with extracted text
@@ -586,6 +603,7 @@ async def worker6b_pdf_search(
     print(f"\n{'='*62}")
     print(f"[WORKER-6B] 📄 PDF Search: '{topic}'")
     print(f"[WORKER-6B] 📚 Classroom ID: {classroom_id or 'None (not storing)'}")
+    print(f"[WORKER-6B] 🎯 Subject: {subject or 'None (auto-detect)'}")
     print(f"[WORKER-6B] 👤 User ID: {user_id or 'anonymous'}")
     print(f"{'='*62}")
     
@@ -634,7 +652,8 @@ async def worker6b_pdf_search(
             urls=pdf_urls,
             user_id=user_id,
             topic=topic,
-            max_downloads=max_pdfs
+            max_downloads=max_pdfs,
+            classroom_id=classroom_id  # Pass classroom context
         )
         
         print(f"[WORKER-6B] 📦 Download complete: {len(download_results)} files")
@@ -674,10 +693,10 @@ async def worker6b_pdf_search(
                     # Store to classroom if classroom_id provided
                     if classroom_id:
                         try:
-                            core_service_url = os.getenv('CORE_SERVICE_URL', 'http://localhost:9000')
+                            core_service_url = os.getenv('CORE_SERVICE_URL', 'http://localhost:8000')
                             
-                            # Build file URL for the downloaded PDF
-                            file_url = f"/api/files/pdfs/{result.file_name}"
+                            # Build file URL for the downloaded PDF (web resources)
+                            file_url = f"/api/files/web/{result.file_name}"
                             
                             print(f"[WORKER-6B] 💾 Storing in classroom {classroom_id}...")
                             
@@ -691,7 +710,8 @@ async def worker6b_pdf_search(
                                         "type": "application/pdf",
                                         "size": result.file_size,
                                         "source_url": result.source_url,
-                                        "description": f"Web search: {topic}"
+                                        "description": f"Web search: {topic}",
+                                        "subject": subject  # Pass detected subject for filtering
                                     }
                                 )
                                 
@@ -809,10 +829,18 @@ def generate_embeddings(texts: List[str]) -> List[List[float]]:
         return []
 
 
-def store_in_qdrant(chunks: List[Dict[str, Any]], embeddings: List[List[float]]) -> int:
+def store_in_qdrant(chunks: List[Dict[str, Any]], embeddings: List[List[float]], classroom_id: str = None, user_id: str = None) -> int:
     """
     Store chunks with embeddings in Qdrant.
-    Returns number of chunks stored.
+    
+    Args:
+        chunks: List of chunk dictionaries with text and metadata
+        embeddings: List of embedding vectors
+        classroom_id: Optional classroom context for scoped retrieval
+        user_id: Optional user who triggered the download
+        
+    Returns:
+        Number of chunks stored
     """
     # WORKER-7: Store in Qdrant vector database
     print(f"[WORKER-7] Storing {len(chunks)} chunks in Qdrant...")
@@ -856,7 +884,11 @@ def store_in_qdrant(chunks: List[Dict[str, Any]], embeddings: List[List[float]])
                     'source_trust': chunk['metadata'].get('source_trust', 0.5),
                     'fetched_at': chunk['metadata'].get('fetched_at', ''),
                     'chunk_index': chunk['metadata'].get('chunk_index', 0),
-                    'total_chunks': chunk['metadata'].get('total_chunks', 1)
+                    'total_chunks': chunk['metadata'].get('total_chunks', 1),
+                    # Scoping metadata for classroom/user-specific retrieval
+                    'classroom_id': classroom_id or '',  # Empty string for global
+                    'user_id': user_id or '',  # User who triggered download
+                    'visibility': 'private' if (classroom_id and user_id) else 'public'  # private = student-only
                 }
             )
             points.append(point)
@@ -1043,6 +1075,32 @@ async def ingest_web_resources(
                     print(f"[WORKER-6] ⚠ Insufficient content from {url[:60]}")
                     continue
                 
+                # GARBAGE CONTENT DETECTION - Skip pages with useless content
+                garbage_patterns = [
+                    "javascript is disabled",
+                    "please enable javascript",
+                    "couldn't load",
+                    "browser settings",
+                    "about\npress\ncopyright",  # YouTube footer
+                    "how youtube works\ntest new features",
+                    "policy & safety",
+                    "enable cookies to continue",
+                    "403 forbidden",
+                    "404 not found",
+                    "access denied"
+                ]
+                
+                content_lower = clean_text.lower()
+                is_garbage = False
+                for pattern in garbage_patterns:
+                    if pattern in content_lower and len(clean_text) < 500:
+                        print(f"[WORKER-6] 🗑️ GARBAGE DETECTED: '{pattern}' in {url[:50]}...")
+                        is_garbage = True
+                        break
+                
+                if is_garbage:
+                    continue
+                
                 print(f"[WORKER-6] 📄 Extracted {len(clean_text)} characters")
                 
                 # Show content preview - FIRST 500 chars
@@ -1133,7 +1191,8 @@ async def ingest_web_resources(
                     topic=topic,
                     user_id=user_id,
                     max_pdfs=3,
-                    classroom_id=classroom_id  # Store PDFs in classroom materials
+                    classroom_id=classroom_id,  # Store PDFs in classroom materials
+                    subject=subject  # Tag PDFs with detected subject
                 )
                 
                 # Process PDF content and add to chunks
@@ -1179,7 +1238,7 @@ async def ingest_web_resources(
             embeddings = generate_embeddings(texts)
             
             if embeddings:
-                total_stored = store_in_qdrant(all_chunks, embeddings)
+                total_stored = store_in_qdrant(all_chunks, embeddings, classroom_id=classroom_id, user_id=user_id)
                 print(f"[WORKER-7] ✅ Successfully stored {total_stored} chunks in Qdrant")
         
         # Pipeline complete

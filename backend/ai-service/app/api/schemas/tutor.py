@@ -26,12 +26,22 @@ class LanguageStyle(str, Enum):
 class SubjectType(str, Enum):
     """Academic subject categories."""
     MATH = "math"
+    MATHEMATICS = "mathematics"
     PHYSICS = "physics"
     CHEMISTRY = "chemistry"
     BIOLOGY = "biology"
     HISTORY = "history"
     ENGLISH = "english"
+    ENGLISH_LITERATURE = "english_literature"
+    COMPUTER_SCIENCE = "computer_science"
+    GEOGRAPHY = "geography"
+    ECONOMICS = "economics"
+    PSYCHOLOGY = "psychology"
     GENERAL = "general"
+
+
+# Alias for backwards compatibility
+Subject = SubjectType
 
 
 class ConversationMessage(BaseModel):
@@ -106,6 +116,8 @@ class ResponseMetadata(BaseModel):
     retrieval_time_ms: int
     llm_time_ms: int
     request_id: str
+    detected_subject: Optional[str] = Field(None, description="Auto-detected subject from query")
+    subject_confidence: Optional[float] = Field(None, description="Confidence of subject detection", ge=0.0, le=1.0)
 
 
 class TutorResponseData(BaseModel):

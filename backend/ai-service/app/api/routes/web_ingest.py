@@ -88,6 +88,23 @@ async def ingest_web_resources(request: WebIngestRequest):
     **Allowed Sources:**
     - Wikipedia, Khan Academy, NCERT, MIT OpenCourseWare, Byjus, Toppr
     """
+    import time
+    import hashlib
+    
+    # Simple in-memory cache to prevent duplicate searches within 5 minutes
+    # This prevents the frontend from triggering duplicate web crawls
+    cache_key = hashlib.md5(f"{request.query}:{request.subject}".encode()).hexdigest()
+    
+    # Check if we have a recent result for this query
+    from app.services.response_cache import get_response_cache
+    cache = get_response_cache()
+    
+    cached_result = cache.get(f"web_ingest:{cache_key}")
+    if cached_result:
+        logger.info(f"Web ingest cache HIT for query: {request.query[:50]}")
+        print(f"[WEB-INGEST] ⚡ CACHE HIT - Returning cached results for: {request.query[:50]}")
+        return cached_result
+    
     try:
         from app.services.web_ingest_service import ingest_web_resources as do_ingest
         
@@ -111,7 +128,7 @@ async def ingest_web_resources(request: WebIngestRequest):
         logger.info(f"Web ingest result: {len(result.resources)} resources ({pdf_count} PDFs, {article_count} articles), {result.total_chunks_stored} chunks stored")
         print(f"[WEB-INGEST] ✅ Result: {pdf_count} PDFs, {article_count} articles found")
         
-        return WebIngestResponse(
+        response = WebIngestResponse(
             success=result.success,
             query=result.query,
             resources=[
@@ -136,6 +153,12 @@ async def ingest_web_resources(request: WebIngestRequest):
             processing_time_ms=result.processing_time_ms,
             error=result.error
         )
+        
+        # Store in cache to prevent duplicate searches (TTL: 5 minutes)
+        cache.set(f"web_ingest:{cache_key}", response, ttl_seconds=300)
+        print(f"[WEB-INGEST] 💾 Cached result for: {request.query[:50]}")
+        
+        return response
         
     except Exception as e:
         logger.error(f"Web ingest error: {e}")

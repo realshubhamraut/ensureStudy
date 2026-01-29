@@ -234,6 +234,8 @@ class MaterialIndexer:
         self,
         query: str,
         classroom_id: Optional[str] = None,  # None = search ALL classrooms
+        subject: Optional[str] = None,  # Subject filter (e.g., 'physics', 'biology')
+        source_type: Optional[str] = None,  # 'teacher_material', 'web_fetched', 'student_upload'
         top_k: int = 5,
         score_threshold: float = 0.3
     ) -> List[Dict[str, Any]]:
@@ -243,6 +245,8 @@ class MaterialIndexer:
         Args:
             query: Search query
             classroom_id: Classroom to search within (None = search ALL)
+            subject: Subject to filter by (supports partial matching via Qdrant)
+            source_type: Filter by source type ('teacher_material', 'web_fetched', etc.)
             top_k: Number of results
             score_threshold: Minimum similarity score
             
@@ -255,13 +259,29 @@ class MaterialIndexer:
             # Generate query embedding
             query_embedding = self.embedding_model.encode(query).tolist()
             
-            # Search with classroom filter
+            # Build filters
+            filters = {}
+            
+            # Source type filter (default to teacher materials if not specified)
+            if source_type:
+                filters["source_type"] = source_type
+            else:
+                filters["source_type"] = SourceType.TEACHER_MATERIAL.value
+            
+            # Subject filter - normalize subject name for matching
+            if subject:
+                # Normalize subject: 'physics', 'Physics', 'PHYSICS' -> 'physics'
+                normalized_subject = subject.lower().replace('_', ' ').strip()
+                filters["subject"] = normalized_subject
+                print(f"[INDEXER] 🎯 Filtering by subject: {normalized_subject}")
+            
+            # Search with filters
             results = self.qdrant_service.search_semantic(
                 query_embedding=query_embedding,
                 classroom_id=classroom_id,
                 top_k=top_k,
                 score_threshold=score_threshold,
-                filters={"source_type": SourceType.TEACHER_MATERIAL.value}
+                filters=filters
             )
             
             # Handle both dataclass (fresh) and dict (from cache) results
@@ -288,7 +308,8 @@ class MaterialIndexer:
                     "page_number": payload.get("page_number", 0),
                     "similarity_score": final_score,
                     "url": payload.get("url", ""),
-                    "subject": payload.get("subject", "")
+                    "subject": payload.get("subject", ""),
+                    "source_type": payload.get("source_type", "")
                 })
             
             return processed_results

@@ -61,6 +61,14 @@ interface TutorResponse {
     confidence_score: number
     recommended_actions: string[]
     follow_up_questions?: string[]
+    metadata?: {
+        detected_subject?: string
+        subject_confidence?: number
+        tokens_used?: number
+        retrieval_time_ms?: number
+        llm_time_ms?: number
+        request_id?: string
+    }
 }
 
 interface Message {
@@ -687,21 +695,9 @@ export default function AITutorPage() {
                 if (data.data.web_resources) {
                     const wr = data.data.web_resources
 
-                    // Videos
-                    if (wr.videos) {
-                        const videoSources = wr.videos.map((v: { id: string; title: string; url: string; thumbnailUrl: string; embedUrl: string; duration: string; source: string; relevance: number }) => ({
-                            id: v.id,
-                            type: 'video' as const,
-                            title: v.title,
-                            url: v.url,
-                            thumbnailUrl: v.thumbnailUrl,
-                            embedUrl: v.embedUrl,
-                            duration: v.duration,
-                            relevance: v.relevance,
-                            source: v.source || 'YouTube'
-                        }))
-                        allSources.push(...videoSources)
-                    }
+                    // NOTE: Videos disabled per user request - resources show only
+                    // Wikipedia + articles for student reference
+                    // Videos from YouTube are excluded from the resources sidebar
 
                     // Images
                     if (wr.images) {
@@ -1122,6 +1118,24 @@ export default function AITutorPage() {
                                             {/* Answer Card */}
                                             {/* Answer Card - Clean, no border */}
                                             <div className="bg-transparent pl-1 py-2 font-sans">
+                                                {/* Show detected subject if available */}
+                                                {msg.response?.metadata?.detected_subject && (
+                                                    <div className="mb-3 flex items-center gap-2">
+                                                        <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-gradient-to-r from-purple-50 to-indigo-50 border border-purple-200 rounded-lg">
+                                                            <svg className="w-3.5 h-3.5 text-purple-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
+                                                            </svg>
+                                                            <span className="text-xs font-medium text-purple-700">
+                                                                {msg.response.metadata.detected_subject.charAt(0).toUpperCase() + msg.response.metadata.detected_subject.slice(1).replace('_', ' ')}
+                                                            </span>
+                                                            <span className="text-[10px] text-purple-500 font-semibold">
+                                                                {Math.round((msg.response.metadata.subject_confidence || 0) * 100)}%
+                                                            </span>
+                                                        </div>
+                                                        <span className="text-[10px] text-gray-400 italic">auto-detected</span>
+                                                    </div>
+                                                )}
+
                                                 {/* Show the answer with enhanced markdown rendering */}
                                                 <div className="text-gray-900">
                                                     <MarkdownRenderer content={msg.response?.answer_detailed || msg.content} />
@@ -1288,22 +1302,38 @@ export default function AITutorPage() {
                                                                     let followUpQuestions: string[] = []
 
                                                                     if (msg.response?.follow_up_questions && msg.response.follow_up_questions.length > 0) {
-                                                                        // Use API-provided questions
+                                                                        // Use API-provided questions (preferred)
                                                                         followUpQuestions = msg.response.follow_up_questions
                                                                     } else {
-                                                                        // Fallback: Generate contextual follow-up questions based on the answer content
-                                                                        const content = (msg.response?.answer_detailed || msg.content).toLowerCase()
+                                                                        // Fallback: Use detected subject or generic questions
+                                                                        const detectedSubject = msg.response?.metadata?.detected_subject
 
-                                                                        if (content.includes('photosynthesis') || content.includes('plant')) {
-                                                                            followUpQuestions = ["What happens during the Calvin cycle?", "Why is chlorophyll green?"]
-                                                                        } else if (content.includes('equation') || content.includes('formula')) {
-                                                                            followUpQuestions = ["Can you show a worked example?", "What are the common mistakes?"]
-                                                                        } else if (content.includes('history') || content.includes('war') || content.includes('century')) {
-                                                                            followUpQuestions = ["What were the main causes?", "What were the consequences?"]
-                                                                        } else if (content.includes('python') || content.includes('code') || content.includes('programming')) {
-                                                                            followUpQuestions = ["Can you show a code example?", "What are common errors?"]
+                                                                        if (detectedSubject) {
+                                                                            // Use subject-specific questions based on detected subject
+                                                                            const subjectQuestions: Record<string, string[]> = {
+                                                                                'biology': ["How does this process work?", "What happens if this goes wrong?"],
+                                                                                'chemistry': ["What are the products?", "What conditions are needed?"],
+                                                                                'physics': ["Can you show an example?", "What's the formula?"],
+                                                                                'mathematics': ["Can you show a worked example?", "What are common mistakes?"],
+                                                                                'computer_science': ["Can you show code?", "What are common bugs?"],
+                                                                                'history': ["What were the main causes?", "What were the consequences?"],
+                                                                                'geography': ["How does this affect people?", "What are environmental impacts?"],
+                                                                                'english_literature': ["What are the main themes?", "What literary devices are used?"],
+                                                                                'economics': ["How does this affect consumers?", "What are real-world examples?"],
+                                                                                'psychology': ["How does this affect behavior?", "What are practical applications?"]
+                                                                            }
+
+                                                                            followUpQuestions = subjectQuestions[detectedSubject] || [
+                                                                                "Can you give an example?",
+                                                                                "Why is this important?"
+                                                                            ]
                                                                         } else {
-                                                                            followUpQuestions = ["Can you give an example?", "Why is this important?", "How is this used in real life?"]
+                                                                            // Generic fallback
+                                                                            followUpQuestions = [
+                                                                                "Can you give an example?",
+                                                                                "Why is this important?",
+                                                                                "How is this used in real life?"
+                                                                            ]
                                                                         }
                                                                     }
 
@@ -1549,10 +1579,10 @@ export default function AITutorPage() {
                             <div className="px-3 py-2 flex gap-2 overflow-x-auto">
                                 {(() => {
                                     const counts = getSourceCounts()
+                                    // NOTE: Videos filter removed - resources now show Wikipedia + articles only
                                     const filters: { key: SourceFilter; icon: React.ReactNode; label: string; count: number }[] = [
                                         { key: 'all', icon: <Squares2X2Icon className="w-5 h-5" />, label: 'All', count: counts.all },
                                         { key: 'documents', icon: <DocumentIcon className="w-5 h-5" />, label: 'Docs', count: counts.documents },
-                                        { key: 'videos', icon: <VideoCameraIcon className="w-5 h-5" />, label: 'Videos', count: counts.videos },
                                         { key: 'websites', icon: <GlobeAltIcon className="w-5 h-5" />, label: 'Web', count: counts.websites },
                                         { key: 'flowcharts', icon: <MapIcon className="w-5 h-5" />, label: 'Flow', count: counts.flowcharts },
                                         { key: 'images', icon: <PhotoIcon className="w-5 h-5" />, label: 'Images', count: counts.images },
