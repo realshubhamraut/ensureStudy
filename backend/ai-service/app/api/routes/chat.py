@@ -97,9 +97,14 @@ async def chat_with_document(request: ChatRequest) -> ChatResponse:
                 
                 from ...services.material_indexer import get_material_indexer
                 
-                # Get document info from core service
+                # Get document info from core service (use HTTP for internal calls)
                 core_url = os.getenv("CORE_SERVICE_URL", "http://localhost:9000")
-                async with httpx.AsyncClient(timeout=30.0) as client:
+                # Ensure we're using HTTP, not HTTPS for local internal calls
+                if "localhost" in core_url or "127.0.0.1" in core_url:
+                    core_url = core_url.replace("https://", "http://")
+                
+                # Use verify=False for internal service calls
+                async with httpx.AsyncClient(timeout=30.0, verify=False) as client:
                     doc_response = await client.get(
                         f"{core_url}/api/internal/documents/{request.document_id}"
                     )

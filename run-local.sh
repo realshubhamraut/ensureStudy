@@ -97,6 +97,10 @@ echo -e "${GREEN}Starting Frontend on https://localhost:$FRONTEND_PORT${NC}"
 cd "$PROJECT_ROOT/frontend"
 [ ! -d "node_modules" ] && npm install
 
+# Clear Next.js cache for fresh start
+echo -e "${YELLOW}Clearing Next.js cache...${NC}"
+rm -rf .next 2>/dev/null || true
+
 NEXT_PUBLIC_API_URL="https://localhost:$CORE_PORT" \
 NEXT_PUBLIC_AI_SERVICE_URL="https://localhost:$AI_PORT" \
 NEXTAUTH_SECRET="${JWT_SECRET}" \

@@ -36,15 +36,23 @@ def register_web_material():
     if not user:
         return jsonify({"error": "User not found"}), 404
     
+    # Get optional classroom_id (if provided, store in that classroom)
+    classroom_id = data.get("classroom_id")
+    if classroom_id:
+        from app.models.classroom import Classroom
+        classroom = Classroom.query.get(classroom_id)
+        if not classroom:
+            print(f"[WEB-RES] Warning: Classroom {classroom_id} not found, storing as global")
+            classroom_id = None
+    
     # Create material record with source='web'
-    # Note: classroom_id is NULL for global web resources
     material = ClassroomMaterial(
-        classroom_id=None,  # Global resource, not tied to classroom
+        classroom_id=classroom_id,  # Store in classroom if provided
         name=data["name"],
         file_url=data["file_path"],  # Local file path
         file_type="application/pdf",
         file_size=data.get("file_size", 0),
-        subject=data.get("topic", "Web Resource"),
+        subject=data.get("topic") or data.get("subject") or "Web Resource",
         description=f"Downloaded from web: {data.get('source_url', '')}",
         uploaded_by=data["user_id"],
         source="web",
@@ -66,7 +74,7 @@ def register_web_material():
             json={
                 'material_id': material.id,
                 'file_url': material.file_url,
-                'classroom_id': None,  # Global resource
+                'classroom_id': classroom_id,  # Pass actual classroom_id
                 'subject': material.subject,
                 'document_title': material.name,
                 'uploaded_by': data["user_id"]

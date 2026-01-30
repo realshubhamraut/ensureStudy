@@ -18,8 +18,10 @@ UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 # Web resources directory (for AI-downloaded PDFs from web searches)
+# PDFs are downloaded by AI service to backend/data/web_resources/
+# Path: files.py -> routes -> app -> core-service -> backend/ -> data/web_resources
 WEB_RESOURCES_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))),
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))),  # Goes to backend/
     'data', 'web_resources'
 )
 os.makedirs(WEB_RESOURCES_DIR, exist_ok=True)
@@ -106,13 +108,32 @@ def get_file(filename):
 @files_bp.route('/web/<path:filename>', methods=['GET'])
 def get_web_resource(filename):
     """Serve a web-downloaded resource (PDF from AI Tutor web search)"""
-    try:
-        from urllib.parse import unquote
-        # Handle URL-encoded filenames (spaces, special chars)
-        decoded_filename = unquote(filename)
-        return send_from_directory(WEB_RESOURCES_DIR, decoded_filename)
-    except Exception as e:
-        return jsonify({'error': 'Web resource not found'}), 404
+    from urllib.parse import unquote
+    import glob
+    
+    # Handle URL-encoded filenames (spaces, special chars)
+    decoded_filename = unquote(filename)
+    
+    # Direct path - try first
+    direct_path = os.path.join(WEB_RESOURCES_DIR, decoded_filename)
+    if os.path.isfile(direct_path):
+        directory = os.path.dirname(direct_path)
+        basename = os.path.basename(direct_path)
+        return send_from_directory(directory, basename)
+    
+    # Fallback: Search in subdirectories (for old URLs without path)
+    # This handles legacy URLs like /api/files/web/file.pdf where file is in classrooms/.../file.pdf
+    basename = os.path.basename(decoded_filename)
+    search_pattern = os.path.join(WEB_RESOURCES_DIR, '**', basename)
+    matches = glob.glob(search_pattern, recursive=True)
+    
+    if matches:
+        # Return first match
+        found_path = matches[0]
+        directory = os.path.dirname(found_path)
+        return send_from_directory(directory, basename)
+    
+    return jsonify({'error': 'Web resource not found', 'searched': basename}), 404
 
 
 @files_bp.route('/material/<material_id>', methods=['GET'])

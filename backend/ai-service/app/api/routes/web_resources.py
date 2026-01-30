@@ -149,14 +149,17 @@ async def register_web_material(
     file_size: int,
     source_url: str,
     user_id: str,
-    topic: str
+    topic: str,
+    classroom_id: str = None,  # Optional classroom to store in
+    subject: str = None  # Subject classification
 ) -> bool:
     """
     Register downloaded PDF as a web material in Core API.
     
     Creates a ClassroomMaterial record with source='web'.
+    If classroom_id is provided, stores in that classroom.
     """
-    core_api_url = os.getenv("CORE_API_URL", "http://localhost:8000")
+    core_api_url = os.getenv("CORE_API_URL") or os.getenv("CORE_SERVICE_URL") or "https://localhost:8000"
     
     # Create the material via Core API
     payload = {
@@ -166,11 +169,14 @@ async def register_web_material(
         "source_url": source_url,
         "user_id": user_id,
         "topic": topic,
-        "source": "web"
+        "source": "web",
+        "classroom_id": classroom_id,  # Include classroom_id
+        "subject": subject  # Include subject
     }
     
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
+        # verify=False for self-signed certs in development
+        async with httpx.AsyncClient(timeout=10, verify=False) as client:
             response = await client.post(
                 f"{core_api_url}/api/web-resources/register",
                 json=payload,
@@ -194,10 +200,11 @@ async def list_user_web_resources(user_id: str):
     """
     List all web resources downloaded by a user.
     """
-    core_api_url = os.getenv("CORE_API_URL", "http://localhost:8000")
+    core_api_url = os.getenv("CORE_API_URL") or os.getenv("CORE_SERVICE_URL") or "https://localhost:8000"
     
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
+        # verify=False for self-signed certs in development
+        async with httpx.AsyncClient(timeout=10, verify=False) as client:
             response = await client.get(
                 f"{core_api_url}/api/web-resources/user/{user_id}",
                 headers={"X-Service-Key": "internal-ai-service"}

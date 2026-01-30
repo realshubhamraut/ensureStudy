@@ -110,6 +110,21 @@ async def process_tutor_query(request: TutorQueryRequest) -> TutorQueryResponse:
                     pass
         
         # ========================================
+        # Step 1.6: Match classroom by subject
+        # ========================================
+        matched_classroom_id = request.classroom_id  # Use existing if provided
+        
+        if not matched_classroom_id and detected_subject and request.user_id:
+            try:
+                from ...services.classroom_matcher import match_classroom_by_subject
+                matched = await match_classroom_by_subject(request.user_id, detected_subject)
+                if matched:
+                    matched_classroom_id = matched["classroom_id"]
+                    print(f"[CLASSROOM] 📚 Matched '{detected_subject}' → '{matched['name']}' (ID: {matched_classroom_id[:8]}...)")
+            except Exception as e:
+                print(f"[CLASSROOM] ⚠️ Classroom matching failed: {e}")
+        
+        # ========================================
         # Step 2: Academic Moderation (No LLM)
         # ========================================
         moderation_result = moderate_query(
@@ -288,11 +303,13 @@ async def process_tutor_query(request: TutorQueryRequest) -> TutorQueryResponse:
                     web_resources_dict = {
                         "articles": [{
                             "id": "cached_1",
+                            "type": "article",
                             "title": "Cached Result",
                             "url": cached.sources[0] if cached.sources else "",
                             "source": "Cache",
                             "snippet": cached.answer[:200],
-                            "trustScore": cached.confidence
+                            "trustScore": cached.confidence,
+                            "relevance": int(cached.confidence * 100) if cached.confidence else 85
                         }]
                     }
                     print(f"[RAG] ⚡ Skipped web crawl - using cache!")
@@ -312,7 +329,7 @@ async def process_tutor_query(request: TutorQueryRequest) -> TutorQueryResponse:
                         conversation_history=history_dicts,
                         search_pdfs=True,  # Enable PDF search with Worker-6B
                         user_id=request.user_id,
-                        classroom_id=request.classroom_id  # Store PDFs in classroom
+                        classroom_id=matched_classroom_id  # Use matched classroom for storing PDFs
                     )
                     
                     if web_result.success and web_result.resources:
@@ -364,11 +381,13 @@ async def process_tutor_query(request: TutorQueryRequest) -> TutorQueryResponse:
                             else:
                                 article_entry = {
                                     "id": r.id,
+                                    "type": "article",
                                     "title": r.title,
                                     "url": r.url,
                                     "source": r.source_name,
                                     "snippet": r.summary[:200] if r.summary else "",
-                                    "trustScore": r.trust_score
+                                    "trustScore": r.trust_score,
+                                    "relevance": int(r.trust_score * 100) if r.trust_score else 85
                                 }
                                 # Prioritize Wikipedia
                                 if 'wikipedia.org' in r.url.lower():
@@ -391,23 +410,49 @@ async def process_tutor_query(request: TutorQueryRequest) -> TutorQueryResponse:
                         web_resources_dict["pdfs"] = pdfs
                         print(f"[RAG] 📄 Added {len(pdfs)} PDFs to web resources")
                 
-                # Fetch images from Brave API (parallel with articles)
-                try:
-                    brave_images = await search_images_brave(request.question, count=3)
-                    if brave_images:
-                        if web_resources_dict is None:
-                            web_resources_dict = {}
-                        web_resources_dict["images"] = brave_images
-                        print(f"[RAG] 🖼️ Added {len(brave_images)} images from Brave")
-                except Exception as img_err:
-                    print(f"[RAG] ⚠ Brave image error: {img_err}")
-                
-                # NOTE: YouTube videos disabled per user request - resources should only show
-                # Wikipedia, articles, and related websites for reference
-                # Videos from YouTube are excluded from the resources sidebar
+                # Note: Images and videos fetching moved outside cache block
                     
             except Exception as e:
                 print(f"[RAG] ⚠ Web fetch error: {e}")
+        
+        # ========================================
+        # Always fetch images and videos (regardless of cache)
+        # ========================================
+        try:
+            # Fetch images from DuckDuckGo (fast)
+            brave_images = await search_images_brave(request.question, count=3)
+            if brave_images:
+                if web_resources_dict is None:
+                    web_resources_dict = {}
+                web_resources_dict["images"] = brave_images
+                print(f"[RAG] 🖼️ Added {len(brave_images)} images")
+        except Exception as img_err:
+            print(f"[RAG] ⚠ Image fetch error: {img_err}")
+        
+        try:
+            # Fetch YouTube videos using YouTube Data API v3
+            from ...services.youtube_video_service import search_videos_youtube
+            youtube_videos = await search_videos_youtube(request.question, max_results=3)
+            if youtube_videos:
+                if web_resources_dict is None:
+                    web_resources_dict = {}
+                web_resources_dict["videos"] = [
+                    {
+                        "id": v.get("id"),
+                        "type": "video",
+                        "title": v.get("title"),
+                        "url": v.get("url"),
+                        "thumbnailUrl": v.get("thumbnailUrl"),
+                        "embedUrl": v.get("embedUrl"),
+                        "duration": v.get("duration"),
+                        "source": v.get("source", "YouTube"),
+                        "relevance": v.get("relevance", 90)
+                    }
+                    for v in youtube_videos
+                ]
+                print(f"[RAG] 🎬 Added {len(youtube_videos)} YouTube videos")
+        except Exception as vid_err:
+            print(f"[RAG] ⚠ YouTube video error: {vid_err}")
         
         # Combine Qdrant context + Web context
         full_context = context.context_text

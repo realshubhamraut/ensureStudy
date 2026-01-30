@@ -21,7 +21,8 @@ def main():
     context.load_cert_chain(cert_file, key_file)
     
     print(f"Starting Flask HTTPS server on port {port}...")
-    app.run(host='0.0.0.0', port=port, ssl_context=context, debug=False, use_reloader=False)
+    # Enable debug and reloader for hot-reload during development
+    app.run(host='0.0.0.0', port=port, ssl_context=context, debug=True, use_reloader=True)
 
 if __name__ == '__main__':
     main()

@@ -196,151 +196,48 @@ class IngestResult:
 # Worker-1: Topic Extraction (NLP)
 # ============================================================================
 
-def worker1_extract_topic(query: str, conversation_history: list = None) -> str:
+def worker1_extract_topic(query: str, conversation_history: list = None, subject: str = None) -> str:
     """
-    WORKER-1: Extract topic from user query using NLP approach.
+    WORKER-1: Extract topic from user query using LLM (industry-standard approach).
     
-    Now context-aware! Uses conversation history for follow-up questions.
-    
-    Process:
-    1. Detect if query is a follow-up (short, uses pronouns/references)
-    2. If follow-up, extract topic from previous conversation
-    3. Otherwise, extract from current query
+    Uses Groq LLM to intelligently extract search terms, handling:
+    - Acronyms (AC, DC, pH, DNA)
+    - Scientific terms
+    - Context from conversation history
+    - Any terminology without hardcoded lists
     
     Args:
         query: Full user query
         conversation_history: List of previous messages [{"role": "user/assistant", "content": "..."}]
+        subject: Detected subject (physics, chemistry, etc.)
         
     Returns:
-        Extracted topic/keyword
+        Extracted topic/keyword for web search
     """
-    from collections import Counter
-    
-    # Stopwords
-    stopwords = {
-        'help', 'me', 'understand', 'explain', 'describe', 'what', 'is', 'are', 
-        'how', 'does', 'do', 'why', 'when', 'tell', 'about', 'please', 'can', 
-        'you', 'could', 'would', 'show', 'teach', 'learn', 'study', 'the', 'a',
-        'an', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'step',
-        'simple', 'simpler', 'terms', 'words', 'explanation', 'context', 'more'
-    }
-    
-    # Follow-up detection patterns - expanded to catch more cases
-    followup_patterns = [
-        # Original patterns
-        'what were', 'what are', 'what is', 'how does', 'why did', 'why is',
-        'tell me more', 'explain more', 'elaborate', 'continue',
-        'main causes', 'main effects', 'main reasons',
-        'their', 'its', 'them', 'they', 'it', 'this', 'that', 'these', 'those',
-        # NEW: Example/illustration requests
-        'give an example', 'give me an example', 'give example', 'for example',
-        'show me an example', 'can you give', 'provide an example', 'example of',
-        'example please', 'some examples', 'any examples', 'real-world example',
-        # NEW: Clarification requests
-        'what do you mean', 'clarify', 'be more specific', 'more details',
-        'explain that', 'what about', 'how about', 'and what about',
-        # NEW: Follow-on questions
-        'why is that', 'how so', 'in what way', 'like what',
-        'such as', 'go on', 'keep going', 'and then'
-    ]
-    
-    # Check if query is a follow-up
-    query_lower = query.lower().strip()
-    is_followup = (
-        len(query.split()) <= 8 and  # Increased from 6 to 8 words
-        any(p in query_lower for p in followup_patterns)
-    )
-    
-    # If follow-up and we have conversation history, extract topic from history
-    if is_followup and conversation_history:
-        print(f"[WORKER-1] Detected follow-up question, using conversation context")
+    try:
+        # Import the LLM-based extractor
+        from app.services.llm_provider import get_search_extractor
         
-        # Find the main topic from previous user messages
-        for msg in reversed(conversation_history):
-            if msg.get('role') == 'user':
-                prev_query = msg.get('content', '')
-                # Extract topic from previous user query
-                prev_words = prev_query.lower().split()
-                prev_content = [w for w in prev_words if w not in stopwords and len(w) > 2]
-                
-                if prev_content:
-                    # Combine previous topic with current query context
-                    current_words = query_lower.split()
-                    current_content = [w for w in current_words if w not in stopwords and len(w) > 2]
-                    
-                    # Better merging: Take strictly the educational keywords from previous + current meaningful words
-                    # If previous had educational keywords, prioritize them
-                    prev_edu = [w for w in prev_content if w in educational_keywords]
-                    if prev_edu:
-                        topic_base = prev_edu
-                    else:
-                        # Fallback to last few meaningful words
-                        topic_base = prev_content[-3:]
-                    
-                    # Add current query's specifics (e.g., "causes", "consequences")
-                    combined = topic_base + current_content
-                    
-                    # Deduplicate preserving order
-                    seen = set()
-                    final_words = [x for x in combined if not (x in seen or seen.add(x))]
-                    
-                    topic = ' '.join(final_words).strip()
-                    
-                    # FORCE FIX: If topic is still generic after merging, force-prepend previous topic
-                    if topic.lower() in ['main causes', 'main effects', 'causes', 'effects', 'reasons', 'consequences']:
-                         topic = f"{prev_query} {topic}"
-                    
-                    print(f"[WORKER-1] Topic extracted from context: '{topic}'")
-                    print(f"[WORKER-1] Previous query was: '{prev_query[:50]}...'")
-                    return topic
-    
-    # Educational keywords - expanded to include more terms
-    educational_keywords = {
-        'equation', 'equations', 'formula', 'formulas', 'theorem', 'theorems',
-        'quadratic', 'linear', 'polynomial', 'calculus', 'algebra', 'geometry',
-        'photosynthesis', 'respiration', 'mitosis', 'meiosis', 'cell', 'cells',
-        'physics', 'chemistry', 'biology', 'force', 'energy', 'velocity',
-        'atom', 'molecule', 'reaction', 'synthesis', 'war', 'revolution',
-        'derivative', 'integral', 'function', 'graph', 'vector', 'matrix',
-        'newton', 'newtons', 'einstein', 'darwin', 'motion', 'gravity', 'laws', 'law',
-        'french', 'world', 'civil', 'american', 'industrial',  # History keywords
-        'first', 'second', 'third',  # Ordinal - important for "first law"
-    }
-    
-    # Standard extraction from current query
-    import string
-    # Keep apostrophes for possessive forms (newton's -> newtons)
-    clean_query = query.lower().replace("'s", "s").replace("'", "")
-    words = clean_query.translate(str.maketrans('', '', string.punctuation.replace("'", ""))).split()
-    content_words = [w for w in words if w not in stopwords and len(w) > 2]
-    
-    topic_words = []
-    
-    # First pass: collect all educational keywords
-    for word in content_words:
-        if word in educational_keywords:
-            topic_words.append(word)
-    
-    # If no educational keywords found, use last few content words
-    if not topic_words:
-        topic_words = content_words[-min(3, len(content_words)):]
-    else:
-        # Add preceding word for context (e.g., "newton's first" -> include context)
-        for i, word in enumerate(content_words):
-            if word in educational_keywords and i > 0:
-                prev_word = content_words[i-1]
-                if prev_word not in topic_words and prev_word not in stopwords:
-                    topic_words.insert(0, prev_word)
-    
-    topic = ' '.join(topic_words).strip()
-    
-    # Fallback: use last 3 words if topic is too short
-    if not topic or len(topic) < 3:
-        words = query.translate(str.maketrans('', '', string.punctuation)).split()
-        topic = ' '.join(words[-min(3, len(words)):])
-    
-    print(f"[WORKER-1] Topic extracted: '{topic}'")
-    return topic
+        extractor = get_search_extractor()
+        topic = extractor.extract_search_query(
+            question=query,
+            subject=subject,
+            conversation_history=conversation_history
+        )
+        
+        print(f"[WORKER-1] Topic extracted: '{topic}'")
+        return topic
+        
+    except Exception as e:
+        print(f"[WORKER-1] ⚠️ LLM extraction failed: {e}, using fallback")
+        # Simple fallback: just clean up the query
+        import re
+        result = query.lower()
+        # Remove common question prefixes
+        result = re.sub(r'^(what is |what are |explain |describe |how does |how do |why is |why are |tell me about |differentiate between |difference between |compare |contrast )', '', result, flags=re.IGNORECASE)
+        result = re.sub(r'[?!.,;:]', '', result).strip()
+        print(f"[WORKER-1] Topic extracted (fallback): '{result}'")
+        return result if result else query
 
 
 # ============================================================================
@@ -693,14 +590,20 @@ async def worker6b_pdf_search(
                     # Store to classroom if classroom_id provided
                     if classroom_id:
                         try:
-                            core_service_url = os.getenv('CORE_SERVICE_URL', 'http://localhost:8000')
+                            core_service_url = os.getenv('CORE_SERVICE_URL') or os.getenv('CORE_API_URL') or 'https://localhost:8000'
                             
                             # Build file URL for the downloaded PDF (web resources)
-                            file_url = f"/api/files/web/{result.file_name}"
+                            # Compute relative path from web_resources base to include classroom subdirectories
+                            from app.services.pdf_downloader import WEB_UPLOADS_BASE
+                            if result.file_path.startswith(WEB_UPLOADS_BASE):
+                                relative_path = result.file_path[len(WEB_UPLOADS_BASE):].lstrip(os.sep)
+                                file_url = f"/api/files/web/{relative_path}"
+                            else:
+                                file_url = f"/api/files/web/{result.file_name}"
                             
                             print(f"[WORKER-6B] 💾 Storing in classroom {classroom_id}...")
                             
-                            async with httpx.AsyncClient(timeout=10.0) as client:
+                            async with httpx.AsyncClient(timeout=10.0, verify=False) as client:
                                 response = await client.post(
                                     f"{core_service_url}/api/classroom/{classroom_id}/web-materials",
                                     headers={"X-Service-Key": "internal-ai-service"},

@@ -31,7 +31,8 @@ import {
     ArrowTopRightOnSquareIcon,
     ExclamationTriangleIcon,
     Squares2X2Icon,
-    MapIcon
+    MapIcon,
+    PlayCircleIcon
 } from '@heroicons/react/24/outline'
 import { StarIcon as StarSolidIcon } from '@heroicons/react/24/solid'
 import { logClick, logInput, logError, logApiCall, logApiResponse, logScroll } from '@/utils/logger'
@@ -415,6 +416,17 @@ export default function AITutorPage() {
 
     // Open content in viewer with enhanced UX (auto-expand sidebar, collapse history)
     const openContentViewer = (source: SourceItem, options?: { resetZoom?: boolean }) => {
+        // For non-Wikipedia articles/webpages, open in new tab instead of iframe
+        if ((source.type === 'article' || source.type === 'webpage') && source.url) {
+            const isWikipedia = source.url.includes('wikipedia.org')
+            if (!isWikipedia) {
+                // Open non-Wikipedia articles in new tab
+                window.open(source.url, '_blank', 'noopener,noreferrer')
+                return
+            }
+        }
+
+        // For Wikipedia and other content types, use the viewer
         setActiveSource(source)
         setViewerMode('viewer')
         setViewerError(null)
@@ -633,9 +645,9 @@ export default function AITutorPage() {
             // Create timeout controller
             const apiController = new AbortController()
             const apiTimeoutId = setTimeout(() => {
-                console.warn('[AI-TUTOR] ⚠ API timeout after 60s')
+                console.warn('[AI-TUTOR] ⚠ API timeout after 90s')
                 apiController.abort()
-            }, 60000)  // Increased from 15s to 60s for web crawling
+            }, 90000)  // Increased from 60s to 90s for web crawling + PDF processing
 
             // Build conversation history for context (last 4 messages for follow-ups)
             const conversationHistory = updatedConv.messages.slice(-4).map(m => ({
@@ -694,10 +706,27 @@ export default function AITutorPage() {
                 // Add web resources if available
                 if (data.data.web_resources) {
                     const wr = data.data.web_resources
+                    console.log('[DEBUG] web_resources received:', wr)
+                    console.log('[DEBUG] videos:', wr.videos)
+                    console.log('[DEBUG] articles:', wr.articles)
+                    console.log('[DEBUG] pdfs:', wr.pdfs)
+                    console.log('[DEBUG] images:', wr.images)
 
-                    // NOTE: Videos disabled per user request - resources show only
-                    // Wikipedia + articles for student reference
-                    // Videos from YouTube are excluded from the resources sidebar
+                    // YouTube Videos - now displayed under the Videos section
+                    if (wr.videos) {
+                        const videoSources = wr.videos.map((v: { id: string; title: string; url: string; thumbnailUrl: string; embedUrl: string; duration?: string; source: string; relevance: number }) => ({
+                            id: v.id,
+                            type: 'video' as const,
+                            title: v.title,
+                            url: v.url,
+                            thumbnailUrl: v.thumbnailUrl,
+                            embedUrl: v.embedUrl,
+                            duration: v.duration,
+                            relevance: v.relevance,
+                            source: v.source || 'YouTube'
+                        }))
+                        allSources.push(...videoSources)
+                    }
 
                     // Images
                     if (wr.images) {
@@ -1579,10 +1608,11 @@ export default function AITutorPage() {
                             <div className="px-3 py-2 flex gap-2 overflow-x-auto">
                                 {(() => {
                                     const counts = getSourceCounts()
-                                    // NOTE: Videos filter removed - resources now show Wikipedia + articles only
+                                    // Videos filter restored - YouTube videos shown under Videos section
                                     const filters: { key: SourceFilter; icon: React.ReactNode; label: string; count: number }[] = [
                                         { key: 'all', icon: <Squares2X2Icon className="w-5 h-5" />, label: 'All', count: counts.all },
                                         { key: 'documents', icon: <DocumentIcon className="w-5 h-5" />, label: 'Docs', count: counts.documents },
+                                        { key: 'videos', icon: <PlayCircleIcon className="w-5 h-5" />, label: 'Videos', count: counts.videos },
                                         { key: 'websites', icon: <GlobeAltIcon className="w-5 h-5" />, label: 'Web', count: counts.websites },
                                         { key: 'flowcharts', icon: <MapIcon className="w-5 h-5" />, label: 'Flow', count: counts.flowcharts },
                                         { key: 'images', icon: <PhotoIcon className="w-5 h-5" />, label: 'Images', count: counts.images },

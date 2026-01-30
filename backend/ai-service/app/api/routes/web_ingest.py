@@ -91,19 +91,21 @@ async def ingest_web_resources(request: WebIngestRequest):
     import time
     import hashlib
     
-    # Simple in-memory cache to prevent duplicate searches within 5 minutes
-    # This prevents the frontend from triggering duplicate web crawls
-    cache_key = hashlib.md5(f"{request.query}:{request.subject}".encode()).hexdigest()
+    # Simple cache key to prevent duplicate searches
+    cache_query = f"web_ingest:{request.query}:{request.subject or 'none'}"
     
     # Check if we have a recent result for this query
     from app.services.response_cache import get_response_cache
     cache = get_response_cache()
     
-    cached_result = cache.get(f"web_ingest:{cache_key}")
+    # Use the existing get_web_resources method for caching
+    cached_result = cache.get_web_resources(cache_query)
     if cached_result:
         logger.info(f"Web ingest cache HIT for query: {request.query[:50]}")
         print(f"[WEB-INGEST] ⚡ CACHE HIT - Returning cached results for: {request.query[:50]}")
-        return cached_result
+        # Return None to indicate we should proceed (cache format doesn't match response format)
+        # The real caching happens in tutor.py, this is just for logging
+        pass  # Continue to normal flow
     
     try:
         from app.services.web_ingest_service import ingest_web_resources as do_ingest
@@ -154,9 +156,9 @@ async def ingest_web_resources(request: WebIngestRequest):
             error=result.error
         )
         
-        # Store in cache to prevent duplicate searches (TTL: 5 minutes)
-        cache.set(f"web_ingest:{cache_key}", response, ttl_seconds=300)
-        print(f"[WEB-INGEST] 💾 Cached result for: {request.query[:50]}")
+        # Note: Web resource caching is handled in tutor.py
+        # Just log for debugging
+        print(f"[WEB-INGEST] ✅ Processed {len(result.resources)} resources")
         
         return response
         

@@ -102,6 +102,10 @@ echo -e "${GREEN}Starting Frontend on https://$LOCAL_IP:$FRONTEND_PORT${NC}"
 cd "$PROJECT_ROOT/frontend"
 [ ! -d "node_modules" ] && npm install
 
+# Clear Next.js cache for fresh start
+echo -e "${YELLOW}Clearing Next.js cache...${NC}"
+rm -rf .next 2>/dev/null || true
+
 # NETWORK URLS ONLY - NO LOCALHOST
 NEXT_PUBLIC_API_URL="https://$LOCAL_IP:$CORE_PORT" \
 NEXT_PUBLIC_AI_SERVICE_URL="https://$LOCAL_IP:$AI_PORT" \

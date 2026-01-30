@@ -409,6 +409,142 @@ class SageMakerLLM:
         return await loop.run_in_executor(None, self.invoke, prompt)
 
 
+class SearchQueryExtractor:
+    """
+    LLM-powered search query extractor using Groq API.
+    
+    Replaces hardcoded keyword lists with intelligent extraction.
+    Handles acronyms (AC, DC, pH), scientific terms, and context.
+    """
+    
+    def __init__(self):
+        self.groq_api_key = os.getenv("GROQ_API_KEY")
+        self._groq_client = None
+        
+        if self.groq_api_key:
+            logger.info("✅ SearchQueryExtractor initialized with Groq API")
+        else:
+            logger.warning("⚠️ No GROQ_API_KEY - will use original query as fallback")
+    
+    @property
+    def groq_client(self):
+        """Lazy load Groq client"""
+        if self._groq_client is None and self.groq_api_key:
+            try:
+                from groq import Groq
+                self._groq_client = Groq(api_key=self.groq_api_key)
+            except Exception as e:
+                logger.error(f"❌ Failed to initialize Groq client: {e}")
+        return self._groq_client
+    
+    def extract_search_query(
+        self,
+        question: str,
+        subject: str = None,
+        conversation_history: list = None
+    ) -> str:
+        """
+        Extract optimal search query from user's educational question.
+        
+        Args:
+            question: User's question
+            subject: Detected subject (physics, chemistry, etc.)
+            conversation_history: Previous messages for context
+            
+        Returns:
+            Optimized search query for web/Wikipedia/PDF search
+        """
+        # Try LLM extraction first
+        if self.groq_client:
+            try:
+                return self._extract_with_groq(question, subject, conversation_history)
+            except Exception as e:
+                logger.warning(f"⚠️ Groq extraction failed: {e}")
+        
+        # Fallback: use original query (search APIs handle natural language)
+        return self._simple_fallback(question)
+    
+    def _extract_with_groq(
+        self,
+        question: str,
+        subject: str = None,
+        conversation_history: list = None
+    ) -> str:
+        """Use Groq LLM to extract search terms."""
+        import time
+        start = time.time()
+        
+        # Build context from conversation history if available
+        context_hint = ""
+        if conversation_history and len(conversation_history) > 0:
+            # Get the last assistant response for context
+            for msg in reversed(conversation_history):
+                if msg.get('role') == 'assistant':
+                    prev_response = msg.get('content', '')[:200]
+                    context_hint = f"\nPrevious context: {prev_response}"
+                    break
+        
+        prompt = f"""Extract the optimal web search query from this educational question.
+
+Question: "{question}"
+Subject: {subject or 'general'}{context_hint}
+
+Rules:
+1. PRESERVE important terms: acronyms (AC, DC, DNA, pH, UV, IR), names (Newton, Einstein), formulas
+2. REMOVE generic words: explain, differentiate, compare, what is, tell me, describe, how does
+3. Output 2-6 key search terms that would work well for Wikipedia/Google
+4. If the question mentions comparing two things (A vs B), include BOTH terms
+5. Keep the terms in a natural search order
+
+Examples:
+- "Differentiate between AC and DC" → "AC DC alternating direct current"
+- "What is Ohm's law?" → "Ohm's law electricity"
+- "Explain the process of photosynthesis" → "photosynthesis"
+- "Why are electric motors preferred over heat engines?" → "electric motors vs heat engines advantages"
+
+Output ONLY the search query, no explanation or quotes."""
+
+        response = self.groq_client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.1,  # Low temperature for consistent output
+            max_tokens=100
+        )
+        
+        result = response.choices[0].message.content.strip()
+        
+        # Clean up the result (remove quotes if present)
+        result = result.strip('"\'')
+        
+        elapsed = (time.time() - start) * 1000
+        logger.info(f"[LLM-EXTRACT] ✅ '{question[:40]}...' → '{result}' ({elapsed:.0f}ms)")
+        
+        return result
+    
+    def _simple_fallback(self, question: str) -> str:
+        """
+        Simple fallback: remove common question words and return.
+        This is used when LLM is unavailable.
+        """
+        import re
+        
+        # Remove common question prefixes
+        patterns = [
+            r'^(what is |what are |explain |describe |how does |how do |why is |why are |tell me about |differentiate between |difference between |compare |contrast )',
+        ]
+        
+        result = question.lower()
+        for pattern in patterns:
+            result = re.sub(pattern, '', result, flags=re.IGNORECASE)
+        
+        # Clean up punctuation but keep important chars
+        result = re.sub(r'[?!.,;:]', '', result)
+        result = result.strip()
+        
+        logger.info(f"[FALLBACK-EXTRACT] '{question[:40]}...' → '{result}'")
+        return result if result else question
+
+
 # ============================================================================
 # Singleton instances
 # ============================================================================
@@ -433,3 +569,9 @@ def get_llm(model: str = "default"):
 def get_classifier() -> TextClassifier:
     """Get cached classifier instance"""
     return TextClassifier()
+
+
+@lru_cache(maxsize=1)
+def get_search_extractor() -> SearchQueryExtractor:
+    """Get cached search query extractor instance"""
+    return SearchQueryExtractor()

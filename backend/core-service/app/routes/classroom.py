@@ -384,6 +384,55 @@ def my_classrooms():
     }), 200
 
 
+@classroom_bp.route("/internal/user/<user_id>/classrooms", methods=["GET"])
+def get_user_classrooms_internal(user_id):
+    """
+    Get user's classrooms - INTERNAL ONLY (for AI service).
+    
+    Requires X-Service-Key header for authentication.
+    Returns both student enrollments and teacher-owned classrooms.
+    """
+    # Verify internal service key
+    service_key = request.headers.get("X-Service-Key")
+    if service_key != "internal-ai-service":
+        return jsonify({"error": "Unauthorized - internal service only"}), 403
+    
+    # Check user exists
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({"error": "User not found", "classrooms": []}), 404
+    
+    classrooms = []
+    
+    # Get student enrollments
+    if user.role == "student":
+        enrollments = StudentClassroom.query.filter_by(
+            student_id=user_id, 
+            is_active=True
+        ).all()
+        
+        for e in enrollments:
+            classroom = Classroom.query.get(e.classroom_id)
+            if classroom and classroom.is_active:
+                classrooms.append(classroom.to_dict())
+    
+    # Get teacher-owned classrooms
+    elif user.role == "teacher":
+        owned = Classroom.query.filter_by(
+            teacher_id=user_id,
+            is_active=True
+        ).all()
+        
+        for c in owned:
+            classrooms.append(c.to_dict())
+    
+    return jsonify({
+        "classrooms": classrooms,
+        "count": len(classrooms),
+        "user_role": user.role
+    }), 200
+
+
 @classroom_bp.route("/leave/<classroom_id>", methods=["POST"])
 @student_required
 def leave_classroom(classroom_id):
