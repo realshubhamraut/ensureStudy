@@ -109,31 +109,49 @@ def get_file(filename):
 def get_web_resource(filename):
     """Serve a web-downloaded resource (PDF from AI Tutor web search)"""
     from urllib.parse import unquote
+    from flask import make_response
     import glob
+    import mimetypes
     
     # Handle URL-encoded filenames (spaces, special chars)
     decoded_filename = unquote(filename)
     
     # Direct path - try first
     direct_path = os.path.join(WEB_RESOURCES_DIR, decoded_filename)
+    found_path = None
+    
     if os.path.isfile(direct_path):
-        directory = os.path.dirname(direct_path)
-        basename = os.path.basename(direct_path)
-        return send_from_directory(directory, basename)
+        found_path = direct_path
+    else:
+        # Fallback: Search in subdirectories (for old URLs without path)
+        basename = os.path.basename(decoded_filename)
+        search_pattern = os.path.join(WEB_RESOURCES_DIR, '**', basename)
+        matches = glob.glob(search_pattern, recursive=True)
+        if matches:
+            found_path = matches[0]
     
-    # Fallback: Search in subdirectories (for old URLs without path)
-    # This handles legacy URLs like /api/files/web/file.pdf where file is in classrooms/.../file.pdf
-    basename = os.path.basename(decoded_filename)
-    search_pattern = os.path.join(WEB_RESOURCES_DIR, '**', basename)
-    matches = glob.glob(search_pattern, recursive=True)
+    if not found_path:
+        return jsonify({'error': 'Web resource not found', 'searched': decoded_filename}), 404
     
-    if matches:
-        # Return first match
-        found_path = matches[0]
-        directory = os.path.dirname(found_path)
-        return send_from_directory(directory, basename)
-    
-    return jsonify({'error': 'Web resource not found', 'searched': basename}), 404
+    # Read file and serve with proper headers for inline viewing
+    try:
+        with open(found_path, 'rb') as f:
+            file_content = f.read()
+        
+        # Get MIME type
+        mimetype, _ = mimetypes.guess_type(found_path)
+        if not mimetype:
+            mimetype = 'application/octet-stream'
+        
+        # Create response with inline disposition (opens in browser, not download)
+        response = make_response(file_content)
+        response.headers['Content-Type'] = mimetype
+        response.headers['Content-Disposition'] = f'inline; filename="{os.path.basename(found_path)}"'
+        response.headers['Cache-Control'] = 'public, max-age=3600'
+        
+        return response
+    except Exception as e:
+        return jsonify({'error': f'Failed to read file: {str(e)}'}), 500
 
 
 @files_bp.route('/material/<material_id>', methods=['GET'])

@@ -574,10 +574,19 @@ async def worker6b_pdf_search(
                 text, has_images, page_count = pdf_extractor.extract_text_from_pdf(result.file_path)
                 
                 if text and len(text) > 100:
+                    # Build local file URL for frontend embedding (external URLs blocked by CSP)
+                    from app.services.pdf_downloader import WEB_UPLOADS_BASE
+                    if result.file_path.startswith(WEB_UPLOADS_BASE):
+                        relative_path = result.file_path[len(WEB_UPLOADS_BASE):].lstrip(os.sep)
+                        local_file_url = f"/api/files/web/{relative_path}"
+                    else:
+                        local_file_url = f"/api/files/web/{result.file_name}"
+                    
                     pdf_doc = {
                         'file_path': result.file_path,
                         'file_name': result.file_name,
                         'source_url': result.source_url,
+                        'local_url': local_file_url,  # Local URL for frontend embedding
                         'file_size': result.file_size,
                         'extracted_text': text[:50000],  # Limit text size
                         'word_count': len(text.split()),
@@ -586,6 +595,7 @@ async def worker6b_pdf_search(
                     }
                     pdf_documents.append(pdf_doc)
                     print(f"[WORKER-6B] ✅ Extracted {len(text)} chars, {len(text.split())} words, {page_count} pages")
+                    print(f"[WORKER-6B] 🔗 Local URL: {local_file_url}")
                     
                     # Store to classroom if classroom_id provided
                     if classroom_id:
@@ -1112,16 +1122,18 @@ async def ingest_web_resources(
                         
                         all_chunks.extend(pdf_chunks)
                         
-                        # Add to resources
+                        # Add to resources - use local_url for embedding, source_url for attribution
+                        # Local URL allows iframe embedding (external URLs blocked by CSP)
+                        pdf_local_url = pdf_doc.get('local_url', pdf_doc.get('source_url', ''))
                         resources.append(IngestedResource(
                             id=f"pdf_{hashlib.md5(pdf_doc['source_url'].encode()).hexdigest()[:12]}",
-                            url=pdf_doc.get('source_url', ''),
+                            url=pdf_local_url,  # Use local URL for frontend iframe
                             title=pdf_doc.get('file_name', 'PDF Document'),
-                            source_name='Web PDF',
+                            source_name=extract_source_name(pdf_doc.get('source_url', '')),  # Original source for attribution
                             source_type='web_pdf',
                             trust_score=0.85,
                             clean_content=text[:1000],
-                            summary=f"PDF with {pdf_doc.get('word_count', 0)} words",
+                            summary=f"PDF from {extract_source_name(pdf_doc.get('source_url', ''))} - {pdf_doc.get('word_count', 0)} words",
                             word_count=pdf_doc.get('word_count', 0),
                             chunk_count=len(pdf_chunks),
                             fetched_at=datetime.now().isoformat(),

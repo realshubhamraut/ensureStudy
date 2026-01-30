@@ -51,7 +51,9 @@ class OCRService:
         line_height_threshold: int = 50
     ):
         self.use_api = use_api
-        self.api_key = api_key or os.getenv("HUGGINGFACE_API_KEY")
+        # Use rotating key manager for API key
+        from app.services.api_key_manager import get_key
+        self.api_key = api_key or get_key("HUGGINGFACE_API_KEY")
         self.fallback_to_local = fallback_to_local
         self.line_height_threshold = line_height_threshold
         

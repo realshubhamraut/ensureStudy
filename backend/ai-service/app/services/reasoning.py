@@ -60,7 +60,9 @@ def get_hf_api_client():
     if _hf_client is None:
         from huggingface_hub import InferenceClient
         
-        api_key = os.getenv("HUGGINGFACE_API_KEY")
+        # Use rotating key manager for API key
+        from app.services.api_key_manager import get_key
+        api_key = get_key("HUGGINGFACE_API_KEY")
         if not api_key:
             raise ValueError("HUGGINGFACE_API_KEY not set. Get one free at https://huggingface.co/settings/tokens")
         

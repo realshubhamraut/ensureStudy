@@ -209,7 +209,9 @@ class SerperSearchClient:
     BASE_URL = "https://google.serper.dev/search"
     
     def __init__(self, api_key: Optional[str] = None):
-        self.api_key = api_key or os.getenv("SERPER_API_KEY")
+        # Use rotating key manager for API keys
+        from app.services.api_key_manager import get_key
+        self.api_key = api_key or get_key("SERPER_API_KEY")
         if not self.api_key:
             logger.warning("[Serper] No API key found. Set SERPER_API_KEY in .env")
     
@@ -317,7 +319,9 @@ class BraveSearchClient:
     BASE_URL = "https://api.search.brave.com/res/v1/web/search"
     
     def __init__(self, api_key: Optional[str] = None):
-        self.api_key = api_key or os.getenv("BRAVE_API_KEY")
+        # Use rotating key manager for API keys
+        from app.services.api_key_manager import get_key
+        self.api_key = api_key or get_key("BRAVE_API_KEY")
         if not self.api_key:
             logger.warning("[Brave] No API key found. Set BRAVE_API_KEY in .env")
     

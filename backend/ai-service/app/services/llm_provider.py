@@ -46,7 +46,9 @@ class HuggingFaceLLM:
         temperature: float = 0.7,
         max_tokens: int = 1024
     ):
-        self.api_key = api_key or os.getenv("HUGGINGFACE_API_KEY")
+        # Use rotating key manager for API keys
+        from app.services.api_key_manager import get_key
+        self.api_key = api_key or get_key("HUGGINGFACE_API_KEY")
         self.model_name = model_name or MODELS["default"]
         self.temperature = temperature
         self.max_tokens = max_tokens
@@ -151,8 +153,10 @@ class TextClassifier:
     """
     
     def __init__(self, api_key: str = None):
-        self.groq_api_key = os.getenv("GROQ_API_KEY")
-        self.hf_api_key = api_key or os.getenv("HUGGINGFACE_API_KEY") or os.getenv("HUGGINGFACE_TOKEN") or os.getenv("HF_TOKEN")
+        # Use rotating key manager for API keys
+        from app.services.api_key_manager import get_key
+        self.groq_api_key = get_key("GROQ_API_KEY")
+        self.hf_api_key = api_key or get_key("HUGGINGFACE_API_KEY")
         self._pipeline = None
         self._groq_client = None
         self._model_name = "typeform/distilbert-base-uncased-mnli"  # Fallback only

@@ -22,7 +22,10 @@ def _get_gemini_client():
     """Lazy-load Gemini client."""
     global _gemini_client
     if _gemini_client is None:
-        api_key = os.getenv("GEMINI_API_KEY", "")
+        # Use rotating API key manager for comma-separated keys
+        from .api_key_manager import get_key
+        api_key = get_key("GEMINI_API_KEY")
+        
         if not api_key:
             logger.warning("[FLOWCHART] GEMINI_API_KEY not set, using templates only")
             return None

@@ -68,8 +68,12 @@ fi
 [ ! -d "$VENV_PATH" ] && python3 -m venv "$VENV_PATH"
 [ -z "$VIRTUAL_ENV" ] && source "$VENV_PATH/bin/activate"
 
-# Load environment
-[ -f "$PROJECT_ROOT/.env" ] && export $(grep -v '^#' "$PROJECT_ROOT/.env" | xargs)
+# Load environment (handles quoted values with commas for API key rotation)
+if [ -f "$PROJECT_ROOT/.env" ]; then
+    set -a
+    source "$PROJECT_ROOT/.env"
+    set +a
+fi
 
 export FLASK_APP=app FLASK_DEBUG=1 PYTHONUNBUFFERED=1
 export JWT_SECRET="${JWT_SECRET:-local-dev-jwt-secret-key-32chars}"

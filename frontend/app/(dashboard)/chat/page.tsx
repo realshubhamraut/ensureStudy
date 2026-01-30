@@ -1922,31 +1922,45 @@ export default function AITutorPage() {
                                             <DocumentIcon className="w-5 h-5 text-red-600" />
                                             <span className="font-medium text-gray-900 text-sm truncate">{activeSource.title}</span>
                                         </div>
-                                        {activeSource.url && (
-                                            <a
-                                                href={activeSource.url}
-                                                target="_blank"
-                                                rel="noopener noreferrer"
-                                                className="text-xs text-blue-600 hover:underline flex items-center gap-1"
-                                            >
-                                                Open in new tab
-                                                <ArrowTopRightOnSquareIcon className="w-3 h-3" />
-                                            </a>
-                                        )}
+                                        {activeSource.url && (() => {
+                                            let linkUrl = activeSource.url
+                                            if (linkUrl.startsWith('/api/files/')) {
+                                                linkUrl = `${getApiBaseUrl()}${linkUrl}`
+                                            }
+                                            return (
+                                                <a
+                                                    href={linkUrl}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    className="text-xs text-blue-600 hover:underline flex items-center gap-1"
+                                                >
+                                                    Open in new tab
+                                                    <ArrowTopRightOnSquareIcon className="w-3 h-3" />
+                                                </a>
+                                            )
+                                        })()}
                                     </div>
 
                                     {/* PDF Viewer Content */}
-                                    {activeSource.url ? (
-                                        <iframe
-                                            src={activeSource.url}
-                                            className="w-full flex-1 border-0"
-                                            title={activeSource.title}
-                                            onLoad={() => setViewerLoading(false)}
-                                            onError={() => {
-                                                setViewerError('Unable to load document preview')
-                                            }}
-                                        />
-                                    ) : (
+                                    {activeSource.url ? (() => {
+                                        // Build full URL for PDFs - handle both relative and absolute URLs
+                                        let pdfUrl = activeSource.url
+                                        if (pdfUrl.startsWith('/api/files/')) {
+                                            // Local file - prepend Core API base URL
+                                            pdfUrl = `${getApiBaseUrl()}${pdfUrl}`
+                                        }
+                                        return (
+                                            <iframe
+                                                src={pdfUrl}
+                                                className="w-full flex-1 border-0"
+                                                title={activeSource.title}
+                                                onLoad={() => setViewerLoading(false)}
+                                                onError={() => {
+                                                    setViewerError('Unable to load document preview')
+                                                }}
+                                            />
+                                        )
+                                    })() : (
                                         <div className="flex-1 flex flex-col items-center justify-center p-6 text-center">
                                             <DocumentIcon className="w-16 h-16 text-gray-300 mb-4" />
                                             <p className="text-gray-900 font-medium mb-2">{activeSource.title}</p>
