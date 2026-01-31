@@ -13,8 +13,8 @@
         "@heroicons/react": "^2.1.1",
         "@livekit/components-react": "^2.9.19",
         "@livekit/components-styles": "^1.2.0",
-        "@react-three/drei": "^10.7.7",
-        "@react-three/fiber": "^9.4.2",
+        "@react-three/drei": "^9.92.7",
+        "@react-three/fiber": "^8.15.12",
         "@types/three": "^0.182.0",
         "axios": "^1.6.2",
         "clsx": "^2.0.0",
@@ -35,7 +35,7 @@
         "rehype-katex": "^7.0.1",
         "remark-gfm": "^4.0.1",
         "remark-math": "^6.0.0",
-        "three": "^0.182.0",
+        "three": "^0.160.0",
         "zustand": "^4.4.7"
     },
     "devDependencies": {

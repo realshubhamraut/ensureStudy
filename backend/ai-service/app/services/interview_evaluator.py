@@ -45,7 +45,6 @@ class EvaluationResult:
             "timestamp": self.timestamp
         }
 
-
 class InterviewEvaluator:
     """
     Evaluates interview answers using LLM.

@@ -17,15 +17,20 @@ import {
 } from '@heroicons/react/24/outline'
 import { useSpeechEngine, useSpeechRecognition } from '@/components/avatar/SpeechEngine'
 
-// Dynamic import for Avatar (uses Three.js which needs client-side only)
-const AvatarViewer = dynamic(() => import('@/components/avatar/AvatarViewer'), {
+// Viseme sprite avatar with optimized lip-sync
+const VisemeSpriteAvatar = dynamic(() => import('@/components/avatar/VisemeSpriteAvatar'), {
     ssr: false,
     loading: () => (
-        <div className="w-full h-full bg-gray-200 animate-pulse rounded-2xl flex items-center justify-center">
+        <div className="w-full h-full bg-gradient-to-b from-slate-100 to-slate-200 animate-pulse rounded-2xl flex items-center justify-center">
             <span className="text-gray-400">Loading Avatar...</span>
         </div>
     )
 })
+
+
+
+
+
 
 // Mock questions for demo
 const DEMO_QUESTIONS = [
@@ -51,20 +56,39 @@ function InterviewSessionContent() {
     const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0)
     const [answers, setAnswers] = useState<string[]>([])
     const [scores, setScores] = useState<number[]>([])
+    const [feedbacks, setFeedbacks] = useState<string[]>([])
+    const [isEvaluating, setIsEvaluating] = useState(false)
     const [isCameraOn, setIsCameraOn] = useState(false)
     const [avatarReady, setAvatarReady] = useState(false)
     const [timeElapsed, setTimeElapsed] = useState(0)
     const [permissionState, setPermissionState] = useState<PermissionState>('pending')
     const [permissionError, setPermissionError] = useState<string>('')
 
+    const AI_SERVICE_URL = process.env.NEXT_PUBLIC_AI_SERVICE_URL || 'http://localhost:8001'
+
+
     const videoRef = useRef<HTMLVideoElement>(null)
     const mediaStreamRef = useRef<MediaStream | null>(null)
     const timerRef = useRef<NodeJS.Timeout | null>(null)
 
-    const { speak, stop: stopSpeaking, isSpeaking, isSupported: ttsSupported } = useSpeechEngine({
-        onSpeakStart: () => setSessionState('speaking'),
-        onSpeakEnd: () => setSessionState('listening')
+
+    // Speech engine for Text-to-Speech
+    const {
+        speak,
+        stop: stopSpeaking,
+        isSpeaking,
+        isSupported: ttsSupported
+    } = useSpeechEngine({
+        onSpeakStart: () => {
+            console.log('[MockInterview] Avatar started speaking')
+            setSessionState('speaking')
+        },
+        onSpeakEnd: () => {
+            console.log('[MockInterview] Avatar finished speaking')
+            setSessionState('listening')
+        }
     })
+
 
     const {
         isListening,
@@ -166,34 +190,88 @@ function InterviewSessionContent() {
         await speak(currentQuestion)
     }, [startCamera, speak, currentQuestion])
 
+    // Evaluate answer using backend API
+    const evaluateAnswer = useCallback(async (question: string, answer: string): Promise<{ score: number; feedback: string }> => {
+        console.log('[MockInterview] Evaluating answer...')
+        console.log('[MockInterview] Question:', question)
+        console.log('[MockInterview] Answer:', answer)
+
+        try {
+            const response = await fetch(`${AI_SERVICE_URL}/api/softskills/interview/evaluate-answer`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    question,
+                    user_answer: answer,
+                    subject,
+                    difficulty: 'medium'
+                })
+            })
+
+            if (!response.ok) {
+                console.error('[MockInterview] Evaluation API error:', response.status)
+                throw new Error(`API error: ${response.status}`)
+            }
+
+            const result = await response.json()
+            console.log('[MockInterview] Evaluation result:', result)
+
+            return {
+                score: result.score,
+                feedback: result.feedback
+            }
+        } catch (error) {
+            console.error('[MockInterview] Evaluation failed:', error)
+            // Fallback to basic heuristic
+            const wordCount = answer.split(' ').length
+            const score = Math.min(100, 40 + wordCount * 2)
+            return {
+                score,
+                feedback: 'Answer recorded. Keep practicing for better results!'
+            }
+        }
+    }, [AI_SERVICE_URL, subject])
+
     // Submit current answer and move to next question
     const submitAnswer = useCallback(async () => {
+        console.log('[MockInterview] Submit answer called')
+        console.log('[MockInterview] Current transcript:', transcript)
+
         stopListening()
+        setIsEvaluating(true)
+        setSessionState('processing')
 
         // Save answer
         const answer = transcript.trim()
         setAnswers(prev => [...prev, answer])
+        console.log('[MockInterview] Answer saved:', answer)
 
-        // Mock scoring (in production, call backend API)
-        const mockScore = Math.floor(Math.random() * 30) + 70 // 70-100
-        setScores(prev => [...prev, mockScore])
+        // Evaluate answer using backend API
+        const { score, feedback } = await evaluateAnswer(currentQuestion, answer)
+        console.log('[MockInterview] Score:', score, 'Feedback:', feedback)
+
+        setScores(prev => [...prev, score])
+        setFeedbacks(prev => [...prev, feedback])
+        setIsEvaluating(false)
 
         resetTranscript()
 
         // Move to next question or complete
         if (currentQuestionIndex < DEMO_QUESTIONS.length - 1) {
+            console.log('[MockInterview] Moving to next question')
             setCurrentQuestionIndex(prev => prev + 1)
             setSessionState('speaking')
             await speak(DEMO_QUESTIONS[currentQuestionIndex + 1])
         } else {
             // Interview complete
+            console.log('[MockInterview] Interview complete!')
             setSessionState('complete')
             stopCamera()
             if (timerRef.current) {
                 clearInterval(timerRef.current)
             }
         }
-    }, [transcript, currentQuestionIndex, stopListening, resetTranscript, speak, stopCamera])
+    }, [transcript, currentQuestion, currentQuestionIndex, stopListening, resetTranscript, speak, stopCamera, evaluateAnswer])
 
     // Format time
     const formatTime = (seconds: number) => {
@@ -331,25 +409,18 @@ function InterviewSessionContent() {
                 <div className="grid lg:grid-cols-2 gap-8">
                     {/* Avatar Section */}
                     <div className="space-y-4">
-                        <div className="aspect-square max-h-[500px] rounded-2xl overflow-hidden shadow-2xl">
-                            <AvatarViewer
+                        <div className="aspect-[3/4] max-h-[600px] rounded-2xl overflow-hidden shadow-2xl relative">
+                            <VisemeSpriteAvatar
                                 avatarId={avatarId}
                                 isSpeaking={isSpeaking}
                                 onReady={() => setAvatarReady(true)}
                             />
                         </div>
-
-                        {/* Speaking indicator */}
-                        {isSpeaking && (
-                            <div className="flex items-center justify-center gap-2 text-blue-400">
-                                <SpeakerWaveIcon className="w-5 h-5 animate-pulse" />
-                                <span className="text-sm">Avatar is speaking...</span>
-                            </div>
-                        )}
                     </div>
 
                     {/* User Section */}
                     <div className="space-y-6">
+
                         {/* User Camera */}
                         <div className="relative aspect-video bg-gray-800 rounded-2xl overflow-hidden shadow-xl">
                             {isCameraOn ? (
@@ -439,7 +510,15 @@ function InterviewSessionContent() {
                                     Listen to the question...
                                 </div>
                             )}
+
+                            {sessionState === 'processing' && (
+                                <div className="flex-1 py-4 rounded-xl bg-gradient-to-r from-purple-500 to-pink-600 font-medium flex items-center justify-center gap-2">
+                                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                    Evaluating your answer...
+                                </div>
+                            )}
                         </div>
+
 
                         {/* Progress */}
                         <div className="flex gap-2">
@@ -458,7 +537,7 @@ function InterviewSessionContent() {
                     </div>
                 </div>
             </div>
-        </div>
+        </div >
     )
 }
 
