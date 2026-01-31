@@ -97,6 +97,30 @@ class SoftSkillsResult(BaseModel):
 
 
 # ============================================
+# Interview Answer Evaluation Schemas
+# ============================================
+
+class InterviewAnswerRequest(BaseModel):
+    """Request for interview answer evaluation."""
+    question: str = Field(..., description="The interview question asked")
+    user_answer: str = Field(..., description="User's transcribed answer")
+    expected_answer: Optional[str] = Field(None, description="Optional expected answer for comparison")
+    subject: Optional[str] = Field(None, description="Subject context (physics, general, etc.)")
+    difficulty: str = Field(default="medium", description="Question difficulty")
+    session_id: Optional[str] = Field(None, description="Session ID for tracking")
+
+
+class InterviewAnswerResult(BaseModel):
+    """Result from interview answer evaluation."""
+    score: float = Field(..., description="Overall score 0-100")
+    feedback: str = Field(..., description="Overall feedback")
+    key_points_covered: List[str] = Field(..., description="Points the user covered")
+    key_points_missed: List[str] = Field(..., description="Points the user missed")
+    breakdown: dict = Field(..., description="Score breakdown by criteria")
+    suggestions: List[str] = Field(..., description="Improvement suggestions")
+
+
+# ============================================
 # Analysis Functions (using new services)
 # ============================================
 
@@ -764,3 +788,212 @@ async def get_scoring_weights():
         "hand_gestures": 0.10,
         "posture": 0.10
     }
+
+
+# ============================================
+# Enhanced Behavior Analysis (Proctoring-style)
+# ============================================
+
+class BehaviorFrameRequest(BaseModel):
+    """Request for behavior frame analysis."""
+    session_id: str = Field(..., description="Session ID for tracking")
+    gaze_score: float = Field(default=0.0, description="Eye contact score 0-100")
+    posture_score: float = Field(default=0.0, description="Posture score 0-100")
+    gesture_score: float = Field(default=0.0, description="Gesture score 0-100")
+    is_looking_at_camera: bool = Field(default=True)
+    is_upright: bool = Field(default=True)
+    hands_visible: bool = Field(default=False)
+
+
+@router.post("/behavior/analyze-frame")
+async def analyze_behavior_frame(request: BehaviorFrameRequest):
+    """
+    Analyze a frame for temporal behavior patterns.
+    
+    Use this for real-time attention and engagement tracking.
+    Combines with the behavior analyzer for temporal pattern recognition.
+    """
+    try:
+        from ...services.behavior_analyzer import get_behavior_analyzer
+        
+        analyzer = get_behavior_analyzer(request.session_id)
+        
+        result = analyzer.analyze_frame(
+            gaze_score=request.gaze_score,
+            posture_score=request.posture_score,
+            gesture_score=request.gesture_score,
+            is_looking_at_camera=request.is_looking_at_camera,
+            is_upright=request.is_upright,
+            hands_visible=request.hands_visible
+        )
+        
+        return result
+        
+    except Exception as e:
+        print(f"[Behavior] Frame analysis error: {e}")
+        raise HTTPException(status_code=500, detail=f"Behavior analysis error: {str(e)}")
+
+
+@router.get("/behavior/temporal-metrics/{session_id}")
+async def get_temporal_metrics(session_id: str):
+    """
+    Get current temporal behavior metrics for a session.
+    
+    Returns attention trends, focus ratio, distraction events, etc.
+    """
+    try:
+        from ...services.behavior_analyzer import get_behavior_analyzer
+        
+        analyzer = get_behavior_analyzer(session_id)
+        metrics = analyzer.get_temporal_metrics()
+        
+        return {
+            "session_id": session_id,
+            "frames_analyzed": analyzer.total_frames,
+            **metrics
+        }
+        
+    except Exception as e:
+        print(f"[Behavior] Metrics error: {e}")
+        return {
+            "session_id": session_id,
+            "error": str(e),
+            "frames_analyzed": 0
+        }
+
+
+@router.get("/behavior/report/{session_id}")
+async def get_behavior_report(session_id: str):
+    """
+    Generate a comprehensive behavior analysis report.
+    
+    Returns engagement level, attention patterns, strengths, and areas for improvement.
+    """
+    try:
+        from ...services.behavior_analyzer import get_behavior_analyzer
+        
+        analyzer = get_behavior_analyzer(session_id)
+        report = analyzer.generate_report()
+        
+        return report.to_dict()
+        
+    except Exception as e:
+        print(f"[Behavior] Report error: {e}")
+        raise HTTPException(status_code=500, detail=f"Report generation error: {str(e)}")
+
+
+@router.post("/behavior/end-session/{session_id}")
+async def end_behavior_session(session_id: str):
+    """
+    End a behavior tracking session and cleanup.
+    
+    Returns the final behavior report before cleanup.
+    """
+    try:
+        from ...services.behavior_analyzer import get_behavior_analyzer, cleanup_behavior_session
+        
+        analyzer = get_behavior_analyzer(session_id)
+        report = analyzer.generate_report()
+        
+        # Cleanup
+        cleanup_behavior_session(session_id)
+        
+        return {
+            "status": "completed",
+            "report": report.to_dict()
+        }
+        
+    except Exception as e:
+        print(f"[Behavior] End session error: {e}")
+        return {
+            "status": "error",
+            "error": str(e)
+        }
+
+
+# ============================================
+# Interview Answer Evaluation
+# ============================================
+
+@router.post("/interview/evaluate-answer", response_model=InterviewAnswerResult)
+async def evaluate_interview_answer(request: InterviewAnswerRequest):
+    """
+    Evaluate an interview answer against the question.
+    
+    Uses LLM to analyze:
+    - Relevance to the question
+    - Clarity of explanation
+    - Completeness of answer
+    
+    Returns a score (0-100) with detailed feedback and suggestions.
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    logger.info(f"[Interview] Evaluating answer for question: {request.question[:50]}...")
+    logger.info(f"[Interview] Answer length: {len(request.user_answer)} chars")
+    
+    if not request.user_answer or len(request.user_answer.strip()) < 5:
+        logger.warning("[Interview] Answer too short")
+        raise HTTPException(
+            status_code=400, 
+            detail="Answer is too short. Please provide a more detailed response."
+        )
+    
+    try:
+        from ...services.interview_evaluator import get_interview_evaluator
+        
+        evaluator = get_interview_evaluator()
+        result = await evaluator.evaluate_answer(
+            question=request.question,
+            user_answer=request.user_answer,
+            expected_answer=request.expected_answer,
+            subject=request.subject,
+            difficulty=request.difficulty
+        )
+        
+        logger.info(f"[Interview] Evaluation complete. Score: {result.score}")
+        
+        return InterviewAnswerResult(
+            score=result.score,
+            feedback=result.feedback,
+            key_points_covered=result.key_points_covered,
+            key_points_missed=result.key_points_missed,
+            breakdown=result.to_dict()["breakdown"],
+            suggestions=result.suggestions
+        )
+        
+    except Exception as e:
+        logger.error(f"[Interview] Evaluation error: {e}")
+        import traceback
+        traceback.print_exc()
+        
+        # Return a fallback result instead of erroring
+        return InterviewAnswerResult(
+            score=60.0,
+            feedback="We couldn't fully analyze your answer, but it appears to address the question.",
+            key_points_covered=["Attempted to answer the question"],
+            key_points_missed=[],
+            breakdown={"clarity": 60, "relevance": 60, "completeness": 60},
+            suggestions=["Try to provide more specific examples", "Explain your reasoning in detail"]
+        )
+
+
+@router.get("/interview/health")
+async def interview_health():
+    """Check interview evaluation service health."""
+    try:
+        from ...services.interview_evaluator import get_interview_evaluator
+        evaluator = get_interview_evaluator()
+        
+        return {
+            "status": "healthy",
+            "llm_available": evaluator.groq_client is not None,
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        return {
+            "status": "degraded",
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        }

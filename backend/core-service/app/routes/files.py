@@ -123,12 +123,26 @@ def get_web_resource(filename):
     if os.path.isfile(direct_path):
         found_path = direct_path
     else:
-        # Fallback: Search in subdirectories (for old URLs without path)
-        basename = os.path.basename(decoded_filename)
-        search_pattern = os.path.join(WEB_RESOURCES_DIR, '**', basename)
-        matches = glob.glob(search_pattern, recursive=True)
-        if matches:
-            found_path = matches[0]
+        # Try the URL-encoded version (some files saved with %20 in name)
+        encoded_path = os.path.join(WEB_RESOURCES_DIR, filename)
+        if os.path.isfile(encoded_path):
+            found_path = encoded_path
+        else:
+            # Fallback: Search in subdirectories for both versions
+            basename = os.path.basename(decoded_filename)
+            encoded_basename = os.path.basename(filename)
+            
+            # Search for decoded basename first
+            search_pattern = os.path.join(WEB_RESOURCES_DIR, '**', basename)
+            matches = glob.glob(search_pattern, recursive=True)
+            
+            if not matches:
+                # Try encoded basename
+                search_pattern = os.path.join(WEB_RESOURCES_DIR, '**', encoded_basename)
+                matches = glob.glob(search_pattern, recursive=True)
+            
+            if matches:
+                found_path = matches[0]
     
     if not found_path:
         return jsonify({'error': 'Web resource not found', 'searched': decoded_filename}), 404

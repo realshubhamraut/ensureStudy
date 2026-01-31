@@ -2,7 +2,7 @@
 import { getApiBaseUrl, getAiServiceUrl } from '@/utils/api'
 
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import {
     PaperAirplaneIcon,
     AcademicCapIcon,
@@ -38,11 +38,35 @@ import { StarIcon as StarSolidIcon } from '@heroicons/react/24/solid'
 import { logClick, logInput, logError, logApiCall, logApiResponse, logScroll } from '@/utils/logger'
 import dynamic from 'next/dynamic'
 
+// Loading skeleton components for dynamic imports
+const MarkdownSkeleton = () => (
+    <div className="animate-pulse space-y-2">
+        <div className="h-4 bg-gray-100 rounded w-full" />
+        <div className="h-4 bg-gray-100 rounded w-5/6" />
+        <div className="h-4 bg-gray-100 rounded w-4/6" />
+    </div>
+)
+
+const MindmapSkeleton = () => (
+    <div className="flex-1 flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+            <div className="w-12 h-12 border-4 border-purple-200 border-t-purple-600 rounded-full animate-spin mx-auto mb-3" />
+            <p className="text-sm text-gray-500">Loading flowchart...</p>
+        </div>
+    </div>
+)
+
 // Dynamic import for MindmapViewer (uses mermaid which needs client-side only)
-const MindmapViewer = dynamic(() => import('@/components/viewers/MindmapViewer'), { ssr: false })
+const MindmapViewer = dynamic(
+    () => import('@/components/viewers/MindmapViewer'),
+    { ssr: false, loading: MindmapSkeleton }
+)
 
 // Dynamic import for MarkdownRenderer (uses KaTeX which needs client-side only)
-const MarkdownRenderer = dynamic(() => import('@/components/chat/MarkdownRenderer'), { ssr: false })
+const MarkdownRenderer = dynamic(
+    () => import('@/components/chat/MarkdownRenderer'),
+    { ssr: false, loading: MarkdownSkeleton }
+)
 
 // ============================================================================
 // Types
@@ -167,6 +191,11 @@ export default function AITutorPage() {
     const [sidebarWidth, setSidebarWidth] = useState(500) // Default wider for better viewing
     const [isResizing, setIsResizing] = useState(false)
 
+    // PDF loading state (for SSE real-time updates)
+    const [isLoadingPdfs, setIsLoadingPdfs] = useState(false)
+    const [currentRequestId, setCurrentRequestId] = useState<string | null>(null)
+    const sseRef = useRef<EventSource | null>(null)
+
     // Image zoom state
     const [imageZoom, setImageZoom] = useState(100)
     const [imagePan, setImagePan] = useState({ x: 0, y: 0 })
@@ -180,18 +209,18 @@ export default function AITutorPage() {
         }
     }, [viewerMode, activeSource])
 
-    // Source category counts
-    const getSourceCounts = () => {
+    // Source category counts - memoized to prevent recalculation on every render
+    const sourceCounts = useMemo(() => {
         const documents = sources.filter(s => ['pdf', 'pptx', 'note', 'docx'].includes(s.type)).length
         const videos = sources.filter(s => s.type === 'video').length
         const websites = sources.filter(s => s.type === 'article' || s.type === 'webpage').length
         const flowcharts = sources.filter(s => s.type === 'flowchart' as any).length
         const images = sources.filter(s => s.type === 'image').length
         return { documents, videos, websites, flowcharts, images, all: sources.length }
-    }
+    }, [sources])
 
-    // Filter sources by category
-    const getFilteredSources = () => {
+    // Filter sources by category - memoized
+    const filteredSources = useMemo(() => {
         if (sourceFilter === 'all') return sources
         if (sourceFilter === 'documents') return sources.filter(s => ['pdf', 'pptx', 'note', 'docx'].includes(s.type))
         if (sourceFilter === 'videos') return sources.filter(s => s.type === 'video')
@@ -199,7 +228,7 @@ export default function AITutorPage() {
         if (sourceFilter === 'flowcharts') return sources.filter(s => s.type === 'flowchart' as any)
         if (sourceFilter === 'images') return sources.filter(s => s.type === 'image')
         return sources
-    }
+    }, [sources, sourceFilter])
 
     // Sidebar resize handler
     const handleMouseDown = (e: React.MouseEvent) => {
@@ -645,15 +674,20 @@ export default function AITutorPage() {
             // Create timeout controller
             const apiController = new AbortController()
             const apiTimeoutId = setTimeout(() => {
-                console.warn('[AI-TUTOR] ⚠ API timeout after 90s')
+                console.warn('[AI-TUTOR] ⚠ API timeout after 180s')
                 apiController.abort()
-            }, 90000)  // Increased from 60s to 90s for web crawling + PDF processing
+            }, 180000)  // 3 minutes - web crawling + PDF processing can take 2+ minutes
 
             // Build conversation history for context (last 4 messages for follow-ups)
             const conversationHistory = updatedConv.messages.slice(-4).map(m => ({
                 role: m.type === 'user' ? 'user' : 'assistant',
                 content: m.content
             }))
+
+            // Start PDF loading indicator immediately if findResources is enabled
+            if (forceWebSearch || findResources) {
+                setIsLoadingPdfs(true)
+            }
 
             const res = await fetch(`${getAiServiceUrl()}/api/ai-tutor/query`, {
                 method: 'POST',
@@ -666,7 +700,8 @@ export default function AITutorPage() {
                     response_mode: responseMode,
                     language_style: languageStyle,
                     find_resources: forceWebSearch || findResources,
-                    conversation_history: conversationHistory.length > 0 ? conversationHistory : undefined
+                    conversation_history: conversationHistory.length > 0 ? conversationHistory : undefined,
+                    auth_token: localStorage.getItem('accessToken') || undefined  // For PDF fetching
                 }),
                 signal: apiController.signal
             })
@@ -788,9 +823,116 @@ export default function AITutorPage() {
                     })
                 }
 
-                setSources(allSources)
+                // MERGE sources instead of replacing - preserve existing resources
+                setSources(prev => {
+                    // Collect existing URLs for deduplication
+                    const existingUrls = new Set(prev.map(s => s.url).filter(Boolean))
+                    const existingIds = new Set(prev.map(s => s.id).filter(Boolean))
+
+                    // Filter out duplicates from new sources
+                    const newSources = allSources.filter(s => {
+                        if (s.url && existingUrls.has(s.url)) return false
+                        if (s.id && existingIds.has(s.id)) return false
+                        return true
+                    })
+
+                    console.log(`[SOURCES] Merging: ${prev.length} existing + ${newSources.length} new = ${prev.length + newSources.length} total`)
+                    return [...prev, ...newSources]
+                })
                 if (allSources.length > 0) {
                     setShowSources(true)
+                }
+
+                // Subscribe to SSE for real-time PDF updates if findResources is enabled
+                const requestId = data.data?.metadata?.request_id
+                const hasPdfsAlready = allSources.some(s => s.type === 'pdf')
+
+                if (hasPdfsAlready) {
+                    // PDFs already in response - stop loading
+                    console.log('[SSE] PDFs found in initial response, skipping SSE')
+                    setIsLoadingPdfs(false)
+                } else if (requestId && (forceWebSearch || findResources)) {
+                    // No PDFs yet - connect to SSE for real-time updates
+                    // Close any existing SSE connection
+                    if (sseRef.current) {
+                        sseRef.current.close()
+                    }
+
+                    setCurrentRequestId(requestId)
+
+                    // Connect to SSE endpoint
+                    const sseUrl = `${getAiServiceUrl()}/sse/resources/${requestId}`
+                    console.log('[SSE] Connecting to:', sseUrl)
+
+                    const eventSource = new EventSource(sseUrl)
+                    sseRef.current = eventSource
+
+                    eventSource.onopen = () => {
+                        console.log('[SSE] Connected')
+                    }
+
+                    eventSource.addEventListener('pdf_added', (event) => {
+                        console.log('[SSE] PDF added:', event.data)
+                        try {
+                            const eventData = JSON.parse(event.data)
+                            const pdf = eventData.pdf
+                            if (pdf) {
+                                const newPdf: SourceItem = {
+                                    id: pdf.id,
+                                    type: 'pdf',
+                                    title: pdf.title,
+                                    url: pdf.url,
+                                    relevance: pdf.relevance || 85,
+                                    snippet: pdf.snippet || '',
+                                    source: pdf.source || 'Web PDF'
+                                }
+                                setSources(prev => [...prev, newPdf])
+                                // Don't stop loading here - wait for complete event
+                            }
+                        } catch (e) {
+                            console.error('[SSE] Error parsing pdf_added:', e)
+                        }
+                    })
+
+                    eventSource.addEventListener('loading_status', (event) => {
+                        console.log('[SSE] Loading status:', event.data)
+                    })
+
+                    eventSource.addEventListener('complete', (event) => {
+                        console.log('[SSE] Complete:', event.data)
+                        setIsLoadingPdfs(false)
+                        eventSource.close()
+                        sseRef.current = null
+                    })
+
+                    eventSource.onerror = (err) => {
+                        console.error('[SSE] Error:', err)
+                        // Don't stop loading on error - maybe retry?
+                        // For now, stop after a delay to prevent infinite loading
+                        setTimeout(() => {
+                            if (sseRef.current === eventSource) {
+                                setIsLoadingPdfs(false)
+                                eventSource.close()
+                                sseRef.current = null
+                            }
+                        }, 5000)
+                    }
+
+                    // Timeout: close SSE after 2 minutes max
+                    setTimeout(() => {
+                        if (sseRef.current) {
+                            console.log('[SSE] Timeout, closing connection')
+                            sseRef.current.close()
+                            sseRef.current = null
+                            setIsLoadingPdfs(false)
+                        }
+                    }, 120000)
+                } else if (!hasPdfsAlready) {
+                    // No PDFs and no SSE available - stop loading after a short delay
+                    // (PDFs might come from classroom materials fetch)
+                    setTimeout(() => {
+                        setIsLoadingPdfs(false)
+                    }, 3000)
                 }
             }
 
@@ -860,29 +1002,31 @@ export default function AITutorPage() {
 
         } catch (error: any) {
             // Log the error
-            if (error.name === 'AbortError') {
-                console.warn('[AI-TUTOR] ⚠ Request timed out, using mock response')
+            const isTimeout = error.name === 'AbortError'
+            if (isTimeout) {
+                console.warn('[AI-TUTOR] ⚠ Request timed out after 3 minutes')
             } else {
                 logError('ai_tutor_query', error)
                 console.error('[AI-TUTOR] API error:', error)
             }
 
             // Skip reasoning simulation if already done (from concurrent promise)
-            // Use mock response for fallback
+            // Create error response instead of fake mock data
 
-            // Mock response for development
-            const mockResponse: TutorResponse = {
-                answer_short: "Based on the study materials, this concept involves fundamental principles that build upon previous knowledge. [Source 1]",
-                answer_detailed: "This is a comprehensive explanation of the topic...\n\nAccording to [Source 1], the key principles are:\n1. First principle\n2. Second principle\n3. Third principle\n\nFurther details from [Source 2] explain the practical applications.",
-                sources: [
-                    { document_id: 'doc1', chunk_id: 'ch1', title: 'Chapter 5 - Fundamentals', similarity_score: 0.94 },
-                    { document_id: 'doc2', chunk_id: 'ch2', title: 'Practice Guide', similarity_score: 0.87 }
-                ],
-                confidence_score: 0.89,
+            // Error response - shows user what happened
+            const errorResponse: TutorResponse = {
+                answer_short: isTimeout
+                    ? "⏱️ The request took too long to complete. The server might be busy processing web resources."
+                    : "❌ Failed to get a response from the AI tutor.",
+                answer_detailed: isTimeout
+                    ? "The AI Tutor is still gathering information but it's taking longer than expected.\n\n**What you can try:**\n1. **Wait and try again** - The server may be busy\n2. **Uncheck 'Find resources'** - This speeds up responses significantly\n3. **Ask a simpler question** - Shorter queries are faster\n\nThe resources panel may still show relevant materials if web search completed."
+                    : `Something went wrong while processing your question.\n\n**Error:** ${error.message || 'Unknown error'}\n\n**What you can try:**\n1. Refresh the page and try again\n2. Check your internet connection\n3. Try a different question`,
+                sources: [],
+                confidence_score: 0,
                 recommended_actions: [
-                    'Review the foundational concepts',
-                    'Try 3-5 practice problems',
-                    'Watch supplementary video'
+                    'Try again with fewer options',
+                    'Disable "Find resources" for faster response',
+                    'Refresh the page if issues persist'
                 ]
             }
 
@@ -968,8 +1112,8 @@ export default function AITutorPage() {
             const assistantMessage: Message = {
                 id: `msg_${Date.now() + 1}`,
                 type: 'assistant',
-                content: mockResponse.answer_short,
-                response: mockResponse,
+                content: errorResponse.answer_short,
+                response: errorResponse,
                 timestamp: new Date()
             }
 
@@ -1607,11 +1751,11 @@ export default function AITutorPage() {
                             {/* Category Filter Icons */}
                             <div className="px-3 py-2 flex gap-2 overflow-x-auto">
                                 {(() => {
-                                    const counts = getSourceCounts()
+                                    const counts = sourceCounts
                                     // Videos filter restored - YouTube videos shown under Videos section
-                                    const filters: { key: SourceFilter; icon: React.ReactNode; label: string; count: number }[] = [
+                                    const filters: { key: SourceFilter; icon: React.ReactNode; label: string; count: number; loading?: boolean }[] = [
                                         { key: 'all', icon: <Squares2X2Icon className="w-5 h-5" />, label: 'All', count: counts.all },
-                                        { key: 'documents', icon: <DocumentIcon className="w-5 h-5" />, label: 'Docs', count: counts.documents },
+                                        { key: 'documents', icon: <DocumentIcon className="w-5 h-5" />, label: 'Docs', count: counts.documents, loading: isLoadingPdfs },
                                         { key: 'videos', icon: <PlayCircleIcon className="w-5 h-5" />, label: 'Videos', count: counts.videos },
                                         { key: 'websites', icon: <GlobeAltIcon className="w-5 h-5" />, label: 'Web', count: counts.websites },
                                         { key: 'flowcharts', icon: <MapIcon className="w-5 h-5" />, label: 'Flow', count: counts.flowcharts },
@@ -1622,17 +1766,26 @@ export default function AITutorPage() {
                                             key={f.key}
                                             onClick={() => setSourceFilter(f.key)}
                                             className={`
-                                                flex flex-col items-center justify-center p-2 rounded-lg min-w-[52px] transition-all
+                                                flex flex-col items-center justify-center p-2 rounded-lg min-w-[52px] transition-all relative
                                                 ${sourceFilter === f.key
                                                     ? 'bg-primary-100 text-primary-700 ring-2 ring-primary-500'
                                                     : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                                                 }
-                                                ${f.count === 0 ? 'opacity-40' : ''}
+                                                ${f.count === 0 && !f.loading ? 'opacity-40' : ''}
                                             `}
-                                            title={f.label}
+                                            title={f.loading ? `${f.label} (Loading...)` : f.label}
                                         >
+                                            {/* Pulsing dot indicator (top-right corner) */}
+                                            {f.loading && (
+                                                <span className="absolute -top-0.5 -right-0.5 flex h-3 w-3">
+                                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary-400 opacity-75"></span>
+                                                    <span className="relative inline-flex rounded-full h-3 w-3 bg-primary-500"></span>
+                                                </span>
+                                            )}
                                             {f.icon}
-                                            <span className="text-[10px] font-bold mt-0.5">{f.count}</span>
+                                            <span className="text-[10px] font-bold mt-0.5">
+                                                {f.loading ? <span className="animate-pulse">...</span> : f.count}
+                                            </span>
                                         </button>
                                     ))
                                 })()}
@@ -1986,7 +2139,7 @@ export default function AITutorPage() {
                         <div className="flex-1 overflow-y-auto">
                             {/* Section 1: Documents */}
                             {(() => {
-                                const filteredSources = getFilteredSources()
+                                // Use memoized filteredSources from above
                                 const documents = filteredSources.filter(s => ['pdf', 'pptx', 'note', 'docx'].includes(s.type))
                                 if (documents.length === 0) return null
                                 return (
@@ -2060,7 +2213,7 @@ export default function AITutorPage() {
 
                             {/* Section 2: Videos */}
                             {(() => {
-                                const filteredSources = getFilteredSources()
+                                // Use memoized filteredSources from above
                                 const videos = filteredSources.filter(s => s.type === 'video').slice(0, 5)
                                 if (videos.length === 0) return null
                                 return (
@@ -2123,7 +2276,7 @@ export default function AITutorPage() {
 
                             {/* Section 3: Images & Diagrams */}
                             {(() => {
-                                const filteredSources = getFilteredSources()
+                                // Use memoized filteredSources from above
                                 const images = filteredSources.filter(s => s.type === 'image')
                                 if (images.length === 0) return null
                                 return (
@@ -2179,7 +2332,7 @@ export default function AITutorPage() {
 
                             {/* Section: Flowcharts */}
                             {(() => {
-                                const filteredSources = getFilteredSources()
+                                // Use memoized filteredSources from above
                                 const flowcharts = filteredSources.filter(s => s.type === 'flowchart')
                                 if (flowcharts.length === 0) return null
                                 return (
@@ -2223,7 +2376,7 @@ export default function AITutorPage() {
 
                             {/* Section 4: Articles & References */}
                             {(() => {
-                                const filteredSources = getFilteredSources()
+                                // Use memoized filteredSources from above
                                 const articles = filteredSources.filter(s => ['article', 'webpage'].includes(s.type))
                                 if (articles.length === 0) return null
 

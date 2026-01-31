@@ -124,6 +124,94 @@ def call_mistral_api(prompt: str) -> tuple:
 
 
 # ============================================================================
+# Groq API (FAST - Primary Provider) 
+# ============================================================================
+# Uses llama-3.3-70b-versatile for high quality + speed (2-5s vs 15-20s)
+
+_groq_client = None
+
+
+def get_groq_client():
+    """Get Groq API client (lazy loaded)."""
+    global _groq_client
+    
+    if _groq_client is None:
+        try:
+            from groq import Groq
+            from app.services.api_key_manager import get_key
+            
+            api_key = get_key("GROQ_API_KEY")
+            if not api_key:
+                print("[LLM-GROQ] ⚠ No GROQ_API_KEY found")
+                return None
+            
+            _groq_client = Groq(api_key=api_key)
+            print("[LLM-GROQ] ✅ Groq client initialized")
+        except ImportError:
+            print("[LLM-GROQ] ⚠ groq package not installed, using HuggingFace fallback")
+            return None
+        except Exception as e:
+            print(f"[LLM-GROQ] ⚠ Failed to initialize: {e}")
+            return None
+    
+    return _groq_client
+
+
+def call_groq_api(prompt: str) -> tuple:
+    """
+    Call Groq API with Llama 3.3 70B for fast, high-quality responses.
+    
+    Groq is 5-10x faster than HuggingFace API.
+    
+    Args:
+        prompt: User prompt (will be formatted as chat message)
+        
+    Returns:
+        (response_text, generation_time_ms)
+    """
+    client = get_groq_client()
+    if client is None:
+        raise ValueError("Groq client not available")
+    
+    start = time.time()
+    
+    try:
+        # Use llama-3.3-70b-versatile for best quality/speed balance
+        response = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are an expert AI tutor. Provide clear, accurate, and educational answers. Use markdown formatting for better readability. Include examples when helpful."
+                },
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            max_tokens=settings.LLM_MAX_NEW_TOKENS,
+            temperature=settings.LLM_TEMPERATURE,
+            top_p=0.95,
+        )
+        
+        response_text = response.choices[0].message.content
+        elapsed_ms = int((time.time() - start) * 1000)
+        
+        print(f"[LLM-GROQ] ⚡ Groq responded in {elapsed_ms}ms (vs ~15000ms HuggingFace)")
+        
+        # Debug preview
+        response_preview = response_text[:200].replace('\n', ' ') if response_text else 'EMPTY'
+        print(f"[LLM-GROQ] Response preview: {response_preview}...")
+        
+        return response_text.strip(), elapsed_ms
+        
+    except Exception as e:
+        logger.error(f"Groq API error: {e}")
+        print(f"[LLM-GROQ] ❌ Error: {e}")
+        raise
+
+
+# ============================================================================
 # Local Model Loading (For Cloud Deployment)
 # ============================================================================
 
@@ -230,24 +318,60 @@ def call_mistral_local(prompt: str) -> tuple:
 
 
 # ============================================================================
-# Unified Call Function (Auto-selects API or Local)
+# Unified Call Function (Auto-selects provider by priority)
 # ============================================================================
 
 def call_mistral(prompt: str) -> tuple:
     """
-    Call Mistral model - automatically chooses API or local.
+    Call LLM with automatic provider selection.
     
-    Set LLM_USE_API=true in .env to use HuggingFace API (recommended for testing)
-    Set LLM_USE_API=false for local model (recommended for deployment)
+    Priority order (fastest to slowest):
+    1. Groq API (llama-3.3-70b-versatile) - ~2-3 seconds
+    2. HuggingFace Inference API (Mistral-7B) - ~15-20 seconds  
+    3. Local Mistral model - depends on hardware
+    
+    Set LLM_PROVIDER environment variable to force a provider:
+    - "groq" - Use Groq only
+    - "huggingface" - Use HuggingFace only
+    - "local" - Use local model only
+    - "auto" (default) - Try in order: Groq -> HuggingFace -> Local
     """
+    provider = os.getenv("LLM_PROVIDER", "auto").lower()
     use_api = os.getenv("LLM_USE_API", "true").lower() == "true"
     
-    if use_api:
-        logger.info("Using HuggingFace Inference API")
+    # Force specific provider if set
+    if provider == "groq":
+        return call_groq_api(prompt)
+    elif provider == "huggingface":
         return call_mistral_api(prompt)
-    else:
-        logger.info("Using local Mistral model")
+    elif provider == "local":
         return call_mistral_local(prompt)
+    
+    # Auto mode: try providers in priority order
+    # 1. Try Groq first (fastest)
+    try:
+        groq_client = get_groq_client()
+        if groq_client is not None:
+            print("[LLM] 🚀 Using Groq API (fastest)")
+            return call_groq_api(prompt)
+    except Exception as groq_err:
+        print(f"[LLM] ⚠ Groq failed: {groq_err}, trying HuggingFace...")
+    
+    # 2. Fallback to HuggingFace API
+    if use_api:
+        try:
+            print("[LLM] 📡 Using HuggingFace API (fallback)")
+            return call_mistral_api(prompt)
+        except Exception as hf_err:
+            print(f"[LLM] ⚠ HuggingFace failed: {hf_err}")
+            if not use_api:
+                pass  # Will try local
+            else:
+                raise
+    
+    # 3. Final fallback: local model
+    print("[LLM] 💻 Using local model (last resort)")
+    return call_mistral_local(prompt)
 
 
 # ============================================================================

@@ -1,12 +1,15 @@
 """
 Proctor Session - Manages a single proctoring session
+
+Enhanced with AutoOEP temporal behavior analysis and static classification.
 """
 
 import uuid
 import logging
 import numpy as np
+from collections import deque
 from datetime import datetime
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 
 from .detectors import (
     FaceDetector,
@@ -20,6 +23,9 @@ from .detectors import (
 )
 from .metrics import MetricsAggregator
 from .scoring import IntegrityScorer, FlagGenerator
+from .scoring.cheat_score import calculate_cheat_score, calculate_session_integrity
+from .temporal_predictor import TemporalPredictor, get_temporal_predictor
+from .static_classifier import StaticClassifier, get_static_classifier
 from .utils.frame_quality import check_frame_quality
 from .utils.logging import log_session_start, log_session_end, log_flag_triggered
 
@@ -71,6 +77,12 @@ class ProctorSession:
         
         # Previous frame for motion detection
         self._prev_frame: Optional[np.ndarray] = None
+        
+        # AutoOEP temporal analysis
+        self._temporal_predictor: Optional[TemporalPredictor] = None
+        self._static_classifier: Optional[StaticClassifier] = None
+        self.cheat_score_history: List[float] = []
+        self.flag_counts: Dict[str, int] = {}
         
         # Log session start
         log_session_start(self.id, assessment_id, student_id)
@@ -133,6 +145,20 @@ class ProctorSession:
             self._face_verifier = FaceVerifier()
         return self._face_verifier
     
+    @property
+    def temporal_predictor(self) -> TemporalPredictor:
+        """Lazy load temporal predictor (LSTM from AutoOEP)"""
+        if self._temporal_predictor is None:
+            self._temporal_predictor = get_temporal_predictor()
+        return self._temporal_predictor
+    
+    @property
+    def static_classifier(self) -> StaticClassifier:
+        """Lazy load static classifier (LightGBM from AutoOEP)"""
+        if self._static_classifier is None:
+            self._static_classifier = get_static_classifier()
+        return self._static_classifier
+    
     def process_frame(self, frame: np.ndarray, timestamp: float = 0.0) -> Dict[str, Any]:
         """
         Process a single frame through the detection pipeline.
@@ -165,20 +191,56 @@ class ProctorSession:
         # Update metrics
         self.metrics.update(detections)
         
-        # Calculate current score and flags
+        # Calculate current score and flags (legacy)
         ratios = self.metrics.get_ratios()
-        current_score = self.scorer.compute(ratios)
+        legacy_score = self.scorer.compute(ratios)
         current_flags = self.flagger.generate(ratios)
+        
+        # Track flag counts
+        for flag in current_flags:
+            self.flag_counts[flag] = self.flag_counts.get(flag, 0) + 1
+        
+        # AutoOEP: Add to temporal history and get predictions
+        temporal_result = None
+        static_result = None
+        unified_score = None
+        
+        try:
+            # Format detections for AutoOEP models
+            formatted = self._format_for_autooep(detections)
+            
+            # Static (per-frame) classification
+            if self.static_classifier.is_ready:
+                static_result = self.static_classifier.predict(formatted)
+            
+            # Temporal analysis (sequence-based)
+            self.temporal_predictor.add_frame(formatted, timestamp)
+            if self.temporal_predictor.is_ready:
+                temporal_result = self.temporal_predictor.predict()
+            
+            # Unified cheat score
+            static_prob = static_result['probability'] if static_result else 0.0
+            temporal_prob = temporal_result['probability'] if temporal_result and temporal_result.get('ready') else 0.0
+            unified = calculate_cheat_score(static_prob, temporal_prob, current_flags)
+            unified_score = unified['unified_probability']
+            self.cheat_score_history.append(unified_score)
+            
+        except Exception as e:
+            logger.warning(f"AutoOEP analysis error: {e}")
         
         # Store previous frame for motion detection
         self._prev_frame = frame.copy()
         
         return {
             "processed": True,
-            "current_score": current_score,
+            "current_score": legacy_score,
             "active_flags": current_flags,
             "detections": detections,
-            "frame_count": self.metrics.frame_count
+            "frame_count": self.metrics.frame_count,
+            # AutoOEP enhanced analysis
+            "temporal_analysis": temporal_result,
+            "static_analysis": static_result,
+            "unified_cheat_score": unified_score
         }
     
     def _run_detectors(self, frame: np.ndarray) -> Dict[str, Any]:
@@ -265,6 +327,121 @@ class ProctorSession:
         """Record a tab switch event"""
         self.metrics.add_tab_switch()
         logger.info(f"Tab switch recorded for session {self.id}")
+    
+    def _format_for_autooep(self, detections: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Format detector results for AutoOEP models.
+        
+        Converts our detector output format to the format expected
+        by the temporal predictor and static classifier.
+        """
+        # Build formatted dict for LSTM/LightGBM
+        formatted = {
+            'face_detected': detections.get('face_present', False),
+            'face_count': detections.get('num_faces', 0),
+            'face_verified': True,  # Default to true if not checked
+            
+            # Gaze features
+            'gaze': {
+                'iris_position': 0.5,  # Default center
+                'iris_ratio': detections.get('iris_ratio', 0.5),
+                'direction': self._gaze_to_numeric(detections.get('gaze_direction', 'center')),
+                'zone': 0,
+                'is_looking_away': detections.get('gaze_direction', 'center') != 'center'
+            },
+            
+            # Head pose
+            'head_pose': {
+                'pitch': detections.get('x_rotation', 0.0),
+                'yaw': detections.get('y_rotation', 0.0),
+                'roll': detections.get('z_rotation', 0.0),
+                'distance': 0.0,
+                'is_suspicious': detections.get('deviation', 'center') not in ['center', 'unknown']
+            },
+            
+            # Mouth
+            'mouth': {
+                'is_open': False,  # Would need mouth detection
+                'aperture': 0.0
+            },
+            
+            # Objects
+            'objects': self._parse_prohibited_items(detections.get('prohibited_items', [])),
+            
+            # Hands
+            'hands': {
+                'detected': detections.get('hands_visible', True),
+                'suspicious_position': False
+            },
+            
+            # Audio (if available)
+            'audio': {
+                'suspicious': False,
+                'amplitude': 0.0
+            },
+            
+            # Blinks
+            'blinks': {
+                'count': detections.get('total_blinks', 0),
+                'rate': detections.get('blink_rate', 0.0)
+            }
+        }
+        
+        return formatted
+    
+    def _gaze_to_numeric(self, direction: str) -> int:
+        """Convert gaze direction string to numeric value."""
+        mapping = {
+            'center': 0,
+            'left': 1,
+            'right': 2,
+            'up': 3,
+            'down': 4,
+            'away': 5,
+            'unknown': 0
+        }
+        return mapping.get(direction.lower() if isinstance(direction, str) else 'center', 0)
+    
+    def _parse_prohibited_items(self, items: list) -> Dict[str, bool]:
+        """Parse prohibited items list into object detection dict."""
+        result = {
+            'phone': False,
+            'book_open': False,
+            'book_closed': False,
+            'earpiece': False,
+            'paper': False,
+            'watch': False,
+            'headphone': False,
+            'all_objects': items or []
+        }
+        
+        if not items:
+            return result
+        
+        item_mapping = {
+            'phone': 'phone',
+            'cell phone': 'phone',
+            'mobile': 'phone',
+            'book': 'book_open',
+            'open book': 'book_open',
+            'closed book': 'book_closed',
+            'earpiece': 'earpiece',
+            'earphone': 'earpiece',
+            'paper': 'paper',
+            'sheet': 'paper',
+            'watch': 'watch',
+            'headphone': 'headphone',
+            'headphones': 'headphone'
+        }
+        
+        for item in items:
+            item_lower = item.lower() if isinstance(item, str) else str(item).lower()
+            for key, mapped in item_mapping.items():
+                if key in item_lower:
+                    result[mapped] = True
+                    break
+        
+        return result
     
     def finalize(self) -> Dict[str, Any]:
         """

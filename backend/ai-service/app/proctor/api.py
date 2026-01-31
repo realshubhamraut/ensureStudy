@@ -58,6 +58,10 @@ class StreamFrameResponse(BaseModel):
     active_flags: List[str]
     frame_count: Optional[int] = None
     quality_issues: Optional[List[str]] = None
+    # AutoOEP enhanced analysis
+    temporal_analysis: Optional[Dict[str, Any]] = None
+    static_analysis: Optional[Dict[str, Any]] = None
+    unified_cheat_score: Optional[float] = None
 
 
 class TabSwitchRequest(BaseModel):
@@ -168,7 +172,11 @@ async def stream_frame(request: StreamFrameRequest):
             current_score=result.get("current_score", 100),
             active_flags=result.get("active_flags", []),
             frame_count=result.get("frame_count"),
-            quality_issues=result.get("quality_issues")
+            quality_issues=result.get("quality_issues"),
+            # AutoOEP enhanced analysis
+            temporal_analysis=result.get("temporal_analysis"),
+            static_analysis=result.get("static_analysis"),
+            unified_cheat_score=result.get("unified_cheat_score")
         )
         
     except HTTPException:
@@ -427,13 +435,116 @@ async def _cleanup_session(session_id: str):
         logger.info(f"Cleaned up session: {session_id}")
 
 
+# ============== AutoOEP Enhanced Endpoints ==============
+
+class TemporalStatusRequest(BaseModel):
+    """Request for temporal analysis status"""
+    session_id: str
+
+
+class TemporalStatusResponse(BaseModel):
+    """Temporal behavior analysis status"""
+    session_id: str
+    is_ready: bool
+    frames_collected: int
+    window_size: int
+    current_prediction: Optional[Dict[str, Any]] = None
+
+
+class BehaviorReportResponse(BaseModel):
+    """Detailed behavior analysis report"""
+    session_id: str
+    final_integrity_score: int
+    average_cheat_probability: float
+    max_cheat_probability: float
+    suspicious_frame_percentage: float
+    total_frames_analyzed: int
+    tab_switch_count: int
+    duration_seconds: float
+    severity: str
+    top_flags: List[str]
+    review_required: bool
+
+
+@router.post("/temporal-status", response_model=TemporalStatusResponse)
+async def get_temporal_status(request: TemporalStatusRequest):
+    """
+    Get temporal behavior analysis status.
+    
+    Returns current LSTM model prediction and readiness state.
+    """
+    session = _sessions.get(request.session_id)
+    
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    try:
+        temporal = session.temporal_predictor
+        prediction = temporal.predict() if temporal.is_ready and len(temporal.feature_history) >= temporal.window_size else None
+        
+        return TemporalStatusResponse(
+            session_id=session.id,
+            is_ready=temporal.is_ready,
+            frames_collected=temporal.frames_collected,
+            window_size=temporal.window_size,
+            current_prediction=prediction
+        )
+        
+    except Exception as e:
+        logger.error(f"Temporal status error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/behavior-report/{session_id}", response_model=BehaviorReportResponse)
+async def get_behavior_report(session_id: str):
+    """
+    Get detailed behavior analysis report for a session.
+    
+    Uses AutoOEP's temporal and static analysis to generate
+    comprehensive integrity assessment.
+    """
+    session = _sessions.get(session_id)
+    
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    try:
+        from .scoring.cheat_score import calculate_session_integrity
+        
+        report = calculate_session_integrity(
+            frame_scores=session.cheat_score_history,
+            total_flags=session.flag_counts,
+            tab_switch_count=session.metrics.tab_switch_count,
+            duration_seconds=(datetime.utcnow() - session.started_at).total_seconds()
+        )
+        
+        return BehaviorReportResponse(
+            session_id=session.id,
+            **report
+        )
+        
+    except Exception as e:
+        logger.error(f"Behavior report error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ============== Health Check ==============
 
 @router.get("/health")
 async def health_check():
     """Health check for proctoring module"""
+    from .temporal_predictor import get_temporal_predictor
+    from .static_classifier import get_static_classifier
+    
+    temporal = get_temporal_predictor()
+    static = get_static_classifier()
+    
     return {
         "status": "healthy",
         "active_sessions": len(_sessions),
-        "module": "proctoring"
+        "module": "proctoring",
+        "autooep": {
+            "temporal_model_ready": temporal.is_ready,
+            "static_model_ready": static.is_ready
+        }
     }

@@ -13,6 +13,7 @@ POST /api/ai-tutor/query
 7. LLM Call (FLAN-T5)
 8. Structured Output
 """
+import os
 import time
 from fastapi import APIRouter, HTTPException
 
@@ -87,21 +88,23 @@ async def process_tutor_query(request: TutorQueryRequest) -> TutorQueryResponse:
         # ========================================
         detected_subject = None
         subject_confidence = 0.0
+        detected_subjects = []  # List of subjects for multi-matching
         
         if not request.subject:
             from ...services.subject_classifier import get_subject_classifier
             subject_classifier = get_subject_classifier()
-            classification = subject_classifier.classify_subject(request.question)
             
-            detected_subject = classification["subject"]
-            subject_confidence = classification["confidence"]
+            # Use LLM-based multi-subject detection (industry standard)
+            multi_result = subject_classifier.classify_subject_multi(request.question)
+            detected_subjects = multi_result["subjects"]
+            detected_subject = multi_result["primary"]  # Most specific
+            subject_confidence = multi_result["confidences"][0] if multi_result["confidences"] else 0.0
             
-            print(f"[SUBJECT] 🎯 Auto-detected: {classification['display_name']} "
-                  f"(confidence: {subject_confidence:.2f})")
+            print(f"[SUBJECT] 🎯 Multi-detected: {' → '.join(multi_result['display_names'])} "
+                  f"(primary: {detected_subject}, confidence: {subject_confidence:.2f})")
             
-            # Use detected subject if confidence is high enough
+            # Use primary subject if confidence is high enough
             if subject_confidence >= 0.3:
-                # Override request.subject for downstream processing
                 from ...api.schemas.tutor import Subject
                 try:
                     request.subject = Subject(detected_subject)
@@ -110,17 +113,22 @@ async def process_tutor_query(request: TutorQueryRequest) -> TutorQueryResponse:
                     pass
         
         # ========================================
-        # Step 1.6: Match classroom by subject
+        # Step 1.6: Match classroom by subject (try multiple)
         # ========================================
         matched_classroom_id = request.classroom_id  # Use existing if provided
         
-        if not matched_classroom_id and detected_subject and request.user_id:
+        if not matched_classroom_id and detected_subjects and request.user_id:
             try:
                 from ...services.classroom_matcher import match_classroom_by_subject
-                matched = await match_classroom_by_subject(request.user_id, detected_subject)
-                if matched:
-                    matched_classroom_id = matched["classroom_id"]
-                    print(f"[CLASSROOM] 📚 Matched '{detected_subject}' → '{matched['name']}' (ID: {matched_classroom_id[:8]}...)")
+                # Try each subject in order (most specific first)
+                for subj in detected_subjects:
+                    matched = await match_classroom_by_subject(request.user_id, subj)
+                    if matched:
+                        matched_classroom_id = matched["classroom_id"]
+                        print(f"[CLASSROOM] 📚 Matched '{subj}' → '{matched['name']}' (ID: {matched_classroom_id[:8]}...)")
+                        break
+                else:
+                    print(f"[CLASSROOM] ℹ️ No classroom match for subjects: {detected_subjects}")
             except Exception as e:
                 print(f"[CLASSROOM] ⚠️ Classroom matching failed: {e}")
         
@@ -254,6 +262,43 @@ async def process_tutor_query(request: TutorQueryRequest) -> TutorQueryResponse:
         
         retrieval_time = int((time.time() - retrieval_start) * 1000)
         
+        # ========================================
+        # Step 4.5: Search web_content for prior crawled content
+        # ========================================
+        # This finds chunks from previous web crawls (shell scripting, etc.)
+        web_chunks_context = ""
+        try:
+            from qdrant_client import QdrantClient
+            qdrant_host = os.getenv("QDRANT_HOST", "localhost")
+            qdrant_port = int(os.getenv("QDRANT_PORT", "6333"))
+            web_client = QdrantClient(host=qdrant_host, port=qdrant_port, timeout=10)
+            
+            # Check if collection exists
+            collections = web_client.get_collections().collections
+            if any(c.name == "web_content" for c in collections):
+                # Get embedding for search
+                from sentence_transformers import SentenceTransformer
+                model = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')
+                question_embedding = model.encode(request.question, normalize_embeddings=True).tolist()
+                
+                web_results = web_client.query_points(
+                    collection_name="web_content",
+                    query=question_embedding,
+                    limit=5,
+                    score_threshold=0.5,  # Only relevant chunks
+                    with_payload=True
+                )
+                
+                if web_results.points:
+                    print(f"[RAG] 📚 Found {len(web_results.points)} prior web chunks, adding to context")
+                    for point in web_results.points:
+                        text = point.payload.get('text', '')[:800]  # Limit per chunk
+                        source = point.payload.get('source_url', '')
+                        if text:
+                            web_chunks_context += f"\n\n--- Prior Knowledge ({source[:50]}...) ---\n{text}"
+        except Exception as web_err:
+            print(f"[RAG] ⚠ Web content search error: {web_err}")
+        
         log_retrieval_result_full(
             request_id=request_id,
             sources_count=len(chunks),
@@ -281,22 +326,44 @@ async def process_tutor_query(request: TutorQueryRequest) -> TutorQueryResponse:
         )
         
         # ========================================
-        # Step 5.5: Web Content (CACHE-FIRST)
+        # Step 5.5: Web Context (HYBRID - Fast + Background PDF)
         # ========================================
+        # OPTIMIZATION: Fast resources block, PDFs run in background
+        # - Cache: instant
+        # - Wikipedia: 2-3s (needed for context)
+        # - Images/Videos: 2-3s (parallel)
+        # - Full web crawl + PDFs: background task (don't wait!)
+        import asyncio
         web_context = ""
         web_resources_dict = None
         cache_hit = False
+        background_crawl_task = None
         
         if request.find_resources:
             try:
                 from ...services.web_cache_service import search_cache, store_in_cache
-                from ...services.web_ingest_service import ingest_web_resources
+                from ...services.web_ingest_service import (
+                    ingest_web_resources,
+                    worker1_extract_topic, 
+                    worker3_wikipedia_search, 
+                    worker4_wikipedia_content,
+                    extract_source_name,
+                    calculate_trust_score
+                )
                 
-                # CACHE-FIRST: Check cache for similar query
-                cached = search_cache(request.question, threshold=0.85)
+                # CACHE-FIRST: Check cache for similar query with matching style
+                # Include language_style so "explain in detail" vs "explain simply" use different caches
+                lang_style = request.language_style.value if request.language_style else "layman"
+                resp_mode = request.response_mode.value if request.response_mode else "short"
+                cached = search_cache(
+                    request.question, 
+                    threshold=0.85,
+                    language_style=lang_style,
+                    response_mode=resp_mode
+                )
                 
                 if cached:
-                    # CACHE HIT - Use cached content (no web crawl needed!)
+                    # CACHE HIT - Use cached content (instant!)
                     print(f"[RAG] ✅ CACHE HIT! Similarity: {cached.similarity:.3f}")
                     cache_hit = True
                     web_context = f"\n\n--- Cached Web Knowledge (similarity: {cached.similarity:.2f}) ---\n{cached.answer[:2000]}"
@@ -312,111 +379,150 @@ async def process_tutor_query(request: TutorQueryRequest) -> TutorQueryResponse:
                             "relevance": int(cached.confidence * 100) if cached.confidence else 85
                         }]
                     }
-                    print(f"[RAG] ⚡ Skipped web crawl - using cache!")
+                    print(f"[RAG] ⚡ Using cache - skipping web crawl!")
                 else:
-                    # CACHE MISS - Crawl web
-                    print(f"[RAG] 🌐 Cache miss, fetching web content for: {request.question[:50]}...")
+                    # CACHE MISS - Run fast Wikipedia + start background PDF crawl
+                    print(f"[RAG] 🌐 Cache miss, starting hybrid fetch...")
                     
-                    # Convert conversation_history to dicts for web ingest
+                    # Convert conversation_history to dicts
                     history_dicts = None
                     if request.conversation_history:
                         history_dicts = [{"role": m.role, "content": m.content} for m in request.conversation_history]
                     
-                    web_result = await ingest_web_resources(
-                        query=request.question,
-                        subject=request.subject.value if request.subject else None,
-                        max_sources=2,
-                        conversation_history=history_dicts,
-                        search_pdfs=True,  # Enable PDF search with Worker-6B
-                        user_id=request.user_id,
-                        classroom_id=matched_classroom_id  # Use matched classroom for storing PDFs
-                    )
+                    # WORKER-1: Topic extraction (fast)
+                    topic = worker1_extract_topic(request.question, history_dicts)
+                    print(f"[RAG-FAST] Topic: {topic}")
                     
-                    if web_result.success and web_result.resources:
-                        # Build web context from crawled content
-                        web_parts = []
-                        sources_list = []
-                        for resource in web_result.resources[:2]:
-                            if resource.clean_content:
-                                snippet = resource.clean_content[:1500]
-                                web_parts.append(f"[Source: {resource.title}]\n{snippet}")
-                                sources_list.append(resource.url)
-                        
-                        if web_parts:
-                            web_context = "\n\n--- Web Knowledge ---\n" + "\n\n".join(web_parts)
-                            print(f"[RAG] ✅ Added {len(web_parts)} web sources to context")
+                    # START BACKGROUND TASK: Full web crawl with PDFs (don't await!)
+                    # This will store resources in Qdrant for future queries
+                    # AND push real-time updates via SSE
+                    async def background_crawl():
+                        try:
+                            from .sse import push_loading_status, push_pdf_update, push_complete, create_stream
                             
-                            # Store in cache for future queries
-                            combined_answer = "\n\n".join([r.clean_content[:2000] for r in web_result.resources if r.clean_content])
-                            store_in_cache(
+                            # Create SSE stream for this request
+                            create_stream(request_id)
+                            await push_loading_status(request_id, "Searching for PDFs...", 10)
+                            
+                            print(f"[BACKGROUND] 📥 Starting full web crawl with PDFs...")
+                            result = await ingest_web_resources(
                                 query=request.question,
-                                answer=combined_answer,
-                                sources=sources_list,
-                                confidence=0.9
+                                subject=request.subject.value if request.subject else None,
+                                max_sources=3,
+                                conversation_history=history_dicts,
+                                search_pdfs=True,  # PDFs enabled!
+                                user_id=request.user_id,
+                                classroom_id=matched_classroom_id
                             )
-                            print(f"[RAG] 💾 Stored in cache for future use!")
-                        
-                        # Also prepare for UI display
-                    # Separate articles and PDFs for proper frontend rendering
-                    # IMPORTANT: Prioritize Wikipedia + 2 related articles for references
-                    articles = []
-                    wikipedia_article = None
-                    other_articles = []
-                    pdfs = []
-                    
-                    for r in web_result.resources:
-                        if r.clean_content:
-                            if r.source_type == 'web_pdf':
-                                pdfs.append({
-                                    "id": r.id,
-                                    "type": "pdf",
-                                    "title": r.title,
-                                    "url": r.url,
-                                    "source": r.source_name,
-                                    "snippet": r.summary[:200] if r.summary else "",
-                                    "trustScore": r.trust_score,
-                                    "wordCount": r.word_count,
-                                    "chunkCount": r.chunk_count
-                                })
+                            
+                            if result.success:
+                                # Push each PDF as it's discovered
+                                pdf_count = 0
+                                for resource in result.resources:
+                                    if resource.url and resource.url.lower().endswith('.pdf'):
+                                        pdf_count += 1
+                                        await push_pdf_update(request_id, {
+                                            "id": f"pdf_{pdf_count}",
+                                            "title": resource.title or f"PDF Document {pdf_count}",
+                                            "url": resource.url,
+                                            "source": resource.source_name or "Web",
+                                            "snippet": (resource.clean_content or "")[:200],
+                                            "relevance": 85
+                                        })
+                                
+                                # Cache the result for future queries
+                                sources_list = [r.url for r in result.resources if r.url]
+                                combined_answer = "\n\n".join([r.clean_content[:2000] for r in result.resources if r.clean_content])
+                                if combined_answer:
+                                    store_in_cache(
+                                        query=request.question,
+                                        answer=combined_answer,
+                                        sources=sources_list,
+                                        confidence=0.9,
+                                        language_style=lang_style,
+                                        response_mode=resp_mode
+                                    )
+                                
+                                # Signal completion
+                                await push_complete(request_id, pdf_count)
+                                print(f"[BACKGROUND] ✅ Crawl complete: {len(result.resources)} sources, {pdf_count} PDFs, cached!")
                             else:
-                                article_entry = {
-                                    "id": r.id,
+                                await push_complete(request_id, 0)
+                                print(f"[BACKGROUND] ⚠ Crawl failed: {result.error}")
+                        except Exception as e:
+                            print(f"[BACKGROUND] ❌ Crawl error: {e}")
+                            try:
+                                from .sse import push_complete
+                                await push_complete(request_id, 0)
+                            except:
+                                pass
+                    
+                    # Fire and forget - don't await, runs in background
+                    background_crawl_task = asyncio.create_task(background_crawl())
+                    
+                    # FAST PATH: Wikipedia + Serper articles (2-3s each, parallel)
+                    wiki_search = await worker3_wikipedia_search(topic)
+                    articles_list = []
+                    
+                    # Add Wikipedia article
+                    if wiki_search:
+                        wiki_data = await worker4_wikipedia_content(wiki_search['canonical_title'])
+                        if wiki_data and wiki_data.get('extract'):
+                            wiki_extract = wiki_data['extract'][:2000]
+                            web_context = f"\n\n--- Wikipedia ---\n{wiki_extract}"
+                            print(f"[RAG-FAST] ✅ Wikipedia fetched: {len(wiki_extract)} chars")
+                            
+                            articles_list.append({
+                                "id": "wiki_1",
+                                "type": "article",
+                                "title": wiki_data.get('title', topic),
+                                "url": wiki_data.get('url', f"https://en.wikipedia.org/wiki/{topic.replace(' ', '_')}"),
+                                "source": "Wikipedia",
+                                "snippet": wiki_extract[:200],
+                                "trustScore": 0.95,
+                                "relevance": 95
+                            })
+                    
+                    # ALSO fetch Serper articles for educational sources (Khan Academy, Byju's, etc.)
+                    try:
+                        from ...services.search_api import SerperSearchClient
+                        serper = SerperSearchClient()
+                        serper_results = await serper.search(topic, num_results=5)
+                        
+                        if serper_results:
+                            print(f"[RAG-FAST] 🔍 Serper found {len(serper_results)} educational sources")
+                            for i, result in enumerate(serper_results[:4]):  # Top 4 results
+                                # Skip if it's a PDF or YouTube (handled separately)
+                                if result.url.endswith('.pdf') or 'youtube.com' in result.url:
+                                    continue
+                                articles_list.append({
+                                    "id": f"article_{i+2}",
                                     "type": "article",
-                                    "title": r.title,
-                                    "url": r.url,
-                                    "source": r.source_name,
-                                    "snippet": r.summary[:200] if r.summary else "",
-                                    "trustScore": r.trust_score,
-                                    "relevance": int(r.trust_score * 100) if r.trust_score else 85
-                                }
-                                # Prioritize Wikipedia
-                                if 'wikipedia.org' in r.url.lower():
-                                    if not wikipedia_article:  # Only take first Wikipedia
-                                        wikipedia_article = article_entry
-                                else:
-                                    other_articles.append(article_entry)
+                                    "title": result.title,
+                                    "url": result.url,
+                                    "source": result.domain,
+                                    "snippet": result.snippet[:200] if result.snippet else "",
+                                    "trustScore": result.trust_score,
+                                    "relevance": int(result.trust_score * 100)
+                                })
+                                # ALSO add snippet to web_context for LLM!
+                                if result.snippet:
+                                    web_context += f"\n\n--- {result.title} ({result.domain}) ---\n{result.snippet}"
+                            print(f"[RAG-FAST] ✅ Added {len(articles_list)} articles (Wikipedia + Serper) to context")
+                    except Exception as serper_err:
+                        print(f"[RAG-FAST] ⚠ Serper search error: {serper_err}")
                     
-                    # Build articles list: Wikipedia first, then up to 2 other articles
-                    if wikipedia_article:
-                        articles.append(wikipedia_article)
-                    # Add up to 2 other articles (for a total of 3 max)
-                    max_other_articles = 2 if wikipedia_article else 3
-                    articles.extend(other_articles[:max_other_articles])
+                    # Build resources dict
+                    if articles_list:
+                        web_resources_dict = {"articles": articles_list}
                     
-                    print(f"[RAG] 📚 Articles: {len(articles)} (Wiki: {'✓' if wikipedia_article else '✗'}, Others: {len(other_articles[:max_other_articles])})")
-                    
-                    web_resources_dict = {"articles": articles}
-                    if pdfs:
-                        web_resources_dict["pdfs"] = pdfs
-                        print(f"[RAG] 📄 Added {len(pdfs)} PDFs to web resources")
-                
-                # Note: Images and videos fetching moved outside cache block
+                    print(f"[RAG-FAST] ⚡ Fast path done, PDFs crawling in background...")
                     
             except Exception as e:
                 print(f"[RAG] ⚠ Web fetch error: {e}")
         
         # ========================================
-        # Always fetch images and videos (regardless of cache)
+        # Fetch images and videos (fast, parallel)
         # ========================================
         try:
             # Fetch images from DuckDuckGo (fast)
@@ -454,23 +560,119 @@ async def process_tutor_query(request: TutorQueryRequest) -> TutorQueryResponse:
         except Exception as vid_err:
             print(f"[RAG] ⚠ YouTube video error: {vid_err}")
         
-        # Combine Qdrant context + Web context
+        # ========================================
+        # Fetch classroom PDFs/web-materials
+        # ========================================
+        # Query the classroom for PDFs stored from previous queries
+        if matched_classroom_id and request.auth_token:
+            try:
+                import httpx
+                # Use the /materials endpoint with source=web filter
+                core_api = os.getenv("CORE_API_URL", "http://localhost:8000")
+                async with httpx.AsyncClient(timeout=5.0) as client:
+                    resp = await client.get(
+                        f"{core_api}/api/classroom/{matched_classroom_id}/materials",
+                        params={"source": "web"},  # Filter to web-crawled materials only
+                        headers={"Authorization": f"Bearer {request.auth_token}"}
+                    )
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        materials = data.get("materials", []) if isinstance(data, dict) else data
+                        pdfs = []
+                        for i, mat in enumerate(materials[:5]):  # Limit to 5 PDFs
+                            # Check if it's a PDF
+                            file_name = mat.get('name', '') or mat.get('file_name', '')
+                            file_url = mat.get('file_url', '')
+                            is_pdf = (
+                                file_name.lower().endswith('.pdf') or 
+                                'pdf' in mat.get('file_type', '').lower() or
+                                file_url.lower().endswith('.pdf')
+                            )
+                            if is_pdf:
+                                pdf_entry = {
+                                    "id": mat.get('id') or f"classroom_pdf_{i}",
+                                    "type": "pdf",
+                                    "title": mat.get('name') or file_name or 'PDF Document',
+                                    "url": file_url,
+                                    "source": mat.get('source', 'Web'),
+                                    "snippet": (mat.get('description', '') or '')[:200],
+                                    "relevance": 85,
+                                    "pages": mat.get('page_count', 0)
+                                }
+                                pdfs.append(pdf_entry)
+                        
+                        if pdfs:
+                            if web_resources_dict is None:
+                                web_resources_dict = {}
+                            web_resources_dict["pdfs"] = pdfs
+                            print(f"[RAG] 📄 Added {len(pdfs)} classroom PDFs to resources")
+                    else:
+                        print(f"[RAG] ⚠ Materials API returned {resp.status_code}")
+            except Exception as pdf_err:
+                print(f"[RAG] ⚠ Classroom PDF fetch error: {pdf_err}")
+        
+        # Combine Qdrant context + Web context + Prior web chunks
         full_context = context.context_text
+        if web_chunks_context:
+            full_context = full_context + web_chunks_context
         if web_context:
             full_context = full_context + web_context
         
         # ========================================
-        # Step 6 & 7: Prompt + LLM (Mistral)
+        # Step 6 & 7: Prompt + LLM (Groq → HuggingFace fallback)
         # ========================================
-        llm_response = generate_answer(
+        # Check LLM response cache first
+        context_hash = generate_context_hash(full_context)
+        subject_str = request.subject.value if request.subject else "General"
+        
+        cached_response = CACHE.get_llm_response(
             question=request.question,
-            context=full_context,  # Now includes web content!
-            subject=request.subject.value if request.subject else "General",
-            response_mode=request.response_mode,
-            language_style=request.language_style.value
+            context_hash=context_hash,
+            subject=subject_str
         )
         
-        llm_time = llm_response.generation_time_ms
+        if cached_response:
+            # CACHE HIT - instant response!
+            print(f"[RAG] ⚡ LLM CACHE HIT - returning cached response")
+            llm_response = type('LLMResponse', (), {
+                'answer_short': cached_response.answer_short,
+                'answer_detailed': cached_response.answer_detailed,
+                'confidence': cached_response.confidence,
+                'reasoning': cached_response.reasoning,
+                'suggested_topics': cached_response.suggested_topics,
+                'raw_response': '',
+                'generation_time_ms': 0
+            })()
+            llm_time = 0
+        else:
+            # CACHE MISS - call LLM (Groq → HuggingFace fallback)
+            llm_response = generate_answer(
+                question=request.question,
+                context=full_context,  # Now includes web content!
+                subject=subject_str,
+                response_mode=request.response_mode,
+                language_style=request.language_style.value
+            )
+            llm_time = llm_response.generation_time_ms
+            
+            # Cache the response for future queries
+            try:
+                CACHE.set_llm_response(
+                    question=request.question,
+                    context_hash=context_hash,
+                    subject=subject_str,
+                    response={
+                        'answer_short': llm_response.answer_short,
+                        'answer_detailed': llm_response.answer_detailed,
+                        'confidence': llm_response.confidence,
+                        'reasoning': llm_response.reasoning,
+                        'suggested_topics': llm_response.suggested_topics,
+                        'generation_time_ms': llm_response.generation_time_ms
+                    }
+                )
+                print(f"[RAG] 💾 Cached LLM response for future queries")
+            except Exception as cache_err:
+                print(f"[RAG] ⚠ Failed to cache response: {cache_err}")
         
         # ========================================
         # Step 8: Structured Output

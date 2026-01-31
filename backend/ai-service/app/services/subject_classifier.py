@@ -66,6 +66,35 @@ SUBJECT_KEYWORDS = {
     ]
 }
 
+# LLM prompt for dynamic multi-subject extraction
+SUBJECT_EXTRACTION_PROMPT = """You are an expert academic subject classifier. Given a student's question, identify the most specific subjects/topics it relates to.
+
+RULES:
+1. Return 1-3 subjects ordered from MOST SPECIFIC to MOST GENERAL
+2. First should be the most specific match (e.g., "Linux", "Java", "Genetics", "Calculus")
+3. Last should be the broad academic field (e.g., "Computer Science", "Biology", "Mathematics")
+4. Use single words or short phrases (1-3 words max)
+5. Return as comma-separated list, nothing else
+
+EXAMPLES:
+Q: "How do I write a for loop in bash?"
+A: Linux, Shell Scripting, Computer Science
+
+Q: "Explain inheritance in Java"
+A: Java, Object-Oriented Programming, Computer Science
+
+Q: "What is Mendel's law of segregation?"
+A: Genetics, Biology
+
+Q: "Solve x^2 - 5x + 6 = 0"
+A: Algebra, Mathematics
+
+Q: "What is thermodynamics?"
+A: Thermodynamics, Physics
+
+Q: "{question}"
+A:"""
+
 
 class SubjectClassifier:
     """
@@ -164,6 +193,134 @@ class SubjectClassifier:
         except Exception as e:
             logger.error(f"Subject classification error: {e}", exc_info=True)
             return self._default_response()
+    
+    def classify_subject_multi(self, query: str, max_subjects: int = 3) -> Dict[str, any]:
+        """
+        Classify query into multiple subjects ordered by specificity using LLM.
+        
+        Uses Groq API for dynamic, intelligent subject extraction.
+        Example: "shell scripting loops" -> ["Linux", "Shell Scripting", "Computer Science"]
+        
+        Args:
+            query: Student's question
+            max_subjects: Maximum number of subjects to return (default 3)
+        
+        Returns:
+            {
+                "subjects": ["linux", "shell_scripting", "computer_science"],
+                "display_names": ["Linux", "Shell Scripting", "Computer Science"],
+                "confidences": [0.95, 0.90, 0.85],
+                "primary": "linux"  # Most specific match
+            }
+        """
+        if not query or len(query.strip()) < 3:
+            return self._default_multi_response()
+        
+        try:
+            # Try LLM-based extraction first (industry standard)
+            llm_result = self._extract_subjects_llm(query)
+            if llm_result:
+                print(f"[SUBJECT] 🎯 LLM Multi-detect: {' → '.join(llm_result['display_names'])}")
+                return llm_result
+        except Exception as e:
+            logger.warning(f"[SUBJECT] LLM extraction failed, falling back to classifier: {e}")
+        
+        # Fallback to zero-shot classifier
+        broad_result = self.classify_subject(query)
+        return {
+            "subjects": [broad_result["subject"]],
+            "display_names": [broad_result["display_name"]],
+            "confidences": [broad_result["confidence"]],
+            "primary": broad_result["subject"]
+        }
+    
+    def _extract_subjects_llm(self, query: str) -> Optional[Dict[str, any]]:
+        """
+        Use Groq LLM to extract multiple subjects from query.
+        
+        This is the industry-standard approach - using AI for dynamic classification
+        instead of hardcoded keyword lists.
+        """
+        import os
+        import httpx
+        
+        try:
+            from .api_key_manager import get_key
+            api_key = get_key("GROQ_API_KEY")
+        except:
+            api_key = os.getenv("GROQ_API_KEY")
+        
+        if not api_key:
+            logger.warning("[SUBJECT-LLM] No GROQ_API_KEY found")
+            return None
+        
+        prompt = SUBJECT_EXTRACTION_PROMPT.format(question=query[:200])
+        
+        try:
+            # Call Groq API (fast, <500ms)
+            response = httpx.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "model": "llama-3.1-8b-instant",  # Fast model for classification
+                    "messages": [{"role": "user", "content": prompt}],
+                    "max_tokens": 50,
+                    "temperature": 0.1  # Low temp for consistent results
+                },
+                timeout=5.0
+            )
+            
+            if response.status_code != 200:
+                logger.warning(f"[SUBJECT-LLM] Groq API error: {response.status_code}")
+                return None
+            
+            result = response.json()
+            content = result["choices"][0]["message"]["content"].strip()
+            
+            # Parse comma-separated subjects
+            raw_subjects = [s.strip() for s in content.split(",") if s.strip()]
+            
+            if not raw_subjects:
+                return None
+            
+            # Normalize to lowercase keys and proper display names
+            subjects = []
+            display_names = []
+            confidences = []
+            
+            for i, subj in enumerate(raw_subjects[:3]):  # Max 3
+                # Create normalized key (lowercase, underscores)
+                key = subj.lower().replace(" ", "_").replace("-", "_")
+                subjects.append(key)
+                display_names.append(subj.title())  # Proper case
+                # Confidence decreases for broader subjects
+                conf = 0.95 - (i * 0.05)
+                confidences.append(conf)
+            
+            logger.info(f"[SUBJECT-LLM] Extracted: {subjects} from query: '{query[:50]}...'")
+            
+            return {
+                "subjects": subjects,
+                "display_names": display_names,
+                "confidences": confidences,
+                "primary": subjects[0] if subjects else "general"
+            }
+            
+        except Exception as e:
+            logger.error(f"[SUBJECT-LLM] Extraction error: {e}")
+            return None
+    
+    def _default_multi_response(self) -> Dict[str, any]:
+        """Default response for multi-subject when classification fails"""
+        return {
+            "subjects": ["general"],
+            "display_names": ["General"],
+            "confidences": [1.0],
+            "primary": "general"
+        }
     
     def _default_response(self) -> Dict[str, any]:
         """Default response when classification fails"""

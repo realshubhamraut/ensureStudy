@@ -97,17 +97,25 @@ def embed_query(query: str) -> List[float]:
     return embedding.tolist()
 
 
-def search_cache(query: str, threshold: float = CACHE_THRESHOLD) -> Optional[CacheHit]:
+def search_cache(
+    query: str, 
+    threshold: float = CACHE_THRESHOLD,
+    language_style: str = "layman",
+    response_mode: str = "short"
+) -> Optional[CacheHit]:
     """
-    Search cache for similar queries.
+    Search cache for similar queries with matching style.
     
-    Returns CacheHit if similarity >= threshold, else None.
+    Returns CacheHit if similarity >= threshold AND style matches, else None.
     """
-    print(f"[CACHE] Searching for: '{query[:50]}...'")
+    # Include style in cache key for style-aware matching
+    cache_key = f"{query}|style:{language_style}|mode:{response_mode}"
+    print(f"[CACHE] Searching for: '{query[:50]}...' (style: {language_style}, mode: {response_mode})")
     
     try:
         client = get_cache_client()
-        query_embedding = embed_query(query)
+        # Embed the full cache key (query + style) for style-aware matching
+        query_embedding = embed_query(cache_key)
         
         results = client.query_points(
             collection_name=CACHE_COLLECTION,
@@ -146,23 +154,28 @@ def store_in_cache(
     query: str,
     answer: str,
     sources: List[str],
-    confidence: float = 0.9
+    confidence: float = 0.9,
+    language_style: str = "layman",
+    response_mode: str = "short"
 ) -> bool:
     """
-    Store a query-answer pair in cache.
+    Store a query-answer pair in cache with style metadata.
     
     Returns True if successful.
     """
-    print(f"[CACHE] Storing: '{query[:50]}...'")
+    # Include style in cache key
+    cache_key = f"{query}|style:{language_style}|mode:{response_mode}"
+    print(f"[CACHE] Storing: '{query[:50]}...' (style: {language_style}, mode: {response_mode})")
     
     try:
         client = get_cache_client()
-        query_embedding = embed_query(query)
+        # Embed the full cache key (query + style) for style-aware storage
+        query_embedding = embed_query(cache_key)
         
-        # Generate UUID from query hash (deterministic for same queries)
-        query_hash = hashlib.md5(query.lower().strip().encode()).hexdigest()
+        # Generate UUID from cache key hash (includes style, so same query with different style = different cache entry)
+        key_hash = hashlib.md5(cache_key.lower().strip().encode()).hexdigest()
         # Convert hash to valid UUID format
-        point_id = str(uuid.UUID(query_hash))
+        point_id = str(uuid.UUID(key_hash))
         
         client.upsert(
             collection_name=CACHE_COLLECTION,

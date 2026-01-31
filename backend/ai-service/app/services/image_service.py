@@ -101,16 +101,19 @@ async def search_images_brave(
         List of image dicts
     """
     # Run sync function in thread pool to not block async loop
+    import asyncio
     try:
-        loop = __import__('asyncio').get_event_loop()
-        with ThreadPoolExecutor() as executor:
-            result = await loop.run_in_executor(
-                executor, 
-                lambda: search_images_duckduckgo(query, count, "on" if safe_search == "strict" else safe_search)
-            )
-            return result
+        # Use asyncio.to_thread for Python 3.9+ (more reliable)
+        result = await asyncio.to_thread(
+            search_images_duckduckgo, 
+            query, 
+            count, 
+            "on" if safe_search == "strict" else safe_search
+        )
+        return result
     except Exception as e:
         logger.error(f"[IMAGES] Async wrapper error: {e}")
+        # Fallback to sync call
         return search_images_duckduckgo(query, count)
 
 

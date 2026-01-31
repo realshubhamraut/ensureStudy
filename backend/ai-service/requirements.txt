@@ -100,3 +100,4 @@ pymupdf>=1.23.0               # PyMuPDF for PDF parsing
 # Install tesseract: brew install tesseract
 pytesseract>=0.3.10           # Python wrapper for Tesseract OCR
 Pillow>=10.0.0                # Image processing for OCR
+sse-starlette>=1.6.0

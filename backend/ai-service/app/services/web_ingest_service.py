@@ -724,16 +724,27 @@ def fetch_content(url: str, crawler_log=None) -> Optional[str]:
 # Qdrant Integration
 # ============================================================================
 
+# Global cached embedding model
+_EMBEDDING_MODEL = None
+
+def get_cached_embedding_model():
+    """Get or create cached embedding model (load once, reuse)."""
+    global _EMBEDDING_MODEL
+    if _EMBEDDING_MODEL is None:
+        from sentence_transformers import SentenceTransformer
+        model_name = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
+        print(f"[EMBEDDING] Loading model: {model_name}")
+        _EMBEDDING_MODEL = SentenceTransformer(model_name)
+        print(f"[EMBEDDING] ✅ Model loaded and cached")
+    return _EMBEDDING_MODEL
+
+
 def generate_embeddings(texts: List[str]) -> List[List[float]]:
     """
-    Generate embeddings using MiniLM.
+    Generate embeddings using cached MiniLM model.
     """
     try:
-        from sentence_transformers import SentenceTransformer
-        
-        model_name = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
-        model = SentenceTransformer(model_name)
-        
+        model = get_cached_embedding_model()
         embeddings = model.encode(texts, normalize_embeddings=True)
         return embeddings.tolist()
         

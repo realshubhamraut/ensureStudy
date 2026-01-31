@@ -105,6 +105,10 @@ app.include_router(agent_router)  # /api/agent (Orchestrator + sub-agents)
 app.include_router(curriculum_router)  # /api/curriculum (Personalized learning paths)
 app.include_router(topic_scores_router)  # /api/curriculum topic scores
 
+# SSE router for real-time resource updates
+from .api.routes.sse import router as sse_router
+app.include_router(sse_router)  # /sse (Server-Sent Events for real-time updates)
+
 
 @app.on_event("startup")
 async def startup_event():
