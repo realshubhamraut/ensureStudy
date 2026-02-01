@@ -17,12 +17,12 @@ import {
 } from '@heroicons/react/24/outline'
 import { useSpeechEngine, useSpeechRecognition } from '@/components/avatar/SpeechEngine'
 
-// Viseme sprite avatar with optimized lip-sync
-const VisemeSpriteAvatar = dynamic(() => import('@/components/avatar/VisemeSpriteAvatar'), {
+// Professional 3D Avatar with TalkingHead.js lip-sync
+const TalkingHeadAvatar = dynamic(() => import('@/components/avatar/TalkingHeadAvatar'), {
     ssr: false,
     loading: () => (
         <div className="w-full h-full bg-gradient-to-b from-slate-100 to-slate-200 animate-pulse rounded-2xl flex items-center justify-center">
-            <span className="text-gray-400">Loading Avatar...</span>
+            <span className="text-gray-400">Loading 3D Avatar...</span>
         </div>
     )
 })
@@ -63,6 +63,8 @@ function InterviewSessionContent() {
     const [timeElapsed, setTimeElapsed] = useState(0)
     const [permissionState, setPermissionState] = useState<PermissionState>('pending')
     const [permissionError, setPermissionError] = useState<string>('')
+    const [textToSpeak, setTextToSpeak] = useState<string>('')
+    const [isSpeaking, setIsSpeaking] = useState(false)
 
     const AI_SERVICE_URL = process.env.NEXT_PUBLIC_AI_SERVICE_URL || 'http://localhost:8001'
 
@@ -72,22 +74,31 @@ function InterviewSessionContent() {
     const timerRef = useRef<NodeJS.Timeout | null>(null)
 
 
-    // Speech engine for Text-to-Speech
-    const {
-        speak,
-        stop: stopSpeaking,
-        isSpeaking,
-        isSupported: ttsSupported
-    } = useSpeechEngine({
-        onSpeakStart: () => {
-            console.log('[MockInterview] Avatar started speaking')
-            setSessionState('speaking')
-        },
-        onSpeakEnd: () => {
-            console.log('[MockInterview] Avatar finished speaking')
-            setSessionState('listening')
-        }
-    })
+    // Speech function - sets text for TalkingHead avatar to speak with lip sync
+    const speak = useCallback((text: string) => {
+        console.log('[MockInterview] Triggering TalkingHead speech:', text)
+        setTextToSpeak(text)
+    }, [])
+
+    const stopSpeaking = useCallback(() => {
+        console.log('[MockInterview] Stopping speech')
+        setTextToSpeak('')
+        setIsSpeaking(false)
+    }, [])
+
+    // TalkingHead speech callbacks
+    const handleSpeechStart = useCallback(() => {
+        console.log('[MockInterview] Avatar started speaking')
+        setIsSpeaking(true)
+        setSessionState('speaking')
+    }, [])
+
+    const handleSpeechEnd = useCallback(() => {
+        console.log('[MockInterview] Avatar finished speaking')
+        setIsSpeaking(false)
+        setTextToSpeak('')
+        setSessionState('listening')
+    }, [])
 
 
     const {
@@ -410,10 +421,13 @@ function InterviewSessionContent() {
                     {/* Avatar Section */}
                     <div className="space-y-4">
                         <div className="aspect-[3/4] max-h-[600px] rounded-2xl overflow-hidden shadow-2xl relative">
-                            <VisemeSpriteAvatar
+                            <TalkingHeadAvatar
                                 avatarId={avatarId}
                                 isSpeaking={isSpeaking}
+                                textToSpeak={textToSpeak}
                                 onReady={() => setAvatarReady(true)}
+                                onSpeechStart={handleSpeechStart}
+                                onSpeechEnd={handleSpeechEnd}
                             />
                         </div>
                     </div>

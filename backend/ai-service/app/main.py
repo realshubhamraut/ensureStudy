@@ -26,6 +26,7 @@ from .api.notes import router as notes_router
 from .api.meetings import router as meetings_router
 from .api.meeting_qa import router as meeting_qa_router
 from .api.process_recording import router as process_recording_router
+from .api.routes.tts import router as tts_router
 from .proctor.api import router as proctor_router
 from .utils.logging import log_startup, log_action, log_error, Colors
 
@@ -104,6 +105,7 @@ app.include_router(web_resources_router)  # /api/web-resources (PDF search/downl
 app.include_router(agent_router)  # /api/agent (Orchestrator + sub-agents)
 app.include_router(curriculum_router)  # /api/curriculum (Personalized learning paths)
 app.include_router(topic_scores_router)  # /api/curriculum topic scores
+app.include_router(tts_router)  # /api/tts (AWS Polly TTS with visemes)
 
 # SSE router for real-time resource updates
 from .api.routes.sse import router as sse_router
