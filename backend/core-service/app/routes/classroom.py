@@ -356,6 +356,33 @@ def join_classroom():
     db.session.add(enrollment)
     db.session.commit()
     
+    # Auto-sync classroom topics to student's score records
+    try:
+        from app.models.curriculum import ClassroomTopic, StudentTopicScore
+        
+        topics = ClassroomTopic.query.filter_by(
+            classroom_id=classroom.id, 
+            is_active=True
+        ).all()
+        
+        for topic in topics:
+            existing_score = StudentTopicScore.query.filter_by(
+                user_id=user.id,
+                classroom_topic_id=topic.id
+            ).first()
+            
+            if not existing_score:
+                score = StudentTopicScore(
+                    user_id=user.id,
+                    classroom_topic_id=topic.id
+                )
+                db.session.add(score)
+        
+        db.session.commit()
+    except Exception as e:
+        print(f"[Enrollment] Topic sync failed: {e}")
+        # Non-blocking - enrollment still succeeds
+    
     return jsonify({
         "message": f"Welcome to {classroom.name}!",
         "classroom": classroom.to_dict()
@@ -882,3 +909,617 @@ def delete_announcement(classroom_id, announcement_id):
     db.session.commit()
     
     return jsonify({"message": "Announcement deleted"}), 200
+
+
+# ==================== Chapters & Topics: Syllabus Hierarchy ====================
+
+@classroom_bp.route("/<classroom_id>/chapters", methods=["POST"])
+@teacher_required
+def create_chapter(classroom_id):
+    """Teacher creates a chapter in classroom"""
+    from app.models.curriculum import Chapter, CHAPTER_COLORS
+    user = request.current_user
+    
+    # Verify classroom ownership
+    classroom = Classroom.query.filter_by(id=classroom_id, teacher_id=user.id).first()
+    if not classroom:
+        return jsonify({"error": "Classroom not found"}), 404
+    
+    data = request.get_json()
+    if not data or not data.get("name"):
+        return jsonify({"error": "Chapter name is required"}), 400
+    
+    # Get next order
+    max_order = db.session.query(db.func.max(Chapter.order)).filter_by(classroom_id=classroom_id).scalar() or -1
+    
+    # Assign color from palette
+    chapter_count = Chapter.query.filter_by(classroom_id=classroom_id).count()
+    color = data.get("color") or CHAPTER_COLORS[chapter_count % len(CHAPTER_COLORS)]
+    
+    chapter = Chapter(
+        classroom_id=classroom_id,
+        syllabus_id=data.get("syllabus_id"),
+        name=data["name"],
+        description=data.get("description"),
+        color=color,
+        estimated_hours=data.get("estimated_hours", 2.0),
+        order=data.get("order", max_order + 1)
+    )
+    
+    db.session.add(chapter)
+    db.session.commit()
+    
+    return jsonify(chapter.to_dict()), 201
+
+
+@classroom_bp.route("/<classroom_id>/chapters", methods=["GET"])
+def list_chapters(classroom_id):
+    """Get all chapters for a classroom"""
+    from app.models.curriculum import Chapter
+    
+    # Verify classroom exists
+    classroom = Classroom.query.get(classroom_id)
+    if not classroom:
+        return jsonify({"error": "Classroom not found"}), 404
+    
+    # Optional: verify user has access (teacher or enrolled student)
+    user = get_current_user()
+    if user:
+        is_teacher = classroom.teacher_id == user.id
+        is_student = StudentClassroom.query.filter_by(
+            student_id=user.id, classroom_id=classroom_id, is_active=True
+        ).first() is not None
+        
+        if not is_teacher and not is_student:
+            return jsonify({"error": "Not authorized"}), 403
+    
+    chapters = Chapter.query.filter_by(classroom_id=classroom_id, is_active=True)\
+        .order_by(Chapter.order).all()
+    
+    return jsonify([ch.to_dict(include_topics=True) for ch in chapters]), 200
+
+
+@classroom_bp.route("/<classroom_id>/topics", methods=["POST"])
+@teacher_required
+def create_topic(classroom_id):
+    """Teacher creates a topic in classroom"""
+    from app.models.curriculum import ClassroomTopic
+    user = request.current_user
+    
+    # Verify classroom ownership
+    classroom = Classroom.query.filter_by(id=classroom_id, teacher_id=user.id).first()
+    if not classroom:
+        return jsonify({"error": "Classroom not found"}), 404
+    
+    data = request.get_json()
+    if not data or not data.get("name") or not data.get("chapter_id"):
+        return jsonify({"error": "Topic name and chapter_id are required"}), 400
+    
+    # Get next order
+    max_order = db.session.query(db.func.max(ClassroomTopic.order)).filter_by(
+        chapter_id=data["chapter_id"]
+    ).scalar() or -1
+    
+    topic = ClassroomTopic(
+        chapter_id=data["chapter_id"],
+        classroom_id=classroom_id,
+        name=data["name"],
+        description=data.get("description"),
+        difficulty=data.get("difficulty", "medium"),
+        estimated_hours=data.get("estimated_hours", 1.0),
+        key_concepts=data.get("key_concepts", []),
+        order=data.get("order", max_order + 1)
+    )
+    
+    db.session.add(topic)
+    db.session.commit()
+    
+    # Auto-sync: create score records for all enrolled students
+    try:
+        from app.models.curriculum import StudentTopicScore
+        
+        enrollments = StudentClassroom.query.filter_by(
+            classroom_id=classroom_id, 
+            is_active=True
+        ).all()
+        
+        for enrollment in enrollments:
+            existing = StudentTopicScore.query.filter_by(
+                user_id=enrollment.student_id,
+                classroom_topic_id=topic.id
+            ).first()
+            
+            if not existing:
+                score = StudentTopicScore(
+                    user_id=enrollment.student_id,
+                    classroom_topic_id=topic.id
+                )
+                db.session.add(score)
+        
+        db.session.commit()
+    except Exception as e:
+        print(f"[Topic Create] Student sync failed: {e}")
+    
+    return jsonify({"topic": topic.to_dict()}), 201
+
+
+@classroom_bp.route("/chapters/<chapter_id>", methods=["PUT"])
+@teacher_required
+def update_chapter(chapter_id):
+    """Teacher updates a chapter"""
+    from app.models.curriculum import Chapter
+    user = request.current_user
+    
+    chapter = Chapter.query.get(chapter_id)
+    if not chapter:
+        return jsonify({"error": "Chapter not found"}), 404
+    
+    # Verify classroom ownership
+    classroom = Classroom.query.filter_by(id=chapter.classroom_id, teacher_id=user.id).first()
+    if not classroom:
+        return jsonify({"error": "Not authorized"}), 403
+    
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "No data provided"}), 400
+    
+    # Update fields
+    if "name" in data:
+        chapter.name = data["name"]
+    if "description" in data:
+        chapter.description = data["description"]
+    if "color" in data:
+        chapter.color = data["color"]
+    if "estimated_hours" in data:
+        chapter.estimated_hours = data["estimated_hours"]
+    if "order" in data:
+        chapter.order = data["order"]
+    
+    db.session.commit()
+    
+    return jsonify({"chapter": chapter.to_dict()}), 200
+
+
+@classroom_bp.route("/chapters/<chapter_id>", methods=["DELETE"])
+@teacher_required
+def delete_chapter(chapter_id):
+    """Teacher deletes a chapter (soft delete)"""
+    from app.models.curriculum import Chapter
+    user = request.current_user
+    
+    chapter = Chapter.query.get(chapter_id)
+    if not chapter:
+        return jsonify({"error": "Chapter not found"}), 404
+    
+    # Verify classroom ownership
+    classroom = Classroom.query.filter_by(id=chapter.classroom_id, teacher_id=user.id).first()
+    if not classroom:
+        return jsonify({"error": "Not authorized"}), 403
+    
+    # Soft delete
+    chapter.is_active = False
+    db.session.commit()
+    
+    return jsonify({"message": "Chapter deleted"}), 200
+
+
+@classroom_bp.route("/topics/<topic_id>", methods=["PUT"])
+@teacher_required
+def update_topic(topic_id):
+    """Teacher updates a topic"""
+    from app.models.curriculum import ClassroomTopic
+    user = request.current_user
+    
+    topic = ClassroomTopic.query.get(topic_id)
+    if not topic:
+        return jsonify({"error": "Topic not found"}), 404
+    
+    # Verify classroom ownership
+    classroom = Classroom.query.filter_by(id=topic.classroom_id, teacher_id=user.id).first()
+    if not classroom:
+        return jsonify({"error": "Not authorized"}), 403
+    
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "No data provided"}), 400
+    
+    # Update fields
+    if "name" in data:
+        topic.name = data["name"]
+    if "description" in data:
+        topic.description = data["description"]
+    if "difficulty" in data:
+        topic.difficulty = data["difficulty"]
+    if "estimated_hours" in data:
+        topic.estimated_hours = data["estimated_hours"]
+    if "key_concepts" in data:
+        topic.key_concepts = data["key_concepts"]
+    if "order" in data:
+        topic.order = data["order"]
+    
+    db.session.commit()
+    
+    return jsonify({"topic": topic.to_dict()}), 200
+
+
+@classroom_bp.route("/topics/<topic_id>", methods=["DELETE"])
+@teacher_required
+def delete_topic(topic_id):
+    """Teacher deletes a topic (soft delete)"""
+    from app.models.curriculum import ClassroomTopic
+    user = request.current_user
+    
+    topic = ClassroomTopic.query.get(topic_id)
+    if not topic:
+        return jsonify({"error": "Topic not found"}), 404
+    
+    # Verify classroom ownership
+    classroom = Classroom.query.filter_by(id=topic.classroom_id, teacher_id=user.id).first()
+    if not classroom:
+        return jsonify({"error": "Not authorized"}), 403
+    
+    # Soft delete
+    topic.is_active = False
+    db.session.commit()
+    
+    return jsonify({"message": "Topic deleted"}), 200
+
+
+@classroom_bp.route("/<classroom_id>/hierarchy", methods=["GET"])
+def get_classroom_hierarchy(classroom_id):
+    """Get full chapter-topic hierarchy for classroom"""
+    from app.models.curriculum import Chapter
+    
+    # Verify classroom exists
+    classroom = Classroom.query.get(classroom_id)
+    if not classroom:
+        return jsonify({"error": "Classroom not found"}), 404
+    
+    chapters = Chapter.query.filter_by(classroom_id=classroom_id, is_active=True)\
+        .order_by(Chapter.order).all()
+    
+    total_topics = sum(ch.topics.count() for ch in chapters)
+    
+    return jsonify({
+        "classroom_id": classroom_id,
+        "subject_name": classroom.subject or classroom.name,
+        "chapters": [ch.to_dict(include_topics=True) for ch in chapters],
+        "total_chapters": len(chapters),
+        "total_topics": total_topics
+    }), 200
+
+
+# ==================== Student Topic Scores ====================
+
+@classroom_bp.route("/users/<user_id>/topic-scores", methods=["GET"])
+def get_student_topic_scores(user_id):
+    """Get topic scores for a student"""
+    from app.models.curriculum import StudentTopicScore, ClassroomTopic, Chapter
+    
+    classroom_id = request.args.get("classroom_id")
+    
+    query = db.session.query(
+        StudentTopicScore,
+        ClassroomTopic,
+        Chapter
+    ).join(
+        ClassroomTopic, StudentTopicScore.classroom_topic_id == ClassroomTopic.id
+    ).join(
+        Chapter, ClassroomTopic.chapter_id == Chapter.id
+    ).filter(
+        StudentTopicScore.user_id == user_id
+    )
+    
+    if classroom_id:
+        query = query.filter(ClassroomTopic.classroom_id == classroom_id)
+    
+    results = query.all()
+    
+    scores = []
+    for score, topic, chapter in results:
+        scores.append({
+            "topic_id": topic.id,
+            "topic_name": topic.name,
+            "chapter_name": chapter.name,
+            "chapter_color": chapter.color,
+            "mastery_percentage": score.mastery_percentage,
+            "mcq_attempts": score.mcq_attempts,
+            "mcq_correct": score.mcq_correct,
+            "descriptive_attempts": score.descriptive_attempts,
+            "status": score.status
+        })
+    
+    return jsonify(scores), 200
+
+
+@classroom_bp.route("/users/<user_id>/sync-topics", methods=["POST"])
+def sync_student_topics(user_id):
+    """Sync classroom topics to student's score records"""
+    from app.models.curriculum import StudentTopicScore, ClassroomTopic
+    
+    data = request.get_json()
+    classroom_id = data.get("classroom_id")
+    
+    if not classroom_id:
+        return jsonify({"error": "classroom_id is required"}), 400
+    
+    # Get all topics for classroom
+    topics = ClassroomTopic.query.filter_by(classroom_id=classroom_id, is_active=True).all()
+    
+    created = 0
+    for topic in topics:
+        # Check if score record exists
+        existing = StudentTopicScore.query.filter_by(
+            user_id=user_id,
+            classroom_topic_id=topic.id
+        ).first()
+        
+        if not existing:
+            score = StudentTopicScore(
+                user_id=user_id,
+                classroom_topic_id=topic.id
+            )
+            db.session.add(score)
+            created += 1
+    
+    db.session.commit()
+    
+    return jsonify({
+        "success": True,
+        "topics_synced": len(topics),
+        "new_records_created": created
+    }), 200
+
+
+# ==================== Topic Questions CRUD ====================
+
+@classroom_bp.route("/topics/<topic_id>/questions", methods=["POST"])
+def create_topic_question(topic_id):
+    """Create a question for a classroom topic"""
+    from app.models.curriculum import TopicQuestion, ClassroomTopic
+    
+    # Verify topic exists
+    topic = ClassroomTopic.query.get(topic_id)
+    if not topic:
+        return jsonify({"error": "Topic not found"}), 404
+    
+    data = request.get_json()
+    if not data or not data.get("question_text") or not data.get("question_type"):
+        return jsonify({"error": "question_text and question_type are required"}), 400
+    
+    question = TopicQuestion(
+        classroom_topic_id=topic_id,
+        question_type=data["question_type"],
+        question_text=data["question_text"],
+        options=data.get("options", []),
+        correct_answer=data.get("correct_answer"),
+        expected_answer=data.get("expected_answer"),
+        key_points=data.get("key_points", []),
+        explanation=data.get("explanation"),
+        marks=data.get("marks", 1 if data["question_type"] == "mcq" else 10),
+        difficulty=data.get("difficulty", "medium"),
+        source=data.get("source", "generated")
+    )
+    
+    db.session.add(question)
+    db.session.commit()
+    
+    return jsonify(question.to_dict(include_answer=True)), 201
+
+
+@classroom_bp.route("/topics/<topic_id>/questions", methods=["GET"])
+def get_topic_questions(topic_id):
+    """Get all questions for a topic"""
+    from app.models.curriculum import TopicQuestion, ClassroomTopic
+    
+    topic = ClassroomTopic.query.get(topic_id)
+    if not topic:
+        return jsonify({"error": "Topic not found"}), 404
+    
+    question_type = request.args.get("question_type")
+    include_answers = request.args.get("include_answers", "false").lower() == "true"
+    
+    query = TopicQuestion.query.filter_by(classroom_topic_id=topic_id, is_active=True)
+    if question_type:
+        query = query.filter_by(question_type=question_type)
+    
+    questions = query.all()
+    
+    return jsonify({
+        "topic_id": topic_id,
+        "topic_name": topic.name,
+        "questions": [q.to_dict(include_answer=include_answers) for q in questions],
+        "total": len(questions)
+    }), 200
+
+
+@classroom_bp.route("/questions/<question_id>", methods=["GET"])
+def get_question(question_id):
+    """Get a single question by ID"""
+    from app.models.curriculum import TopicQuestion
+    
+    question = TopicQuestion.query.get(question_id)
+    if not question:
+        return jsonify({"error": "Question not found"}), 404
+    
+    include_answer = request.args.get("include_answer", "false").lower() == "true"
+    
+    return jsonify(question.to_dict(include_answer=include_answer)), 200
+
+
+@classroom_bp.route("/questions/<question_id>", methods=["PUT"])
+@teacher_required
+def update_question(question_id):
+    """Update a question"""
+    from app.models.curriculum import TopicQuestion
+    
+    question = TopicQuestion.query.get(question_id)
+    if not question:
+        return jsonify({"error": "Question not found"}), 404
+    
+    data = request.get_json()
+    
+    if "question_text" in data:
+        question.question_text = data["question_text"]
+    if "options" in data:
+        question.options = data["options"]
+    if "correct_answer" in data:
+        question.correct_answer = data["correct_answer"]
+    if "expected_answer" in data:
+        question.expected_answer = data["expected_answer"]
+    if "key_points" in data:
+        question.key_points = data["key_points"]
+    if "explanation" in data:
+        question.explanation = data["explanation"]
+    if "marks" in data:
+        question.marks = data["marks"]
+    if "difficulty" in data:
+        question.difficulty = data["difficulty"]
+    if "is_active" in data:
+        question.is_active = data["is_active"]
+    
+    db.session.commit()
+    
+    return jsonify(question.to_dict(include_answer=True)), 200
+
+
+@classroom_bp.route("/questions/<question_id>", methods=["DELETE"])
+@teacher_required
+def delete_question(question_id):
+    """Delete a question (soft delete)"""
+    from app.models.curriculum import TopicQuestion
+    
+    question = TopicQuestion.query.get(question_id)
+    if not question:
+        return jsonify({"error": "Question not found"}), 404
+    
+    question.is_active = False
+    db.session.commit()
+    
+    return jsonify({"message": "Question deleted"}), 200
+
+
+# ==================== Student Question Responses ====================
+
+@classroom_bp.route("/responses", methods=["POST"])
+def create_response():
+    """Create a student question response record"""
+    from app.models.curriculum import StudentQuestionResponse
+    
+    data = request.get_json()
+    if not data or not data.get("user_id") or not data.get("question_id"):
+        return jsonify({"error": "user_id and question_id are required"}), 400
+    
+    response = StudentQuestionResponse(
+        user_id=data["user_id"],
+        question_id=data["question_id"],
+        response_type=data.get("response_type", "mcq"),
+        selected_option=data.get("selected_option"),
+        is_correct=data.get("is_correct"),
+        descriptive_response=data.get("descriptive_response"),
+        matched_key_points=data.get("matched_key_points", []),
+        score_awarded=data.get("score_awarded", 0.0),
+        max_score=data.get("max_score", 1.0),
+        score_percentage=data.get("score_percentage", 0.0),
+        ai_feedback=data.get("ai_feedback"),
+        ai_confidence=data.get("ai_confidence"),
+        response_time_ms=data.get("response_time_ms"),
+        source=data.get("source", "assessment"),
+        source_session_id=data.get("source_session_id")
+    )
+    
+    db.session.add(response)
+    db.session.commit()
+    
+    return jsonify(response.to_dict()), 201
+
+
+@classroom_bp.route("/responses/user/<user_id>", methods=["GET"])
+def get_user_responses(user_id):
+    """Get all responses for a user"""
+    from app.models.curriculum import StudentQuestionResponse
+    
+    topic_id = request.args.get("topic_id")
+    source = request.args.get("source")
+    
+    query = StudentQuestionResponse.query.filter_by(user_id=user_id)
+    
+    if source:
+        query = query.filter_by(source=source)
+    
+    # Filter by topic requires join
+    if topic_id:
+        from app.models.curriculum import TopicQuestion
+        query = query.join(TopicQuestion).filter(TopicQuestion.classroom_topic_id == topic_id)
+    
+    responses = query.order_by(StudentQuestionResponse.created_at.desc()).limit(100).all()
+    
+    return jsonify([r.to_dict() for r in responses]), 200
+
+
+# ==================== Topic Score Updates ====================
+
+@classroom_bp.route("/topic-scores/update-mcq", methods=["POST"])
+def update_mcq_topic_score():
+    """Update topic score after MCQ answer"""
+    from app.models.curriculum import StudentTopicScore
+    
+    data = request.get_json()
+    user_id = data.get("user_id")
+    topic_id = data.get("topic_id")
+    correct = data.get("correct", False)
+    marks = data.get("marks", 1)
+    
+    if not user_id or not topic_id:
+        return jsonify({"error": "user_id and topic_id are required"}), 400
+    
+    # Get or create score record
+    score = StudentTopicScore.query.filter_by(
+        user_id=user_id,
+        classroom_topic_id=topic_id
+    ).first()
+    
+    if not score:
+        score = StudentTopicScore(
+            user_id=user_id,
+            classroom_topic_id=topic_id
+        )
+        db.session.add(score)
+    
+    score.update_mcq_score(correct=correct, marks=marks)
+    db.session.commit()
+    
+    return jsonify(score.to_dict()), 200
+
+
+@classroom_bp.route("/topic-scores/update-descriptive", methods=["POST"])
+def update_descriptive_topic_score():
+    """Update topic score after descriptive answer"""
+    from app.models.curriculum import StudentTopicScore
+    
+    data = request.get_json()
+    user_id = data.get("user_id")
+    topic_id = data.get("topic_id")
+    score_awarded = data.get("score_awarded", 0.0)
+    max_score = data.get("max_score", 10.0)
+    
+    if not user_id or not topic_id:
+        return jsonify({"error": "user_id and topic_id are required"}), 400
+    
+    # Get or create score record
+    score = StudentTopicScore.query.filter_by(
+        user_id=user_id,
+        classroom_topic_id=topic_id
+    ).first()
+    
+    if not score:
+        score = StudentTopicScore(
+            user_id=user_id,
+            classroom_topic_id=topic_id
+        )
+        db.session.add(score)
+    
+    score.update_descriptive_score(score_awarded=score_awarded, max_score=max_score)
+    db.session.commit()
+    
+    return jsonify(score.to_dict()), 200

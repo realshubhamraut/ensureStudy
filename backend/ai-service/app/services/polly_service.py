@@ -6,7 +6,14 @@ AWS Polly Free Tier: 5M characters/month for 12 months
 Neural voices provide the best quality for interviews.
 """
 
-import boto3
+# boto3 is optional - service will work without it (fallback to browser TTS)
+try:
+    import boto3
+    BOTO3_AVAILABLE = True
+except ImportError:
+    boto3 = None
+    BOTO3_AVAILABLE = False
+
 import json
 import os
 import hashlib
@@ -68,6 +75,10 @@ class PollyService:
     
     def _init_client(self):
         """Initialize boto3 Polly client with credentials."""
+        if not BOTO3_AVAILABLE:
+            logger.warning("boto3 not installed. AWS Polly TTS will not work. Install with: pip install boto3")
+            return
+            
         try:
             # Get credentials from environment
             access_key = os.getenv('AWS_ACCESS_KEY_ID')

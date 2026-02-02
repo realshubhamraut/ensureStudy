@@ -420,3 +420,225 @@ async def health_check():
         "status": "healthy",
         "service": "questions-api"
     }
+
+
+# ============================================================================
+# Assessment Generation from Topics/Chapters
+# ============================================================================
+
+class GenerateAssessmentRequest(BaseModel):
+    """Request to generate a complete assessment from selected topics/chapters"""
+    classroom_id: str = Field(..., description="Classroom ID")
+    topic_ids: List[str] = Field(default=[], description="List of ClassroomTopic IDs")
+    chapter_ids: List[str] = Field(default=[], description="List of Chapter IDs")
+    include_weak_topics: bool = Field(default=False, description="Include user's weak topics")
+    user_id: Optional[str] = Field(None, description="User ID for weak topic lookup")
+    num_questions: int = Field(default=10, ge=1, le=50, description="Total questions to generate")
+    difficulty: str = Field(default="mixed", description="easy, medium, hard, or mixed")
+    question_type: str = Field(default="mcq", description="mcq or mixed")
+    title: Optional[str] = Field(None, description="Assessment title")
+    time_limit_minutes: int = Field(default=30, ge=5, le=180)
+
+
+@router.post("/generate-assessment", response_model=Dict[str, Any])
+async def generate_assessment(request: GenerateAssessmentRequest):
+    """
+    Generate a complete assessment from selected topics and chapters.
+    
+    Features:
+    - Pulls content from selected topics/chapters in Qdrant
+    - Generates AI questions based on content
+    - Can include weak topics for targeted practice
+    - Returns a ready-to-use assessment with questions
+    """
+    import os
+    import httpx
+    import uuid
+    
+    try:
+        # Get topic/chapter content from core service
+        core_service_url = os.getenv("CORE_SERVICE_URL", "http://localhost:8000")
+        
+        topics_content = []
+        topic_names = []
+        
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            # Fetch content from selected chapters
+            for chapter_id in request.chapter_ids:
+                try:
+                    resp = await client.get(f"{core_service_url}/api/classrooms/chapters/{chapter_id}")
+                    if resp.status_code == 200:
+                        chapter = resp.json().get("chapter", {})
+                        topic_names.append(chapter.get("name", "Chapter"))
+                        
+                        # Get topics within this chapter
+                        topics = chapter.get("topics", [])
+                        for t in topics:
+                            topics_content.append({
+                                "name": t.get("name"),
+                                "description": t.get("description", ""),
+                                "key_concepts": t.get("key_concepts", [])
+                            })
+                except Exception as e:
+                    logger.warning(f"Failed to fetch chapter {chapter_id}: {e}")
+            
+            # Fetch content from selected topics
+            for topic_id in request.topic_ids:
+                try:
+                    resp = await client.get(f"{core_service_url}/api/classrooms/topics/{topic_id}")
+                    if resp.status_code == 200:
+                        topic = resp.json().get("topic", {})
+                        topic_names.append(topic.get("name", "Topic"))
+                        topics_content.append({
+                            "name": topic.get("name"),
+                            "description": topic.get("description", ""),
+                            "key_concepts": topic.get("key_concepts", [])
+                        })
+                except Exception as e:
+                    logger.warning(f"Failed to fetch topic {topic_id}: {e}")
+            
+            # Optionally include weak topics
+            if request.include_weak_topics and request.user_id:
+                try:
+                    resp = await client.get(
+                        f"{core_service_url}/api/assessments/weak-topics",
+                        params={"classroom_id": request.classroom_id},
+                        headers={"X-User-Id": request.user_id}
+                    )
+                    if resp.status_code == 200:
+                        weak = resp.json().get("weak_topics", [])
+                        for w in weak[:5]:  # Limit weak topics
+                            topic_names.append(f"{w.get('topic', '')} (Weak)")
+                            topics_content.append({
+                                "name": w.get("topic"),
+                                "description": "",
+                                "key_concepts": []
+                            })
+                except Exception as e:
+                    logger.warning(f"Failed to fetch weak topics: {e}")
+        
+        # Build content string for question generation
+        if not topics_content:
+            return {
+                "success": False,
+                "error": "No content found for selected topics/chapters",
+                "questions": []
+            }
+        
+        content_parts = []
+        for tc in topics_content:
+            part = f"## Topic: {tc['name']}\n"
+            if tc['description']:
+                part += f"{tc['description']}\n"
+            if tc['key_concepts']:
+                part += f"Key concepts: {', '.join(tc['key_concepts'])}\n"
+            content_parts.append(part)
+        
+        # Enhance with actual syllabus content from Qdrant
+        try:
+            from app.rag.qdrant_store import get_qdrant_store
+            from app.services.embeddings_service import get_embeddings_service
+            
+            qdrant = get_qdrant_store()
+            embedder = get_embeddings_service()
+            
+            # Search syllabus_content collection for each topic
+            for tc in topics_content[:5]:  # Limit to avoid timeout
+                try:
+                    query_text = f"{tc['name']} {' '.join(tc.get('key_concepts', []))}"
+                    query_embedding = embedder.embed_query(query_text)
+                    
+                    # Search with classroom filter
+                    results = qdrant.search(
+                        collection_name="syllabus_content",
+                        query_vector=query_embedding,
+                        filter={
+                            "must": [
+                                {"key": "classroom_id", "match": {"value": request.classroom_id}}
+                            ]
+                        } if request.classroom_id else None,
+                        limit=3
+                    )
+                    
+                    # Add retrieved content
+                    for r in results:
+                        if r.score > 0.5:  # Only include relevant content
+                            chunk_text = r.payload.get("text", "")[:1500]  # Limit chunk size
+                            if chunk_text:
+                                content_parts.append(f"### Content on {tc['name']}:\n{chunk_text}")
+                                
+                except Exception as e:
+                    logger.warning(f"Failed to search syllabus content for {tc['name']}: {e}")
+                    continue
+                    
+        except Exception as e:
+            logger.warning(f"Could not enhance with Qdrant content: {e}")
+        
+        combined_content = "\n\n".join(content_parts)
+        
+        # Generate questions using the question generator
+        from app.services.question_generator import get_question_generator
+        
+        generator = get_question_generator()
+        
+        if request.question_type == "mixed":
+            # Generate mixed assessment
+            mcq_count = int(request.num_questions * 0.7)  # 70% MCQ
+            desc_count = request.num_questions - mcq_count  # 30% descriptive
+            
+            result = await generator.generate_mixed_assessment(
+                content=combined_content,
+                mcq_count=mcq_count,
+                descriptive_count=desc_count,
+                short_answer_count=0,
+                difficulty=request.difficulty if request.difficulty != "mixed" else "medium"
+            )
+            
+            all_questions = []
+            for q in result.get("mcq", []):
+                qd = q.to_dict()
+                qd["id"] = str(uuid.uuid4())[:8]
+                all_questions.append(qd)
+            for q in result.get("descriptive", []):
+                qd = q.to_dict()
+                qd["id"] = str(uuid.uuid4())[:8]
+                all_questions.append(qd)
+        else:
+            # Generate MCQ only
+            questions = await generator.generate_questions(
+                content=combined_content,
+                question_type="mcq",
+                num_questions=request.num_questions,
+                difficulty=request.difficulty if request.difficulty != "mixed" else "medium"
+            )
+            
+            all_questions = []
+            for q in questions:
+                qd = q.to_dict()
+                qd["id"] = str(uuid.uuid4())[:8]
+                all_questions.append(qd)
+        
+        # Build assessment title
+        title = request.title or f"Assessment: {', '.join(topic_names[:3])}"
+        if len(topic_names) > 3:
+            title += f" (+{len(topic_names) - 3} more)"
+        
+        return {
+            "success": True,
+            "title": title,
+            "classroom_id": request.classroom_id,
+            "source_topics": request.topic_ids,
+            "source_chapters": request.chapter_ids,
+            "include_weak_topics": request.include_weak_topics,
+            "difficulty": request.difficulty,
+            "time_limit_minutes": request.time_limit_minutes,
+            "question_count": len(all_questions),
+            "questions": all_questions
+        }
+        
+    except Exception as e:
+        logger.error(f"Error generating assessment: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+

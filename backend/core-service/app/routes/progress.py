@@ -324,3 +324,150 @@ def get_topics_list():
         }
         for p in all_progress
     ]), 200
+
+
+# ============================================================================
+# Classroom Topic Mastery (for ProgressDashboard)
+# ============================================================================
+
+@progress_bp.route("/topic-mastery", methods=["GET"])
+@require_auth
+def get_topic_mastery():
+    """
+    Get topic mastery data for ProgressDashboard.
+    Returns stats, chapters, and topics with scores.
+    """
+    from app.models.curriculum import StudentTopicScore, ClassroomTopic, Chapter
+    from app.models.classroom import Classroom, StudentClassroom
+    
+    user_id = request.user_id
+    classroom_id = request.args.get("classroom_id")
+    
+    # Get enrolled classrooms if no specific one requested
+    if classroom_id:
+        classroom_ids = [classroom_id]
+    else:
+        enrollments = StudentClassroom.query.filter_by(
+            student_id=user_id, is_active=True
+        ).all()
+        classroom_ids = [e.classroom_id for e in enrollments]
+    
+    if not classroom_ids:
+        return jsonify({
+            "stats": {
+                "total_topics": 0,
+                "topics_started": 0,
+                "topics_mastered": 0,
+                "average_mastery": 0,
+                "total_study_hours": 0,
+                "current_streak": 0
+            },
+            "chapters": [],
+            "topics": []
+        }), 200
+    
+    # Get chapters for these classrooms
+    chapters = Chapter.query.filter(
+        Chapter.classroom_id.in_(classroom_ids),
+        Chapter.is_active == True
+    ).order_by(Chapter.order).all()
+    
+    # Get topics for these classrooms
+    topics = ClassroomTopic.query.filter(
+        ClassroomTopic.classroom_id.in_(classroom_ids),
+        ClassroomTopic.is_active == True
+    ).all()
+    
+    # Get student scores
+    scores_query = db.session.query(
+        StudentTopicScore,
+        ClassroomTopic,
+        Chapter
+    ).join(
+        ClassroomTopic, StudentTopicScore.classroom_topic_id == ClassroomTopic.id
+    ).join(
+        Chapter, ClassroomTopic.chapter_id == Chapter.id
+    ).filter(
+        StudentTopicScore.user_id == user_id,
+        ClassroomTopic.classroom_id.in_(classroom_ids)
+    ).all()
+    
+    # Build scores map
+    scores_map = {}
+    for score, topic, chapter in scores_query:
+        scores_map[topic.id] = {
+            "score": score,
+            "topic": topic,
+            "chapter": chapter
+        }
+    
+    # Calculate chapter progress
+    chapter_progress = []
+    for ch in chapters:
+        ch_topics = [t for t in topics if t.chapter_id == ch.id]
+        ch_scores = [scores_map.get(t.id) for t in ch_topics if t.id in scores_map]
+        
+        mastered = sum(1 for s in ch_scores if s and s["score"].mastery_percentage >= 80)
+        avg_mastery = sum(s["score"].mastery_percentage for s in ch_scores if s) / len(ch_scores) if ch_scores else 0
+        
+        chapter_progress.append({
+            "chapter_id": ch.id,
+            "name": ch.name,
+            "color": ch.color,
+            "topics_count": len(ch_topics),
+            "topics_mastered": mastered,
+            "average_mastery": round(avg_mastery, 1)
+        })
+    
+    # Build topic list with scores
+    topic_list = []
+    for t in topics:
+        score_data = scores_map.get(t.id)
+        chapter = next((ch for ch in chapters if ch.id == t.chapter_id), None)
+        
+        if score_data:
+            topic_list.append({
+                "topic_id": t.id,
+                "topic_name": t.name,
+                "chapter_name": chapter.name if chapter else "Unknown",
+                "chapter_color": chapter.color if chapter else "#3B82F6",
+                "mastery_level": round(score_data["score"].mastery_percentage, 1),
+                "quiz_score": round((score_data["score"].mcq_total_score / score_data["score"].mcq_max_score * 100) if score_data["score"].mcq_max_score > 0 else 0, 1),
+                "interview_score": round(score_data["score"].descriptive_avg_score, 1),
+                "total_attempts": score_data["score"].mcq_attempts + score_data["score"].descriptive_attempts,
+                "last_activity": score_data["score"].last_activity_at.strftime("%Y-%m-%d") if score_data["score"].last_activity_at else "Never"
+            })
+        else:
+            topic_list.append({
+                "topic_id": t.id,
+                "topic_name": t.name,
+                "chapter_name": chapter.name if chapter else "Unknown",
+                "chapter_color": chapter.color if chapter else "#3B82F6",
+                "mastery_level": 0,
+                "quiz_score": 0,
+                "interview_score": 0,
+                "total_attempts": 0,
+                "last_activity": "Never"
+            })
+    
+    # Calculate stats
+    total_topics = len(topics)
+    topics_started = sum(1 for t in topic_list if t["total_attempts"] > 0)
+    topics_mastered = sum(1 for t in topic_list if t["mastery_level"] >= 80)
+    average_mastery = sum(t["mastery_level"] for t in topic_list) / total_topics if total_topics > 0 else 0
+    
+    # TODO: Calculate real study hours and streak from activity
+    total_study_hours = sum(t.estimated_hours or 1 for t in topics if t.id in scores_map) * 0.5
+    
+    return jsonify({
+        "stats": {
+            "total_topics": total_topics,
+            "topics_started": topics_started,
+            "topics_mastered": topics_mastered,
+            "average_mastery": round(average_mastery, 1),
+            "total_study_hours": round(total_study_hours, 1),
+            "current_streak": 0  # TODO: Calculate from activity
+        },
+        "chapters": chapter_progress,
+        "topics": topic_list
+    }), 200

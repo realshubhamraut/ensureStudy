@@ -107,6 +107,14 @@ app.include_router(curriculum_router)  # /api/curriculum (Personalized learning 
 app.include_router(topic_scores_router)  # /api/curriculum topic scores
 app.include_router(tts_router)  # /api/tts (AWS Polly TTS with visemes)
 
+# Classroom syllabus extraction and topic hierarchy
+from .api.routes.classroom_syllabus import router as classroom_syllabus_router
+app.include_router(classroom_syllabus_router)  # /api/classroom-syllabus
+
+# Question generation and scoring
+from .api.routes.questions_scoring import router as questions_scoring_router
+app.include_router(questions_scoring_router)  # /api/questions
+
 # SSE router for real-time resource updates
 from .api.routes.sse import router as sse_router
 app.include_router(sse_router)  # /sse (Server-Sent Events for real-time updates)

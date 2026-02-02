@@ -64,15 +64,15 @@ export default function MockInterviewPage() {
     const [selectedClassrooms, setSelectedClassrooms] = useState<string[]>([])
     const [allClassroomsSelected, setAllClassroomsSelected] = useState(true)
     const [topics, setTopics] = useState<Topic[]>([])
-    const [selectedTopic, setSelectedTopic] = useState<Topic | null>(null)
+    const [selectedTopics, setSelectedTopics] = useState<Topic[]>([])
     const [selectedAvatar, setSelectedAvatar] = useState<string>('female')
     const [loading, setLoading] = useState({ classrooms: true, topics: false })
     const [isReady, setIsReady] = useState(false)
 
     // Check if ready to start
     useEffect(() => {
-        setIsReady(selectedTopic !== null && (allClassroomsSelected || selectedClassrooms.length > 0))
-    }, [selectedTopic, selectedClassrooms, allClassroomsSelected])
+        setIsReady(selectedTopics.length > 0 && (allClassroomsSelected || selectedClassrooms.length > 0))
+    }, [selectedTopics, selectedClassrooms, allClassroomsSelected])
 
     // Fetch classrooms on mount
     useEffect(() => {
@@ -100,7 +100,7 @@ export default function MockInterviewPage() {
     useEffect(() => {
         const fetchTopics = async () => {
             setLoading(prev => ({ ...prev, topics: true }))
-            setSelectedTopic(null)
+            setSelectedTopics([])
 
             try {
                 const classroomIds = allClassroomsSelected ? ['all'] : selectedClassrooms
@@ -149,10 +149,23 @@ export default function MockInterviewPage() {
         setSelectedClassrooms([])
     }
 
+    // Toggle topic selection
+    const toggleTopic = (topic: Topic) => {
+        setSelectedTopics(prev => {
+            const exists = prev.find(t => t.id === topic.id)
+            if (exists) {
+                return prev.filter(t => t.id !== topic.id)
+            }
+            return [...prev, topic]
+        })
+    }
+
     const startInterview = () => {
-        if (isReady && selectedTopic) {
+        if (isReady && selectedTopics.length > 0) {
             const classroomParam = allClassroomsSelected ? 'all' : selectedClassrooms.join(',')
-            router.push(`/softskills/mock-interview/session?topic=${selectedTopic.id}&topic_name=${encodeURIComponent(selectedTopic.name)}&classrooms=${classroomParam}&avatar=${selectedAvatar}`)
+            const topicIds = selectedTopics.map(t => t.id).join(',')
+            const topicNames = selectedTopics.map(t => t.name).join(',')
+            router.push(`/softskills/mock-interview/session?topics=${topicIds}&topic_names=${encodeURIComponent(topicNames)}&classrooms=${classroomParam}&avatar=${selectedAvatar}`)
         }
     }
 
@@ -208,8 +221,8 @@ export default function MockInterviewPage() {
                                     <button
                                         onClick={selectAllClassrooms}
                                         className={`w-full p-4 rounded-xl border-2 transition-all flex items-center gap-3 ${allClassroomsSelected
-                                                ? 'border-blue-500 bg-blue-50 shadow-md'
-                                                : 'border-gray-200 hover:border-blue-300 hover:bg-gray-50'
+                                            ? 'border-blue-500 bg-blue-50 shadow-md'
+                                            : 'border-gray-200 hover:border-blue-300 hover:bg-gray-50'
                                             }`}
                                     >
                                         <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${allClassroomsSelected ? 'border-blue-500 bg-blue-500' : 'border-gray-300'
@@ -233,8 +246,8 @@ export default function MockInterviewPage() {
                                                     key={classroom.id}
                                                     onClick={() => toggleClassroom(classroom.id)}
                                                     className={`p-4 rounded-xl border-2 transition-all flex flex-col items-center gap-2 ${isSelected
-                                                            ? 'border-blue-500 bg-blue-50 shadow-md'
-                                                            : 'border-gray-200 hover:border-blue-300 hover:bg-gray-50'
+                                                        ? 'border-blue-500 bg-blue-50 shadow-md'
+                                                        : 'border-gray-200 hover:border-blue-300 hover:bg-gray-50'
                                                         }`}
                                                 >
                                                     <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${isSelected ? 'bg-blue-500' : 'bg-gray-200'
@@ -263,8 +276,13 @@ export default function MockInterviewPage() {
                                 <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center">
                                     <span className="text-blue-600 font-bold text-sm">2</span>
                                 </div>
-                                <h2 className="text-lg font-semibold text-gray-900">Select Topic</h2>
-                                {selectedTopic && <CheckCircleIcon className="w-5 h-5 text-green-500 ml-auto" />}
+                                <h2 className="text-lg font-semibold text-gray-900">Select Topics</h2>
+                                {selectedTopics.length > 0 && (
+                                    <span className="ml-auto flex items-center gap-2">
+                                        <span className="text-sm text-primary-600">{selectedTopics.length} selected</span>
+                                        <CheckCircleIcon className="w-5 h-5 text-green-500" />
+                                    </span>
+                                )}
                             </div>
 
                             {/* Weak topics hint */}
@@ -287,21 +305,21 @@ export default function MockInterviewPage() {
                                 <div className="space-y-2 max-h-[400px] overflow-y-auto pr-2">
                                     {topics.map((topic) => {
                                         const colors = getConfidenceColor(topic.confidence_score)
-                                        const isSelected = selectedTopic?.id === topic.id
+                                        const isSelected = selectedTopics.some(t => t.id === topic.id)
 
                                         return (
                                             <button
                                                 key={topic.id}
-                                                onClick={() => setSelectedTopic(topic)}
+                                                onClick={() => toggleTopic(topic)}
                                                 className={`w-full p-4 rounded-lg border-2 transition-all flex items-center gap-4 ${isSelected
-                                                        ? 'border-blue-500 bg-blue-50'
-                                                        : 'border-gray-200 hover:border-blue-300 hover:bg-gray-50'
+                                                    ? 'border-blue-500 bg-blue-50'
+                                                    : 'border-gray-200 hover:border-blue-300 hover:bg-gray-50'
                                                     }`}
                                             >
-                                                {/* Topic Icon/Radio */}
-                                                <div className={`w-5 h-5 rounded-full border-2 flex-shrink-0 flex items-center justify-center ${isSelected ? 'border-blue-500 bg-blue-500' : 'border-gray-300'
+                                                {/* Topic Checkbox */}
+                                                <div className={`w-5 h-5 rounded flex-shrink-0 flex items-center justify-center border-2 ${isSelected ? 'border-blue-500 bg-blue-500' : 'border-gray-300'
                                                     }`}>
-                                                    {isSelected && <div className="w-2 h-2 rounded-full bg-white"></div>}
+                                                    {isSelected && <CheckCircleIcon className="w-4 h-4 text-white" />}
                                                 </div>
 
                                                 {/* Topic Info */}
@@ -351,13 +369,13 @@ export default function MockInterviewPage() {
                                         key={avatar.id}
                                         onClick={() => setSelectedAvatar(avatar.id)}
                                         className={`p-5 rounded-xl border-2 transition-all flex flex-col items-center gap-3 ${selectedAvatar === avatar.id
-                                                ? 'border-blue-500 bg-blue-50 shadow-md'
-                                                : 'border-gray-200 hover:border-blue-300 hover:bg-gray-50'
+                                            ? 'border-blue-500 bg-blue-50 shadow-md'
+                                            : 'border-gray-200 hover:border-blue-300 hover:bg-gray-50'
                                             }`}
                                     >
                                         <div className={`w-20 h-20 rounded-full flex items-center justify-center ${selectedAvatar === avatar.id
-                                                ? 'bg-gradient-to-br from-blue-400 to-indigo-500'
-                                                : 'bg-gradient-to-br from-gray-300 to-gray-400'
+                                            ? 'bg-gradient-to-br from-blue-400 to-indigo-500'
+                                            : 'bg-gradient-to-br from-gray-300 to-gray-400'
                                             }`}>
                                             <UserIcon className="w-10 h-10 text-white" />
                                         </div>
@@ -392,16 +410,20 @@ export default function MockInterviewPage() {
                                         </span>
                                     </div>
                                     <div className="flex items-center justify-between">
-                                        <span className="text-blue-200">Topic</span>
+                                        <span className="text-blue-200">Topics</span>
                                         <span className="font-medium truncate max-w-[150px]">
-                                            {selectedTopic?.name || '—'}
+                                            {selectedTopics.length > 0
+                                                ? `${selectedTopics.length} topic${selectedTopics.length > 1 ? 's' : ''}`
+                                                : '—'
+                                            }
                                         </span>
                                     </div>
-                                    {selectedTopic && (
+                                    {selectedTopics.length > 0 && (
                                         <div className="flex items-center justify-between">
-                                            <span className="text-blue-200">Confidence</span>
+                                            <span className="text-blue-200">Avg Confidence</span>
                                             <span className="font-medium">
-                                                {getConfidenceEmoji(selectedTopic.confidence_score)} {selectedTopic.confidence_score}%
+                                                {getConfidenceEmoji(Math.round(selectedTopics.reduce((acc, t) => acc + t.confidence_score, 0) / selectedTopics.length))}
+                                                {Math.round(selectedTopics.reduce((acc, t) => acc + t.confidence_score, 0) / selectedTopics.length)}%
                                             </span>
                                         </div>
                                     )}
@@ -444,8 +466,8 @@ export default function MockInterviewPage() {
                                 onClick={startInterview}
                                 disabled={!isReady}
                                 className={`w-full py-4 rounded-xl font-semibold flex items-center justify-center gap-2 transition-all ${isReady
-                                        ? 'bg-gradient-to-r from-blue-500 to-indigo-600 text-white shadow-lg hover:shadow-xl hover:scale-[1.02]'
-                                        : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                                    ? 'bg-gradient-to-r from-blue-500 to-indigo-600 text-white shadow-lg hover:shadow-xl hover:scale-[1.02]'
+                                    : 'bg-gray-200 text-gray-400 cursor-not-allowed'
                                     }`}
                             >
                                 <PlayIcon className="w-5 h-5" />

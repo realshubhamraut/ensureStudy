@@ -408,3 +408,415 @@ class Question(db.Model):
             success_rate = self.times_correct / self.times_used
             # Invert: lower success rate = higher difficulty
             self.difficulty_rating = round(1 - success_rate, 2)
+
+
+# ============================================================================
+# CLASSROOM TOPIC HIERARCHY MODELS
+# Classroom → Chapter → ClassroomTopic → TopicQuestion
+# ============================================================================
+
+# Color palette for chapters
+CHAPTER_COLORS = [
+    '#3B82F6',  # Blue
+    '#10B981',  # Emerald
+    '#F59E0B',  # Amber
+    '#EF4444',  # Red
+    '#8B5CF6',  # Violet
+    '#EC4899',  # Pink
+    '#06B6D4',  # Cyan
+    '#84CC16',  # Lime
+    '#F97316',  # Orange
+    '#14B8A6',  # Teal
+]
+
+
+class Chapter(db.Model):
+    """
+    Chapter/Lesson within a classroom syllabus.
+    Groups related topics together.
+    Hierarchy: Classroom → Chapters → ClassroomTopics
+    """
+    __tablename__ = "chapters"
+    
+    id = db.Column(db.String(36), primary_key=True, default=generate_uuid)
+    classroom_id = db.Column(db.String(36), db.ForeignKey("classrooms.id"), nullable=False, index=True)
+    syllabus_id = db.Column(db.String(36), db.ForeignKey("syllabi.id"), nullable=True, index=True)
+    
+    name = db.Column(db.String(200), nullable=False)
+    description = db.Column(db.Text)
+    
+    # UI styling
+    color = db.Column(db.String(7), default='#3B82F6')  # Hex color for chapter grouping
+    icon = db.Column(db.String(50))  # Optional icon name
+    
+    # Metadata
+    estimated_hours = db.Column(db.Float, default=2.0)
+    order = db.Column(db.Integer, default=0)
+    is_active = db.Column(db.Boolean, default=True)
+    
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    topics = db.relationship("ClassroomTopic", backref="chapter", cascade="all, delete-orphan", lazy="dynamic")
+    
+    __table_args__ = (
+        db.Index('idx_chapter_classroom', 'classroom_id'),
+    )
+    
+    def to_dict(self, include_topics=False):
+        data = {
+            "id": self.id,
+            "classroom_id": self.classroom_id,
+            "syllabus_id": self.syllabus_id,
+            "name": self.name,
+            "description": self.description,
+            "color": self.color,
+            "icon": self.icon,
+            "estimated_hours": self.estimated_hours,
+            "order": self.order,
+            "is_active": self.is_active,
+            "topic_count": self.topics.count() if self.topics else 0,
+            "created_at": self.created_at.isoformat() if self.created_at else None
+        }
+        if include_topics:
+            data["topics"] = [t.to_dict() for t in self.topics.filter_by(is_active=True).order_by(ClassroomTopic.order)]
+        return data
+
+
+class ClassroomTopic(db.Model):
+    """
+    Topic extracted from classroom syllabus.
+    Different from personal curriculum Topics - these are shared with all enrolled students.
+    """
+    __tablename__ = "classroom_topics"
+    
+    id = db.Column(db.String(36), primary_key=True, default=generate_uuid)
+    chapter_id = db.Column(db.String(36), db.ForeignKey("chapters.id"), nullable=False, index=True)
+    classroom_id = db.Column(db.String(36), db.ForeignKey("classrooms.id"), nullable=False, index=True)
+    
+    name = db.Column(db.String(200), nullable=False)
+    description = db.Column(db.Text)
+    
+    # Learning metadata
+    difficulty = db.Column(db.String(20), default="medium")  # easy, medium, hard
+    estimated_hours = db.Column(db.Float, default=1.0)
+    key_concepts = db.Column(JSON, default=list)  # ["concept1", "concept2"]
+    
+    # Ordering
+    order = db.Column(db.Integer, default=0)
+    is_active = db.Column(db.Boolean, default=True)
+    
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    questions = db.relationship("TopicQuestion", backref="topic", cascade="all, delete-orphan", lazy="dynamic")
+    student_scores = db.relationship("StudentTopicScore", backref="topic", cascade="all, delete-orphan", lazy="dynamic")
+    
+    __table_args__ = (
+        db.Index('idx_classroom_topic_chapter', 'chapter_id'),
+        db.Index('idx_classroom_topic_classroom', 'classroom_id'),
+    )
+    
+    def to_dict(self, include_questions=False):
+        data = {
+            "id": self.id,
+            "chapter_id": self.chapter_id,
+            "classroom_id": self.classroom_id,
+            "name": self.name,
+            "description": self.description,
+            "difficulty": self.difficulty,
+            "estimated_hours": self.estimated_hours,
+            "key_concepts": self.key_concepts or [],
+            "order": self.order,
+            "is_active": self.is_active,
+            "question_count": self.questions.count() if self.questions else 0,
+            "created_at": self.created_at.isoformat() if self.created_at else None
+        }
+        if include_questions:
+            data["questions"] = [q.to_dict() for q in self.questions.filter_by(is_active=True)]
+        return data
+
+
+class TopicQuestion(db.Model):
+    """
+    Question linked to a classroom topic.
+    Supports both MCQ and Descriptive question types.
+    """
+    __tablename__ = "topic_questions"
+    
+    id = db.Column(db.String(36), primary_key=True, default=generate_uuid)
+    classroom_topic_id = db.Column(db.String(36), db.ForeignKey("classroom_topics.id"), nullable=False, index=True)
+    
+    # Question content
+    question_type = db.Column(db.String(20), nullable=False)  # "mcq" or "descriptive"
+    question_text = db.Column(db.Text, nullable=False)
+    
+    # For MCQ: options array
+    # [{"id": "A", "text": "Option A", "is_correct": false}, ...]
+    options = db.Column(JSON, default=list)
+    
+    # For MCQ: correct option id ("A", "B", "C", "D")
+    correct_answer = db.Column(db.String(10))
+    
+    # For Descriptive: model/expected answer
+    expected_answer = db.Column(db.Text)
+    
+    # Scoring rubric for descriptive answers
+    # ["key point 1", "key point 2", ...]
+    key_points = db.Column(JSON, default=list)
+    
+    # Explanation shown after answer
+    explanation = db.Column(db.Text)
+    
+    # Scoring
+    marks = db.Column(db.Integer, default=1)
+    difficulty = db.Column(db.String(20), default="medium")  # easy, medium, hard
+    time_estimate_seconds = db.Column(db.Integer, default=60)
+    
+    # Analytics
+    times_used = db.Column(db.Integer, default=0)
+    times_correct = db.Column(db.Integer, default=0)
+    times_incorrect = db.Column(db.Integer, default=0)
+    average_score = db.Column(db.Float)  # For descriptive questions
+    
+    # Status
+    is_active = db.Column(db.Boolean, default=True)
+    source = db.Column(db.String(30), default="generated")  # "generated", "manual", "imported"
+    
+    created_by = db.Column(db.String(36), db.ForeignKey("users.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    responses = db.relationship("StudentQuestionResponse", backref="question", cascade="all, delete-orphan", lazy="dynamic")
+    
+    __table_args__ = (
+        db.Index('idx_topic_question_topic', 'classroom_topic_id'),
+        db.Index('idx_topic_question_type', 'question_type'),
+    )
+    
+    def to_dict(self, include_answer=False):
+        """Convert to dictionary. Set include_answer=False to hide correct answer for students."""
+        data = {
+            "id": self.id,
+            "classroom_topic_id": self.classroom_topic_id,
+            "question_type": self.question_type,
+            "question_text": self.question_text,
+            "options": self.options if self.question_type == "mcq" else None,
+            "marks": self.marks,
+            "difficulty": self.difficulty,
+            "time_estimate_seconds": self.time_estimate_seconds,
+            "is_active": self.is_active,
+            "source": self.source
+        }
+        
+        if include_answer:
+            data["correct_answer"] = self.correct_answer
+            data["expected_answer"] = self.expected_answer
+            data["key_points"] = self.key_points
+            data["explanation"] = self.explanation
+        
+        return data
+    
+    def update_analytics(self, score_awarded: float, max_score: float):
+        """Update question analytics after a student answers"""
+        self.times_used += 1
+        
+        if self.question_type == "mcq":
+            if score_awarded == max_score:
+                self.times_correct += 1
+            else:
+                self.times_incorrect += 1
+        else:
+            # For descriptive, update average score
+            if self.average_score is None:
+                self.average_score = score_awarded / max_score * 100
+            else:
+                self.average_score = (
+                    (self.average_score * (self.times_used - 1) + (score_awarded / max_score * 100)) /
+                    self.times_used
+                )
+
+
+class StudentTopicScore(db.Model):
+    """
+    Track cumulative scores and mastery per student per classroom topic.
+    Updated after MCQ tests and mock interviews.
+    """
+    __tablename__ = "student_topic_scores"
+    
+    id = db.Column(db.String(36), primary_key=True, default=generate_uuid)
+    user_id = db.Column(db.String(36), db.ForeignKey("users.id"), nullable=False, index=True)
+    classroom_topic_id = db.Column(db.String(36), db.ForeignKey("classroom_topics.id"), nullable=False, index=True)
+    
+    # Cumulative scores
+    total_score = db.Column(db.Float, default=0.0)
+    max_possible_score = db.Column(db.Float, default=0.0)
+    mastery_percentage = db.Column(db.Float, default=0.0)  # 0-100
+    
+    # MCQ performance
+    mcq_attempts = db.Column(db.Integer, default=0)
+    mcq_correct = db.Column(db.Integer, default=0)
+    mcq_total_score = db.Column(db.Float, default=0.0)
+    mcq_max_score = db.Column(db.Float, default=0.0)
+    
+    # Descriptive performance (mock interview, etc.)
+    descriptive_attempts = db.Column(db.Integer, default=0)
+    descriptive_total_score = db.Column(db.Float, default=0.0)
+    descriptive_max_score = db.Column(db.Float, default=0.0)
+    descriptive_avg_score = db.Column(db.Float, default=0.0)
+    
+    # Status tracking
+    status = db.Column(db.String(20), default="not_started")  # not_started, learning, practicing, mastered
+    
+    first_activity_at = db.Column(db.DateTime)
+    last_activity_at = db.Column(db.DateTime)
+    
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    __table_args__ = (
+        db.UniqueConstraint('user_id', 'classroom_topic_id', name='unique_user_classroom_topic'),
+        db.Index('idx_student_topic_score_user', 'user_id'),
+        db.Index('idx_student_topic_score_topic', 'classroom_topic_id'),
+    )
+    
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "user_id": self.user_id,
+            "classroom_topic_id": self.classroom_topic_id,
+            "total_score": self.total_score,
+            "max_possible_score": self.max_possible_score,
+            "mastery_percentage": round(self.mastery_percentage, 1),
+            "mcq_attempts": self.mcq_attempts,
+            "mcq_correct": self.mcq_correct,
+            "mcq_accuracy": round((self.mcq_correct / self.mcq_attempts * 100) if self.mcq_attempts > 0 else 0, 1),
+            "descriptive_attempts": self.descriptive_attempts,
+            "descriptive_avg_score": round(self.descriptive_avg_score, 1),
+            "status": self.status,
+            "last_activity_at": self.last_activity_at.isoformat() if self.last_activity_at else None
+        }
+    
+    def update_mcq_score(self, correct: bool, marks: int):
+        """Update after MCQ answer"""
+        self.mcq_attempts += 1
+        self.mcq_max_score += marks
+        self.max_possible_score += marks
+        
+        if correct:
+            self.mcq_correct += 1
+            self.mcq_total_score += marks
+            self.total_score += marks
+        
+        self._recalculate_mastery()
+        self.last_activity_at = datetime.utcnow()
+        if not self.first_activity_at:
+            self.first_activity_at = datetime.utcnow()
+    
+    def update_descriptive_score(self, score_awarded: float, max_score: float):
+        """Update after descriptive answer"""
+        self.descriptive_attempts += 1
+        self.descriptive_total_score += score_awarded
+        self.descriptive_max_score += max_score
+        self.total_score += score_awarded
+        self.max_possible_score += max_score
+        
+        # Update running average
+        self.descriptive_avg_score = (
+            self.descriptive_total_score / self.descriptive_max_score * 100
+        ) if self.descriptive_max_score > 0 else 0
+        
+        self._recalculate_mastery()
+        self.last_activity_at = datetime.utcnow()
+        if not self.first_activity_at:
+            self.first_activity_at = datetime.utcnow()
+    
+    def _recalculate_mastery(self):
+        """Recalculate mastery percentage based on all scores"""
+        if self.max_possible_score > 0:
+            self.mastery_percentage = (self.total_score / self.max_possible_score) * 100
+        else:
+            self.mastery_percentage = 0.0
+        
+        # Update status based on mastery
+        if self.mastery_percentage >= 80:
+            self.status = "mastered"
+        elif self.mastery_percentage >= 50:
+            self.status = "practicing"
+        elif self.mastery_percentage > 0:
+            self.status = "learning"
+        else:
+            self.status = "not_started"
+
+
+class StudentQuestionResponse(db.Model):
+    """
+    Individual question response record.
+    Stores both MCQ and descriptive answers with scoring details.
+    """
+    __tablename__ = "student_question_responses"
+    
+    id = db.Column(db.String(36), primary_key=True, default=generate_uuid)
+    user_id = db.Column(db.String(36), db.ForeignKey("users.id"), nullable=False, index=True)
+    question_id = db.Column(db.String(36), db.ForeignKey("topic_questions.id"), nullable=False, index=True)
+    
+    # Response content
+    response_type = db.Column(db.String(20), nullable=False)  # "mcq" or "descriptive"
+    
+    # For MCQ
+    selected_option = db.Column(db.String(10))  # "A", "B", "C", "D"
+    is_correct = db.Column(db.Boolean)
+    
+    # For Descriptive
+    descriptive_response = db.Column(db.Text)
+    matched_key_points = db.Column(JSON, default=list)  # Which key points were covered
+    
+    # Scoring
+    score_awarded = db.Column(db.Float, default=0.0)
+    max_score = db.Column(db.Float, default=1.0)
+    score_percentage = db.Column(db.Float, default=0.0)  # 0-100
+    
+    # AI evaluation (for descriptive)
+    ai_feedback = db.Column(db.Text)
+    ai_confidence = db.Column(db.Float)  # 0-1
+    
+    # Timing
+    response_time_ms = db.Column(db.Integer)  # Time taken to answer
+    
+    # Source tracking
+    source = db.Column(db.String(30), nullable=False)  # "assessment", "mock_interview", "practice"
+    source_session_id = db.Column(db.String(36))  # Reference to exam/interview session
+    
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    __table_args__ = (
+        db.Index('idx_response_user', 'user_id'),
+        db.Index('idx_response_question', 'question_id'),
+        db.Index('idx_response_source', 'source', 'source_session_id'),
+    )
+    
+    def to_dict(self, include_feedback=True):
+        data = {
+            "id": self.id,
+            "user_id": self.user_id,
+            "question_id": self.question_id,
+            "response_type": self.response_type,
+            "selected_option": self.selected_option if self.response_type == "mcq" else None,
+            "is_correct": self.is_correct if self.response_type == "mcq" else None,
+            "descriptive_response": self.descriptive_response if self.response_type == "descriptive" else None,
+            "score_awarded": self.score_awarded,
+            "max_score": self.max_score,
+            "score_percentage": round(self.score_percentage, 1),
+            "response_time_ms": self.response_time_ms,
+            "source": self.source,
+            "created_at": self.created_at.isoformat() if self.created_at else None
+        }
+        
+        if include_feedback and self.response_type == "descriptive":
+            data["ai_feedback"] = self.ai_feedback
+            data["matched_key_points"] = self.matched_key_points
+        
+        return data

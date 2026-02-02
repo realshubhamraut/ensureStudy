@@ -1,22 +1,38 @@
 """
 Assessment Routes
+Enhanced with assessment creation, challenges, and AI integration
 """
 from flask import Blueprint, request, jsonify
 from datetime import datetime
 from uuid import uuid4
 from app import db
-from app.models.user import Assessment, AssessmentResult, Progress
+from app.models.user import Assessment, AssessmentResult, Progress, AssessmentChallenge, User
 from app.routes.users import require_auth, require_teacher
 
 assessments_bp = Blueprint("assessments", __name__, url_prefix="/api/assessments")
 
 
+# ============================================================================
+# Assessment CRUD Endpoints
+# ============================================================================
+
 @assessments_bp.route("/", methods=["GET"])
 @require_auth
 def list_assessments():
-    """List available assessments"""
+    """
+    List available assessments with filtering.
+    Query params:
+    - subject: Filter by subject
+    - difficulty: Filter by difficulty
+    - assessment_type: Filter by type (teacher_created, self_practice, student_challenge)
+    - classroom_id: Filter by classroom
+    - created_by_me: If 'true', show only assessments created by current user
+    """
     subject = request.args.get("subject")
     difficulty = request.args.get("difficulty")
+    assessment_type = request.args.get("assessment_type")
+    classroom_id = request.args.get("classroom_id")
+    created_by_me = request.args.get("created_by_me") == "true"
     
     query = Assessment.query
     
@@ -24,11 +40,17 @@ def list_assessments():
         query = query.filter_by(subject=subject)
     if difficulty:
         query = query.filter_by(difficulty=difficulty)
+    if assessment_type:
+        query = query.filter_by(assessment_type=assessment_type)
+    if classroom_id:
+        query = query.filter_by(classroom_id=classroom_id)
+    if created_by_me:
+        query = query.filter_by(created_by=request.user_id)
     
-    assessments = query.order_by(Assessment.created_at.desc()).limit(50).all()
+    assessments = query.order_by(Assessment.created_at.desc()).limit(100).all()
     
     return jsonify({
-        "assessments": [a.to_dict() for a in assessments],
+        "assessments": [a.to_dict(include_questions=False) for a in assessments],
         "count": len(assessments)
     }), 200
 
@@ -36,38 +58,61 @@ def list_assessments():
 @assessments_bp.route("/<assessment_id>", methods=["GET"])
 @require_auth
 def get_assessment(assessment_id):
-    """Get assessment details"""
+    """Get assessment details with questions"""
     assessment = Assessment.query.get(assessment_id)
     
     if not assessment:
         return jsonify({"error": "Assessment not found"}), 404
     
-    return jsonify({"assessment": assessment.to_dict()}), 200
+    return jsonify({"assessment": assessment.to_dict(include_questions=True)}), 200
 
 
 @assessments_bp.route("/", methods=["POST"])
-@require_teacher
+@require_auth
 def create_assessment():
-    """Create new assessment (teacher only)"""
+    """
+    Create new assessment.
+    Accepts new fields for enhanced assessment creation:
+    - assessment_type: teacher_created | self_practice | student_challenge
+    - classroom_id: Optional classroom link
+    - use_ai_questions: Boolean flag for AI generation
+    - source_topics: List of topic IDs to pull questions from
+    - source_chapters: List of chapter IDs
+    - include_weak_topics: Boolean to include user's weak topics
+    """
     data = request.get_json()
+    user = User.query.get(request.user_id)
     
-    required_fields = ["topic", "subject", "questions"]
-    for field in required_fields:
-        if not data.get(field):
-            return jsonify({"error": f"Missing required field: {field}"}), 400
+    # For teacher_created, require teacher role
+    assessment_type = data.get("assessment_type", "teacher_created")
+    if assessment_type == "teacher_created" and user.role != "teacher":
+        return jsonify({"error": "Only teachers can create teacher assessments"}), 403
     
+    # Validate required fields
+    if not data.get("questions") and not data.get("use_ai_questions"):
+        return jsonify({"error": "Either questions or use_ai_questions is required"}), 400
+    
+    # Build assessment
     assessment = Assessment(
-        id=uuid4(),
-        topic=data["topic"],
-        subject=data["subject"],
-        title=data.get("title", f"{data['topic']} Assessment"),
+        id=str(uuid4()),
+        topic=data.get("topic", "General"),
+        subject=data.get("subject", "General"),
+        title=data.get("title", f"{data.get('topic', 'General')} Assessment"),
         description=data.get("description"),
-        questions=data["questions"],
+        questions=data.get("questions", []),
         difficulty=data.get("difficulty", "medium"),
         time_limit_minutes=data.get("time_limit_minutes", 30),
         is_adaptive=data.get("is_adaptive", False),
         scheduled_date=datetime.fromisoformat(data["scheduled_date"]) if data.get("scheduled_date") else None,
-        created_by=request.user_id
+        created_by=request.user_id,
+        # New fields
+        assessment_type=assessment_type,
+        classroom_id=data.get("classroom_id"),
+        use_ai_questions=data.get("use_ai_questions", False),
+        source_topics=data.get("source_topics", []),
+        source_chapters=data.get("source_chapters", []),
+        include_weak_topics=data.get("include_weak_topics", False),
+        is_challenge=data.get("is_challenge", False)
     )
     
     db.session.add(assessment)
@@ -75,6 +120,29 @@ def create_assessment():
     
     return jsonify({"assessment": assessment.to_dict()}), 201
 
+
+@assessments_bp.route("/<assessment_id>", methods=["DELETE"])
+@require_auth
+def delete_assessment(assessment_id):
+    """Delete an assessment (owner or teacher only)"""
+    assessment = Assessment.query.get(assessment_id)
+    
+    if not assessment:
+        return jsonify({"error": "Assessment not found"}), 404
+    
+    user = User.query.get(request.user_id)
+    if assessment.created_by != request.user_id and user.role != "teacher":
+        return jsonify({"error": "Not authorized to delete this assessment"}), 403
+    
+    db.session.delete(assessment)
+    db.session.commit()
+    
+    return jsonify({"message": "Assessment deleted"}), 200
+
+
+# ============================================================================
+# Assessment Submission
+# ============================================================================
 
 @assessments_bp.route("/<assessment_id>/submit", methods=["POST"])
 @require_auth
@@ -118,7 +186,7 @@ def submit_assessment(assessment_id):
     
     # Save result
     result = AssessmentResult(
-        id=uuid4(),
+        id=str(uuid4()),
         user_id=request.user_id,
         assessment_id=assessment_id,
         answers=answers,
@@ -152,6 +220,10 @@ def submit_assessment(assessment_id):
         progress.confidence_score = sum(recent_scores) / len(recent_scores)
         progress.is_weak = progress.confidence_score < 50
     
+    # Update challenge if this is part of one
+    if assessment.is_challenge:
+        _update_challenge_score(assessment, request.user_id, score)
+    
     db.session.commit()
     
     return jsonify({
@@ -162,6 +234,32 @@ def submit_assessment(assessment_id):
         "feedback": feedback
     }), 200
 
+
+def _update_challenge_score(assessment, user_id, score):
+    """Update challenge scores when an assessment is completed"""
+    # Find challenge where this assessment is used
+    challenge = AssessmentChallenge.query.filter(
+        (AssessmentChallenge.assessment_id == assessment.id) |
+        (AssessmentChallenge.recipient_assessment_id == assessment.id)
+    ).first()
+    
+    if not challenge:
+        return
+    
+    if challenge.sender_id == user_id:
+        challenge.sender_score = score
+    elif challenge.recipient_id == user_id:
+        challenge.recipient_score = score
+    
+    # Check if both have completed
+    if challenge.sender_score is not None and challenge.recipient_score is not None:
+        challenge.status = "completed"
+        challenge.completed_at = datetime.utcnow()
+
+
+# ============================================================================
+# User Results
+# ============================================================================
 
 @assessments_bp.route("/results", methods=["GET"])
 @require_auth
@@ -192,3 +290,348 @@ def get_assessment_results(assessment_id):
         return jsonify({"error": "Result not found"}), 404
     
     return jsonify({"result": result.to_dict()}), 200
+
+
+# ============================================================================
+# My Assessments (Created by user)
+# ============================================================================
+
+@assessments_bp.route("/my-assessments", methods=["GET"])
+@require_auth
+def get_my_assessments():
+    """Get assessments created by current user"""
+    assessments = Assessment.query.filter_by(
+        created_by=request.user_id
+    ).order_by(Assessment.created_at.desc()).limit(50).all()
+    
+    return jsonify({
+        "assessments": [a.to_dict(include_questions=False) for a in assessments],
+        "count": len(assessments)
+    }), 200
+
+
+# ============================================================================
+# Weak Topics for Assessment Targeting
+# ============================================================================
+
+@assessments_bp.route("/weak-topics", methods=["GET"])
+@require_auth
+def get_weak_topics():
+    """Get user's weak topics for assessment targeting"""
+    classroom_id = request.args.get("classroom_id")
+    
+    # Get progress records where user is weak
+    weak_progress = Progress.query.filter_by(
+        user_id=request.user_id,
+        is_weak=True
+    ).all()
+    
+    weak_topics = []
+    for p in weak_progress:
+        weak_topics.append({
+            "topic": p.topic,
+            "subject": p.subject,
+            "confidence_score": p.confidence_score,
+            "last_studied": p.last_studied.isoformat() if p.last_studied else None
+        })
+    
+    # Also check StudentTopicScore for classroom topics if classroom_id provided
+    if classroom_id:
+        try:
+            from app.models.curriculum import StudentTopicScore, ClassroomTopic
+            
+            low_scores = StudentTopicScore.query.filter(
+                StudentTopicScore.user_id == request.user_id,
+                StudentTopicScore.mastery_percentage < 50
+            ).all()
+            
+            for score in low_scores:
+                topic = ClassroomTopic.query.get(score.classroom_topic_id)
+                if topic and topic.classroom_id == classroom_id:
+                    weak_topics.append({
+                        "topic_id": topic.id,
+                        "topic": topic.name,
+                        "chapter_id": topic.chapter_id,
+                        "mastery_percentage": score.mastery_percentage,
+                        "status": score.status
+                    })
+        except Exception:
+            pass  # Models may not exist in test
+    
+    return jsonify({
+        "weak_topics": weak_topics,
+        "count": len(weak_topics)
+    }), 200
+
+
+# ============================================================================
+# Challenge System
+# ============================================================================
+
+@assessments_bp.route("/challenge", methods=["POST"])
+@require_auth
+def send_challenge():
+    """
+    Send an assessment challenge to another student.
+    Request body:
+    - assessment_id: ID of the assessment to challenge with
+    - recipient_id: ID of the student to challenge
+    - message: Optional challenge message
+    """
+    data = request.get_json()
+    
+    assessment_id = data.get("assessment_id")
+    recipient_id = data.get("recipient_id")
+    message = data.get("message")
+    
+    if not assessment_id or not recipient_id:
+        return jsonify({"error": "assessment_id and recipient_id are required"}), 400
+    
+    # Validate assessment
+    assessment = Assessment.query.get(assessment_id)
+    if not assessment:
+        return jsonify({"error": "Assessment not found"}), 404
+    
+    # Can't challenge yourself
+    if recipient_id == request.user_id:
+        return jsonify({"error": "Cannot challenge yourself"}), 400
+    
+    # Validate recipient
+    recipient = User.query.get(recipient_id)
+    if not recipient:
+        return jsonify({"error": "Recipient not found"}), 404
+    
+    # Check if challenge already exists
+    existing = AssessmentChallenge.query.filter_by(
+        assessment_id=assessment_id,
+        sender_id=request.user_id,
+        recipient_id=recipient_id,
+        status="pending"
+    ).first()
+    
+    if existing:
+        return jsonify({"error": "Challenge already sent"}), 409
+    
+    # Get sender's score if they've completed the assessment
+    sender_result = AssessmentResult.query.filter_by(
+        user_id=request.user_id,
+        assessment_id=assessment_id
+    ).order_by(AssessmentResult.completed_at.desc()).first()
+    
+    challenge = AssessmentChallenge(
+        id=str(uuid4()),
+        assessment_id=assessment_id,
+        sender_id=request.user_id,
+        recipient_id=recipient_id,
+        status="pending",
+        sender_score=sender_result.score if sender_result else None,
+        challenge_message=message
+    )
+    
+    db.session.add(challenge)
+    db.session.commit()
+    
+    return jsonify({
+        "challenge": challenge.to_dict(include_assessment=True),
+        "message": "Challenge sent successfully"
+    }), 201
+
+
+@assessments_bp.route("/challenges/sent", methods=["GET"])
+@require_auth
+def get_sent_challenges():
+    """Get challenges sent by current user"""
+    challenges = AssessmentChallenge.query.filter_by(
+        sender_id=request.user_id
+    ).order_by(AssessmentChallenge.sent_at.desc()).limit(50).all()
+    
+    return jsonify({
+        "challenges": [c.to_dict(include_assessment=True) for c in challenges],
+        "count": len(challenges)
+    }), 200
+
+
+@assessments_bp.route("/challenges/received", methods=["GET"])
+@require_auth
+def get_received_challenges():
+    """Get challenges received by current user"""
+    status = request.args.get("status")  # Optional filter: pending, accepted, declined, completed
+    
+    query = AssessmentChallenge.query.filter_by(recipient_id=request.user_id)
+    
+    if status:
+        query = query.filter_by(status=status)
+    
+    challenges = query.order_by(AssessmentChallenge.sent_at.desc()).limit(50).all()
+    
+    return jsonify({
+        "challenges": [c.to_dict(include_assessment=True) for c in challenges],
+        "count": len(challenges)
+    }), 200
+
+
+@assessments_bp.route("/challenges/<challenge_id>/accept", methods=["POST"])
+@require_auth
+def accept_challenge(challenge_id):
+    """Accept a challenge - clones the assessment for the recipient"""
+    challenge = AssessmentChallenge.query.get(challenge_id)
+    
+    if not challenge:
+        return jsonify({"error": "Challenge not found"}), 404
+    
+    if challenge.recipient_id != request.user_id:
+        return jsonify({"error": "Not authorized"}), 403
+    
+    if challenge.status != "pending":
+        return jsonify({"error": f"Challenge already {challenge.status}"}), 400
+    
+    # Clone the assessment for the recipient
+    original = Assessment.query.get(challenge.assessment_id)
+    if not original:
+        return jsonify({"error": "Original assessment not found"}), 404
+    
+    cloned = Assessment(
+        id=str(uuid4()),
+        topic=original.topic,
+        subject=original.subject,
+        title=f"Challenge: {original.title}",
+        description=original.description,
+        questions=original.questions,
+        difficulty=original.difficulty,
+        time_limit_minutes=original.time_limit_minutes,
+        is_adaptive=original.is_adaptive,
+        created_by=request.user_id,
+        assessment_type="student_challenge",
+        classroom_id=original.classroom_id,
+        use_ai_questions=original.use_ai_questions,
+        source_topics=original.source_topics,
+        source_chapters=original.source_chapters,
+        is_challenge=True,
+        original_assessment_id=original.id
+    )
+    
+    db.session.add(cloned)
+    
+    # Update challenge
+    challenge.status = "accepted"
+    challenge.responded_at = datetime.utcnow()
+    challenge.recipient_assessment_id = cloned.id
+    
+    db.session.commit()
+    
+    return jsonify({
+        "challenge": challenge.to_dict(include_assessment=True),
+        "assessment": cloned.to_dict(include_questions=False),
+        "message": "Challenge accepted"
+    }), 200
+
+
+@assessments_bp.route("/challenges/<challenge_id>/decline", methods=["POST"])
+@require_auth
+def decline_challenge(challenge_id):
+    """Decline a challenge"""
+    challenge = AssessmentChallenge.query.get(challenge_id)
+    
+    if not challenge:
+        return jsonify({"error": "Challenge not found"}), 404
+    
+    if challenge.recipient_id != request.user_id:
+        return jsonify({"error": "Not authorized"}), 403
+    
+    if challenge.status != "pending":
+        return jsonify({"error": f"Challenge already {challenge.status}"}), 400
+    
+    challenge.status = "declined"
+    challenge.responded_at = datetime.utcnow()
+    
+    db.session.commit()
+    
+    return jsonify({
+        "challenge": challenge.to_dict(),
+        "message": "Challenge declined"
+    }), 200
+
+
+@assessments_bp.route("/challenges/<challenge_id>", methods=["GET"])
+@require_auth
+def get_challenge(challenge_id):
+    """Get challenge details including comparison if completed"""
+    challenge = AssessmentChallenge.query.get(challenge_id)
+    
+    if not challenge:
+        return jsonify({"error": "Challenge not found"}), 404
+    
+    # Only sender or recipient can view
+    if challenge.sender_id != request.user_id and challenge.recipient_id != request.user_id:
+        return jsonify({"error": "Not authorized"}), 403
+    
+    data = challenge.to_dict(include_assessment=True)
+    
+    # Add comparison data if completed
+    if challenge.status == "completed":
+        data["comparison"] = {
+            "sender_score": challenge.sender_score,
+            "recipient_score": challenge.recipient_score,
+            "winner": "sender" if (challenge.sender_score or 0) > (challenge.recipient_score or 0) else "recipient" if (challenge.recipient_score or 0) > (challenge.sender_score or 0) else "tie",
+            "difference": abs((challenge.sender_score or 0) - (challenge.recipient_score or 0))
+        }
+    
+    return jsonify({"challenge": data}), 200
+
+
+# ============================================================================
+# Available Students for Challenging
+# ============================================================================
+
+@assessments_bp.route("/challenge/students", methods=["GET"])
+@require_auth
+def get_challengeable_students():
+    """Get list of students that can be challenged (classmates)"""
+    classroom_id = request.args.get("classroom_id")
+    
+    try:
+        from app.models.classroom import StudentEnrollment
+        
+        if classroom_id:
+            enrollments = StudentEnrollment.query.filter(
+                StudentEnrollment.classroom_id == classroom_id,
+                StudentEnrollment.user_id != request.user_id,
+                StudentEnrollment.status == "active"
+            ).all()
+            
+            student_ids = [e.user_id for e in enrollments]
+        else:
+            # Get all classmates from any enrolled classroom
+            my_enrollments = StudentEnrollment.query.filter_by(
+                user_id=request.user_id,
+                status="active"
+            ).all()
+            
+            my_classroom_ids = [e.classroom_id for e in my_enrollments]
+            
+            enrollments = StudentEnrollment.query.filter(
+                StudentEnrollment.classroom_id.in_(my_classroom_ids),
+                StudentEnrollment.user_id != request.user_id,
+                StudentEnrollment.status == "active"
+            ).all()
+            
+            student_ids = list(set([e.user_id for e in enrollments]))
+        
+        students = User.query.filter(User.id.in_(student_ids)).all()
+        
+        return jsonify({
+            "students": [{
+                "id": s.id,
+                "username": s.username,
+                "name": f"{s.first_name or ''} {s.last_name or ''}".strip() or s.username,
+                "avatar_url": s.avatar_url
+            } for s in students],
+            "count": len(students)
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            "students": [],
+            "count": 0,
+            "error": str(e)
+        }), 200

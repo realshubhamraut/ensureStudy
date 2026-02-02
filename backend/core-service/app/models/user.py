@@ -129,30 +129,57 @@ class Assessment(db.Model):
     title = db.Column(db.String(300))
     description = db.Column(db.Text)
     questions = db.Column(JSON, nullable=False)  # Array of question objects
-    difficulty = db.Column(db.String(20), default="medium")  # easy, medium, hard
+    difficulty = db.Column(db.String(20), default="medium")  # easy, medium, hard, mixed
     time_limit_minutes = db.Column(db.Integer, default=30)
     is_adaptive = db.Column(db.Boolean, default=False)
     scheduled_date = db.Column(db.DateTime)
     created_by = db.Column(db.String(36), db.ForeignKey("users.id"))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
+    # NEW: Assessment type and creation context
+    assessment_type = db.Column(db.String(30), default="teacher_created")  # teacher_created, self_practice, student_challenge
+    classroom_id = db.Column(db.String(36), db.ForeignKey("classrooms.id"), nullable=True, index=True)
+    
+    # NEW: AI generation options
+    use_ai_questions = db.Column(db.Boolean, default=False)
+    
+    # NEW: Source filters used to create assessment (topic/chapter IDs)
+    source_topics = db.Column(JSON, default=list)  # List of ClassroomTopic IDs
+    source_chapters = db.Column(JSON, default=list)  # List of Chapter IDs
+    include_weak_topics = db.Column(db.Boolean, default=False)
+    
+    # NEW: Challenge support
+    is_challenge = db.Column(db.Boolean, default=False)
+    original_assessment_id = db.Column(db.String(36), nullable=True)  # If cloned from challenge
+    
     # Relationships
     results = db.relationship("AssessmentResult", backref="assessment", cascade="all, delete-orphan")
     
-    def to_dict(self):
-        return {
+    def to_dict(self, include_questions=True):
+        data = {
             "id": str(self.id),
             "topic": self.topic,
             "subject": self.subject,
             "title": self.title,
             "description": self.description,
-            "questions": self.questions,
             "difficulty": self.difficulty,
             "time_limit_minutes": self.time_limit_minutes,
             "is_adaptive": self.is_adaptive,
             "scheduled_date": self.scheduled_date.isoformat() if self.scheduled_date else None,
-            "created_at": self.created_at.isoformat() if self.created_at else None
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "created_by": self.created_by,
+            "assessment_type": self.assessment_type,
+            "classroom_id": self.classroom_id,
+            "use_ai_questions": self.use_ai_questions,
+            "source_topics": self.source_topics or [],
+            "source_chapters": self.source_chapters or [],
+            "include_weak_topics": self.include_weak_topics,
+            "is_challenge": self.is_challenge,
+            "num_questions": len(self.questions) if self.questions else 0
         }
+        if include_questions:
+            data["questions"] = self.questions
+        return data
 
 
 class AssessmentResult(db.Model):
@@ -300,3 +327,65 @@ class StudyNote(db.Model):
             "is_ai_generated": self.is_ai_generated,
             "created_at": self.created_at.isoformat() if self.created_at else None
         }
+
+
+class AssessmentChallenge(db.Model):
+    """Track assessment challenges between students"""
+    __tablename__ = "assessment_challenges"
+    
+    id = db.Column(db.String(36), primary_key=True, default=generate_uuid)
+    
+    # The assessment being shared
+    assessment_id = db.Column(db.String(36), db.ForeignKey("assessments.id"), nullable=False, index=True)
+    
+    # Sender & recipient
+    sender_id = db.Column(db.String(36), db.ForeignKey("users.id"), nullable=False, index=True)
+    recipient_id = db.Column(db.String(36), db.ForeignKey("users.id"), nullable=False, index=True)
+    
+    # Challenge status: pending, accepted, declined, completed
+    status = db.Column(db.String(20), default="pending", index=True)
+    
+    # Results comparison
+    sender_score = db.Column(db.Float)  # Sender's score on the assessment
+    recipient_score = db.Column(db.Float)  # Recipient's score on the assessment
+    recipient_assessment_id = db.Column(db.String(36))  # Cloned assessment for recipient tracking
+    
+    # Optional message
+    challenge_message = db.Column(db.Text)
+    
+    # Timestamps
+    sent_at = db.Column(db.DateTime, default=datetime.utcnow)
+    responded_at = db.Column(db.DateTime)
+    completed_at = db.Column(db.DateTime)
+    
+    # Relationships
+    assessment = db.relationship("Assessment", backref="challenges")
+    sender = db.relationship("User", foreign_keys=[sender_id], backref="sent_challenges")
+    recipient = db.relationship("User", foreign_keys=[recipient_id], backref="received_challenges")
+    
+    __table_args__ = (
+        db.Index('idx_challenge_sender', 'sender_id'),
+        db.Index('idx_challenge_recipient', 'recipient_id'),
+        db.Index('idx_challenge_status', 'status'),
+    )
+    
+    def to_dict(self, include_assessment=False):
+        data = {
+            "id": str(self.id),
+            "assessment_id": str(self.assessment_id),
+            "sender_id": str(self.sender_id),
+            "recipient_id": str(self.recipient_id),
+            "status": self.status,
+            "sender_score": self.sender_score,
+            "recipient_score": self.recipient_score,
+            "challenge_message": self.challenge_message,
+            "sent_at": self.sent_at.isoformat() if self.sent_at else None,
+            "responded_at": self.responded_at.isoformat() if self.responded_at else None,
+            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
+            # Include sender/recipient info
+            "sender_name": f"{self.sender.first_name or ''} {self.sender.last_name or ''}".strip() or self.sender.username if self.sender else None,
+            "recipient_name": f"{self.recipient.first_name or ''} {self.recipient.last_name or ''}".strip() or self.recipient.username if self.recipient else None
+        }
+        if include_assessment and self.assessment:
+            data["assessment"] = self.assessment.to_dict(include_questions=False)
+        return data

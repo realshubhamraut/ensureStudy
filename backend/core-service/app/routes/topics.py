@@ -453,7 +453,56 @@ def get_topics_by_classrooms():
             "subtopics_count": len(subtopics),
             "subtopics_mastered": subtopics_mastered,
             "subtopics_attempted": subtopics_attempted,
-            "is_weak": confidence_score < 50
+            "is_weak": confidence_score < 50,
+            "source": "personal_curriculum"
+        }
+        result.append(topic_data)
+    
+    # ========================================================================
+    # Also include ClassroomTopics from syllabus with StudentTopicScore
+    # ========================================================================
+    from app.models.curriculum import ClassroomTopic, Chapter, StudentTopicScore
+    
+    classroom_topics = ClassroomTopic.query.filter(
+        ClassroomTopic.classroom_id.in_(classroom_ids),
+        ClassroomTopic.is_active == True
+    ).all()
+    
+    # Get chapters for names
+    chapters = Chapter.query.filter(
+        Chapter.classroom_id.in_(classroom_ids),
+        Chapter.is_active == True
+    ).all()
+    chapter_map = {ch.id: ch for ch in chapters}
+    
+    # Get student's mastery scores
+    score_records = StudentTopicScore.query.filter(
+        StudentTopicScore.user_id == user_id,
+        StudentTopicScore.classroom_topic_id.in_([t.id for t in classroom_topics])
+    ).all() if classroom_topics else []
+    score_map = {s.classroom_topic_id: s for s in score_records}
+    
+    for ct in classroom_topics:
+        chapter = chapter_map.get(ct.chapter_id)
+        score = score_map.get(ct.id)
+        mastery = score.mastery_percentage if score else 0
+        
+        topic_data = {
+            "id": ct.id,
+            "name": ct.name,
+            "description": ct.description,
+            "difficulty": ct.difficulty,
+            "estimated_hours": ct.estimated_hours,
+            "subject_id": None,
+            "subject_name": chapter.name if chapter else "Classroom Topic",
+            "subject_icon": "📚",
+            "confidence_score": round(mastery, 1),
+            "subtopics_count": 0,
+            "subtopics_mastered": 1 if mastery >= 80 else 0,
+            "subtopics_attempted": 1 if score else 0,
+            "is_weak": mastery < 50,
+            "source": "classroom_syllabus",
+            "chapter_color": chapter.color if chapter else "#3B82F6"
         }
         result.append(topic_data)
     

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { getAiServiceUrl } from '@/utils/api'
+import { getAiServiceUrl, getApiBaseUrl } from '@/utils/api'
 import {
     AcademicCapIcon,
     CalendarDaysIcon,
@@ -15,7 +15,8 @@ import {
     TrashIcon,
     EyeIcon,
     EyeSlashIcon,
-    Cog6ToothIcon
+    Cog6ToothIcon,
+    ListBulletIcon
 } from '@heroicons/react/24/outline'
 import dynamic from 'next/dynamic'
 
@@ -24,6 +25,8 @@ const LearningStyleQuiz = dynamic(() => import('@/components/curriculum/Learning
 const ExamPrepModal = dynamic(() => import('@/components/curriculum/ExamPrepModal'), { ssr: false })
 const SyllabusUploadModal = dynamic(() => import('@/components/curriculum/SyllabusUploadModal'), { ssr: false })
 const WeeklyCalendar = dynamic(() => import('@/components/curriculum/WeeklyCalendar'), { ssr: false })
+const ClassroomTopicHierarchy = dynamic(() => import('@/components/curriculum/ClassroomTopicHierarchy'), { ssr: false })
+const ProgressDashboard = dynamic(() => import('@/components/curriculum/ProgressDashboard'), { ssr: false })
 
 // ============================================================================
 // Types
@@ -62,6 +65,13 @@ interface TopicScore {
     status: string
 }
 
+interface EnrolledClassroom {
+    id: string
+    name: string
+    subject?: string
+    teacher_name?: string
+}
+
 // ============================================================================
 // Main Component
 // ============================================================================
@@ -88,6 +98,11 @@ export default function CurriculumPage() {
     const [hiddenCurricula, setHiddenCurricula] = useState<Set<string>>(new Set())
     const [hoverCurriculumId, setHoverCurriculumId] = useState<string | null>(null)
 
+    // Classroom topics state
+    const [activeTab, setActiveTab] = useState<'calendar' | 'topics' | 'progress'>('calendar')
+    const [enrolledClassrooms, setEnrolledClassrooms] = useState<EnrolledClassroom[]>([])
+    const [selectedClassroomId, setSelectedClassroomId] = useState<string | null>(null)
+
     // ========================================================================
     // API Calls
     // ========================================================================
@@ -110,6 +125,24 @@ export default function CurriculumPage() {
             console.error('Failed to fetch curricula:', error)
         } finally {
             setLoading(false)
+        }
+    }
+
+    const fetchEnrolledClassrooms = async () => {
+        try {
+            const res = await fetch(`${getApiBaseUrl()}/api/classroom/student/my-classrooms`, {
+                headers: { 'Authorization': `Bearer ${localStorage.getItem('accessToken')}` }
+            })
+            if (res.ok) {
+                const data = await res.json()
+                setEnrolledClassrooms(data.classrooms || [])
+                // Auto-select first classroom with topics
+                if (data.classrooms?.length > 0 && !selectedClassroomId) {
+                    setSelectedClassroomId(data.classrooms[0].id)
+                }
+            }
+        } catch (error) {
+            console.error('Failed to fetch enrolled classrooms:', error)
         }
     }
 
@@ -184,6 +217,7 @@ export default function CurriculumPage() {
     useEffect(() => {
         setMounted(true)  // Mark as client-side mounted
         fetchCurricula()
+        fetchEnrolledClassrooms()
     }, [])
 
     useEffect(() => {
@@ -233,6 +267,39 @@ export default function CurriculumPage() {
                     <p className="text-gray-600 mt-1">Weekly learning calendar with confidence tracking</p>
                 </div>
                 <div className="flex items-center gap-2">
+                    {/* Tab switcher */}
+                    <div className="flex rounded-lg border border-gray-200 p-0.5 bg-gray-50">
+                        <button
+                            onClick={() => setActiveTab('calendar')}
+                            className={`px-3 py-1.5 text-sm rounded-md flex items-center gap-1.5 transition-colors ${activeTab === 'calendar'
+                                ? 'bg-white text-primary-600 shadow-sm font-medium'
+                                : 'text-gray-600 hover:text-gray-900'
+                                }`}
+                        >
+                            <CalendarDaysIcon className="w-4 h-4" />
+                            Calendar
+                        </button>
+                        <button
+                            onClick={() => setActiveTab('topics')}
+                            className={`px-3 py-1.5 text-sm rounded-md flex items-center gap-1.5 transition-colors ${activeTab === 'topics'
+                                ? 'bg-white text-primary-600 shadow-sm font-medium'
+                                : 'text-gray-600 hover:text-gray-900'
+                                }`}
+                        >
+                            <ListBulletIcon className="w-4 h-4" />
+                            Topics
+                        </button>
+                        <button
+                            onClick={() => setActiveTab('progress')}
+                            className={`px-3 py-1.5 text-sm rounded-md flex items-center gap-1.5 transition-colors ${activeTab === 'progress'
+                                ? 'bg-white text-primary-600 shadow-sm font-medium'
+                                : 'text-gray-600 hover:text-gray-900'
+                                }`}
+                        >
+                            <ChartBarIcon className="w-4 h-4" />
+                            Progress
+                        </button>
+                    </div>
                     <button
                         onClick={() => setShowSyllabusUpload(true)}
                         className="px-3 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 flex items-center gap-2"
@@ -408,39 +475,96 @@ export default function CurriculumPage() {
                         </div>
                     </div>
 
-                    {/* Weekly Calendar */}
-                    <div className="card">
-                        {selectedCurriculumId && hiddenCurricula.has(selectedCurriculumId) ? (
-                            <div className="p-8 text-center">
-                                <EyeSlashIcon className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-                                <p className="text-gray-500 font-medium">Subject Hidden</p>
-                                <p className="text-sm text-gray-400 mt-1">
-                                    Topics for this subject are hidden from the calendar view.
-                                </p>
-                                <button
-                                    onClick={() => {
-                                        setHiddenCurricula(prev => {
-                                            const newSet = new Set(prev)
-                                            newSet.delete(selectedCurriculumId!)
-                                            return newSet
-                                        })
+                    {/* Content based on active tab */}
+                    {activeTab === 'calendar' ? (
+                        /* Weekly Calendar */
+                        <div className="card">
+                            {selectedCurriculumId && hiddenCurricula.has(selectedCurriculumId) ? (
+                                <div className="p-8 text-center">
+                                    <EyeSlashIcon className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                                    <p className="text-gray-500 font-medium">Subject Hidden</p>
+                                    <p className="text-sm text-gray-400 mt-1">
+                                        Topics for this subject are hidden from the calendar view.
+                                    </p>
+                                    <button
+                                        onClick={() => {
+                                            setHiddenCurricula(prev => {
+                                                const newSet = new Set(prev)
+                                                newSet.delete(selectedCurriculumId!)
+                                                return newSet
+                                            })
+                                        }}
+                                        className="mt-4 px-4 py-2 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 inline-flex items-center gap-2"
+                                    >
+                                        <EyeIcon className="w-4 h-4" />
+                                        Show Topics
+                                    </button>
+                                </div>
+                            ) : (
+                                <WeeklyCalendar
+                                    schedule={weeklySchedule}
+                                    loading={scheduleLoading}
+                                    onWeekChange={handleWeekChange}
+                                    onReschedule={handleReschedule}
+                                    weekOffset={weekOffset}
+                                />
+                            )}
+                        </div>
+                    ) : (
+                        /* Topics Hierarchy View */
+                        <div className="card p-4">
+                            {/* Classroom selector if multiple enrolled */}
+                            {enrolledClassrooms.length > 1 && (
+                                <div className="mb-4">
+                                    <label className="text-sm font-medium text-gray-700 mb-2 block">
+                                        Select Classroom
+                                    </label>
+                                    <select
+                                        value={selectedClassroomId || ''}
+                                        onChange={(e) => setSelectedClassroomId(e.target.value)}
+                                        className="w-full md:w-64 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                                    >
+                                        {enrolledClassrooms.map(c => (
+                                            <option key={c.id} value={c.id}>
+                                                {c.name} {c.subject && `(${c.subject})`}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+                            )}
+
+                            {/* Topic hierarchy */}
+                            {selectedClassroomId ? (
+                                <ClassroomTopicHierarchy
+                                    classroomId={selectedClassroomId}
+                                    userId={localStorage.getItem('userId') || undefined}
+                                    showMastery={true}
+                                    onTopicClick={(topic) => {
+                                        // Could navigate to topic practice or show modal
+                                        console.log('Topic clicked:', topic)
                                     }}
-                                    className="mt-4 px-4 py-2 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 inline-flex items-center gap-2"
-                                >
-                                    <EyeIcon className="w-4 h-4" />
-                                    Show Topics
-                                </button>
-                            </div>
-                        ) : (
-                            <WeeklyCalendar
-                                schedule={weeklySchedule}
-                                loading={scheduleLoading}
-                                onWeekChange={handleWeekChange}
-                                onReschedule={handleReschedule}
-                                weekOffset={weekOffset}
+                                />
+                            ) : enrolledClassrooms.length === 0 ? (
+                                <div className="text-center py-8">
+                                    <AcademicCapIcon className="w-12 h-12 mx-auto mb-2 text-gray-300" />
+                                    <p className="text-gray-500 font-medium">No classroom topics yet</p>
+                                    <p className="text-sm text-gray-400 mt-1">
+                                        Join a classroom or upload a syllabus to see topics
+                                    </p>
+                                </div>
+                            ) : null}
+                        </div>
+                    )}
+
+                    {/* Progress Tab Content */}
+                    {activeTab === 'progress' && (
+                        <div className="card p-6">
+                            <ProgressDashboard
+                                classroomId={selectedClassroomId || undefined}
+                                userId={localStorage.getItem('userId') || undefined}
                             />
-                        )}
-                    </div>
+                        </div>
+                    )}
 
                     {/* Score Sources Info */}
                     <div className="card p-4 bg-blue-50 border-blue-100">
@@ -474,10 +598,11 @@ export default function CurriculumPage() {
                 </div>
             )}
 
-            {showExamPrepModal && (
+            {showExamPrepModal && selectedCurriculumId && (
                 <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
                     <ExamPrepModal
-                        topics={topicScores.map(t => ({ id: t.topic_id, name: t.topic_name }))}
+                        curriculumId={selectedCurriculumId}
+                        subjectName={curricula.find(c => c.id === selectedCurriculumId)?.subject_name || 'Subject'}
                         onClose={() => setShowExamPrepModal(false)}
                     />
                 </div>

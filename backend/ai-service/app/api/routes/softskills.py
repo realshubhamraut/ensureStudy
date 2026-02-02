@@ -9,7 +9,7 @@ Provides endpoints for evaluating communication skills:
 - Real-time frame analysis via WebSocket
 """
 
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form, WebSocket, WebSocketDisconnect, Header
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict
 import json
@@ -977,6 +977,109 @@ async def evaluate_interview_answer(request: InterviewAnswerRequest):
             breakdown={"clarity": 60, "relevance": 60, "completeness": 60},
             suggestions=["Try to provide more specific examples", "Explain your reasoning in detail"]
         )
+
+
+# ============================================
+# Interview Results Persistence
+# ============================================
+
+class SaveInterviewResultsRequest(BaseModel):
+    """Request to save interview results."""
+    user_id: str = ""
+    # Support both single topic_id and array of topic_ids
+    topic_id: str = ""  # Backward compatibility
+    topic_ids: List[str] = []  # New multi-topic support
+    score: float  # Average score from the interview (0-100)
+    questions_count: int
+    time_spent_minutes: int = 0
+
+
+@router.post("/interview/save-results")
+async def save_interview_results(
+    request: SaveInterviewResultsRequest,
+    authorization: str = Header(None)
+):
+    """
+    Save interview results to update topic progress.
+    
+    Calls the Core API to update the student's mastery score for each topic.
+    Supports both single topic_id (backward compatible) and topic_ids array.
+    """
+    import logging
+    import httpx
+    import os
+    
+    logger = logging.getLogger(__name__)
+    
+    # Collect all topic IDs (backward compatible)
+    all_topic_ids = list(request.topic_ids) if request.topic_ids else []
+    if request.topic_id and request.topic_id not in all_topic_ids:
+        all_topic_ids.append(request.topic_id)
+    
+    if not all_topic_ids:
+        return {
+            "success": False,
+            "message": "No topic IDs provided"
+        }
+    
+    logger.info(f"[Interview] Saving results for {len(all_topic_ids)} topics: score={request.score}")
+    
+    saved_topics = []
+    failed_topics = []
+    
+    try:
+        # Get Core API URL
+        core_api_url = os.getenv("CORE_API_URL", "http://localhost:5001")
+        
+        async with httpx.AsyncClient() as client:
+            # Update progress for each topic
+            for topic_id in all_topic_ids:
+                try:
+                    response = await client.post(
+                        f"{core_api_url}/api/classroom/topic-scores/update-descriptive",
+                        json={
+                            "user_id": request.user_id,
+                            "topic_id": topic_id,
+                            "score_awarded": request.score * request.questions_count / 100,
+                            "max_score": float(request.questions_count)
+                        },
+                        headers={
+                            "Authorization": authorization,
+                            "Content-Type": "application/json"
+                        },
+                        timeout=10.0
+                    )
+                    
+                    if response.status_code == 200:
+                        logger.info(f"[Interview] Results saved for topic {topic_id}")
+                        saved_topics.append(topic_id)
+                    else:
+                        logger.warning(f"[Interview] Core API returned {response.status_code} for topic {topic_id}")
+                        failed_topics.append(topic_id)
+                        
+                except Exception as e:
+                    logger.error(f"[Interview] Error saving results for topic {topic_id}: {e}")
+                    failed_topics.append(topic_id)
+        
+        return {
+            "success": True,
+            "message": f"Interview results saved for {len(saved_topics)} topics",
+            "topic_ids": all_topic_ids,
+            "saved_count": len(saved_topics),
+            "failed_count": len(failed_topics),
+            "score": request.score
+        }
+                
+    except Exception as e:
+        logger.error(f"[Interview] Error saving results: {e}")
+        # Return success to not block the frontend experience
+        return {
+            "success": True,
+            "message": "Interview completed",
+            "topic_ids": all_topic_ids,
+            "score": request.score,
+            "warning": "Progress update may be delayed"
+        }
 
 
 @router.get("/interview/health")

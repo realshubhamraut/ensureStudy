@@ -32,6 +32,8 @@ import {
 } from '@heroicons/react/24/outline'
 import PDFViewer from '@/components/PDFViewer'
 import ImageViewer from '@/components/ImageViewer'
+import TeacherSyllabusModal from '@/components/classroom/TeacherSyllabusModal'
+import TeacherTopicManager from '@/components/classroom/TeacherTopicManager'
 
 interface Student {
     id: string
@@ -131,7 +133,7 @@ interface Classroom {
     has_syllabus?: boolean
 }
 
-type TabType = 'stream' | 'materials' | 'meet' | 'assignments' | 'students' | 'settings'
+type TabType = 'stream' | 'materials' | 'meet' | 'assignments' | 'topics' | 'students' | 'settings'
 
 export default function TeacherClassroomDetailPage() {
     const params = useParams()
@@ -160,6 +162,7 @@ export default function TeacherClassroomDetailPage() {
     const [savingSyllabus, setSavingSyllabus] = useState(false)
     const [syllabusFile, setSyllabusFile] = useState<File | null>(null)
     const [showSyllabusModal, setShowSyllabusModal] = useState(false)
+    const [showTopicExtractModal, setShowTopicExtractModal] = useState(false)
 
     // Document Viewer Modal state (for Materials)
     const [showDocumentViewer, setShowDocumentViewer] = useState(false)
@@ -954,6 +957,13 @@ export default function TeacherClassroomDetailPage() {
                                             <TrashIcon className="w-4 h-4" />
                                             Remove
                                         </button>
+                                        <button
+                                            onClick={() => setShowTopicExtractModal(true)}
+                                            className="px-3 py-1.5 bg-white/20 hover:bg-white/30 rounded-lg text-sm flex items-center gap-1"
+                                        >
+                                            <AcademicCapIcon className="w-4 h-4" />
+                                            Extract Topics
+                                        </button>
                                     </div>
                                 </div>
                             ) : (
@@ -998,6 +1008,7 @@ export default function TeacherClassroomDetailPage() {
                     { id: 'materials', label: 'Materials', icon: FolderIcon },
                     { id: 'meet', label: 'Meet', icon: VideoCameraIcon },
                     { id: 'assignments', label: `Assignments (${assignments.length})`, icon: AcademicCapIcon },
+                    { id: 'topics', label: 'Topics', icon: BookOpenIcon },
                     { id: 'students', label: `Students (${students.length})`, icon: UsersIcon },
                     { id: 'settings', label: 'Settings', icon: Cog6ToothIcon },
                 ].map(tab => (
@@ -1423,6 +1434,16 @@ export default function TeacherClassroomDetailPage() {
                             ))}
                         </div>
                     )}
+                </div>
+            )}
+
+            {/* Topics Tab */}
+            {activeTab === 'topics' && (
+                <div className="card">
+                    <TeacherTopicManager
+                        classroomId={classroomId}
+                        onUpdate={fetchClassroom}
+                    />
                 </div>
             )}
 
@@ -1999,6 +2020,20 @@ export default function TeacherClassroomDetailPage() {
                         )}
                     </div>
                 </div>
+            )}
+
+            {/* Teacher Syllabus AI Extraction Modal */}
+            {showTopicExtractModal && classroom && (
+                <TeacherSyllabusModal
+                    classroomId={classroomId}
+                    classroomName={classroom.name}
+                    onSuccess={(data) => {
+                        setShowTopicExtractModal(false)
+                        alert(`Successfully extracted ${data.chapters_count || 0} chapters and ${data.topics_count || 0} topics!`)
+                        fetchClassroom()
+                    }}
+                    onClose={() => setShowTopicExtractModal(false)}
+                />
             )}
         </div>
     )

@@ -48,9 +48,28 @@ function InterviewSessionContent() {
     const searchParams = useSearchParams()
     const router = useRouter()
 
-    const subject = searchParams.get('subject') || 'physics'
-    const chapter = searchParams.get('chapter') || 'Mechanics'
+    // Read correct URL params from mock interview selection page
+    // New multi-topic params
+    const topicIdsParam = searchParams.get('topics') || ''
+    const topicNamesParam = searchParams.get('topic_names') || ''
+    // Backward compatibility with single topic
+    const legacyTopicId = searchParams.get('topic') || ''
+    const legacyTopicName = searchParams.get('topic_name') || ''
+
+    // Parse topic IDs and names
+    const topicIds = topicIdsParam ? topicIdsParam.split(',') : (legacyTopicId ? [legacyTopicId] : [])
+    const topicNames = topicNamesParam ? topicNamesParam.split(',') : (legacyTopicName ? [legacyTopicName] : ['General Topic'])
+
+    const displayTopicName = topicNames.length > 1
+        ? `${topicNames[0]} (+${topicNames.length - 1} more)`
+        : topicNames[0] || 'General Topic'
+
+    const classrooms = searchParams.get('classrooms') || 'all'
     const avatarId = (searchParams.get('avatar') || 'female') as 'male' | 'female'
+
+    // Legacy params (fallback for backward compatibility)
+    const subject = displayTopicName
+    const chapter = displayTopicName
 
     const [sessionState, setSessionState] = useState<SessionState>('ready')
     const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0)
@@ -243,6 +262,45 @@ function InterviewSessionContent() {
         }
     }, [AI_SERVICE_URL, subject])
 
+    // Save interview results to update topic progress
+    const saveInterviewResults = useCallback(async (finalScores: number[]) => {
+        if (topicIds.length === 0) {
+            console.log('[MockInterview] No topic IDs - skipping save')
+            return
+        }
+
+        const averageScore = finalScores.length > 0
+            ? Math.round(finalScores.reduce((a, b) => a + b, 0) / finalScores.length)
+            : 0
+
+        console.log('[MockInterview] Saving interview results - topicIds:', topicIds, 'score:', averageScore)
+
+        try {
+            // Update topic progress for each topic
+            const response = await fetch(`${AI_SERVICE_URL}/api/softskills/interview/save-results`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
+                },
+                body: JSON.stringify({
+                    topic_ids: topicIds,
+                    score: averageScore,
+                    questions_count: finalScores.length,
+                    time_spent_minutes: Math.round(timeElapsed / 60)
+                })
+            })
+
+            if (response.ok) {
+                console.log('[MockInterview] Results saved successfully')
+            } else {
+                console.error('[MockInterview] Failed to save results:', response.status)
+            }
+        } catch (error) {
+            console.error('[MockInterview] Error saving results:', error)
+        }
+    }, [topicIds, AI_SERVICE_URL, timeElapsed])
+
     // Submit current answer and move to next question
     const submitAnswer = useCallback(async () => {
         console.log('[MockInterview] Submit answer called')
@@ -274,15 +332,20 @@ function InterviewSessionContent() {
             setSessionState('speaking')
             await speak(DEMO_QUESTIONS[currentQuestionIndex + 1])
         } else {
-            // Interview complete
+            // Interview complete - save results and update UI
             console.log('[MockInterview] Interview complete!')
+
+            // Calculate final score from all scores including this one
+            const finalScores = [...scores, score]
+            await saveInterviewResults(finalScores)
+
             setSessionState('complete')
             stopCamera()
             if (timerRef.current) {
                 clearInterval(timerRef.current)
             }
         }
-    }, [transcript, currentQuestion, currentQuestionIndex, stopListening, resetTranscript, speak, stopCamera, evaluateAnswer])
+    }, [transcript, currentQuestion, currentQuestionIndex, stopListening, resetTranscript, speak, stopCamera, evaluateAnswer, scores, saveInterviewResults])
 
     // Format time
     const formatTime = (seconds: number) => {
