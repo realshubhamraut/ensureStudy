@@ -898,11 +898,32 @@ export default function AITutorPage() {
                         console.log('[SSE] Loading status:', event.data)
                     })
 
-                    eventSource.addEventListener('complete', (event) => {
+                    eventSource.addEventListener('complete', async (event) => {
                         console.log('[SSE] Complete:', event.data)
                         setIsLoadingPdfs(false)
                         eventSource.close()
                         sseRef.current = null
+
+                        // Save all accumulated sources (including PDFs from SSE) to backend
+                        // We need to get current sources state and save them
+                        setSources(currentSources => {
+                            if (currentSources.length > 0 && conv?.id) {
+                                // Fire and forget - save sources to backend
+                                fetch(`${getApiBaseUrl()}/api/chat/conversations/${conv.id}/sources`, {
+                                    method: 'POST',
+                                    headers: {
+                                        'Content-Type': 'application/json',
+                                        'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
+                                    },
+                                    body: JSON.stringify({ sources: currentSources })
+                                }).then(() => {
+                                    console.log('[SSE] ✅ Saved', currentSources.length, 'sources to conversation')
+                                }).catch(err => {
+                                    console.error('[SSE] Failed to save sources:', err)
+                                })
+                            }
+                            return currentSources  // Don't modify state
+                        })
                     })
 
                     eventSource.onerror = (err) => {
@@ -925,6 +946,23 @@ export default function AITutorPage() {
                             sseRef.current.close()
                             sseRef.current = null
                             setIsLoadingPdfs(false)
+
+                            // Save any sources that were added before timeout
+                            setSources(currentSources => {
+                                if (currentSources.length > 0 && conv?.id) {
+                                    fetch(`${getApiBaseUrl()}/api/chat/conversations/${conv.id}/sources`, {
+                                        method: 'POST',
+                                        headers: {
+                                            'Content-Type': 'application/json',
+                                            'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
+                                        },
+                                        body: JSON.stringify({ sources: currentSources })
+                                    }).then(() => {
+                                        console.log('[SSE] ✅ Saved sources on timeout')
+                                    }).catch(err => console.error('[SSE] Save error:', err))
+                                }
+                                return currentSources
+                            })
                         }
                     }, 120000)
                 } else if (!hasPdfsAlready) {

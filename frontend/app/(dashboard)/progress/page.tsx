@@ -8,7 +8,9 @@ import {
     ArrowTrendingDownIcon,
     AcademicCapIcon,
     FireIcon,
-    ArrowPathIcon
+    ArrowPathIcon,
+    ChevronDownIcon,
+    ChevronUpIcon
 } from '@heroicons/react/24/outline'
 import clsx from 'clsx'
 
@@ -48,6 +50,10 @@ export default function ProgressPage() {
     const [overview, setOverview] = useState<ProgressOverview | null>(null)
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState<string | null>(null)
+    const [showAllWeakTopics, setShowAllWeakTopics] = useState(false)
+    const [showAllStrongTopics, setShowAllStrongTopics] = useState(false)
+
+    const MAX_VISIBLE_TOPICS = 10
 
     const apiUrl = getApiBaseUrl()
 
@@ -59,12 +65,12 @@ export default function ProgressPage() {
                 setLoading(true)
                 setError(null)
 
-                // Fetch both overview and topics list in parallel
-                const [overviewRes, topicsRes] = await Promise.all([
+                // Fetch overview and topic mastery (classroom-based only) in parallel
+                const [overviewRes, masteryRes] = await Promise.all([
                     fetch(`${apiUrl}/api/progress/overview`, {
                         headers: { 'Authorization': `Bearer ${session?.accessToken}` }
                     }),
-                    fetch(`${apiUrl}/api/progress/topics-list`, {
+                    fetch(`${apiUrl}/api/progress/topic-mastery`, {
                         headers: { 'Authorization': `Bearer ${session?.accessToken}` }
                     })
                 ])
@@ -74,13 +80,22 @@ export default function ProgressPage() {
                     setOverview(overviewData)
                 }
 
-                if (topicsRes.ok) {
-                    const topicsData = await topicsRes.json()
-                    setTopics(topicsData)
+                if (masteryRes.ok) {
+                    const masteryData = await masteryRes.json()
+                    // Transform topic-mastery format to TopicProgress format
+                    const transformedTopics: TopicProgress[] = (masteryData.topics || []).map((t: any) => ({
+                        topic: t.topic_name,
+                        subject: t.chapter_name || 'Unknown',
+                        confidence: t.mastery_level || 0,
+                        isWeak: t.mastery_level < 50,
+                        timesStudied: t.total_attempts || 0,
+                        lastStudied: t.last_activity || 'Never'
+                    }))
+                    setTopics(transformedTopics)
                 }
 
                 // If no data found, use empty arrays
-                if (!overviewRes.ok && !topicsRes.ok) {
+                if (!overviewRes.ok && !masteryRes.ok) {
                     setError('No progress data found. Start learning to track your progress!')
                 }
             } catch (err) {
@@ -178,15 +193,40 @@ export default function ProgressPage() {
             <div className="grid md:grid-cols-2 gap-6">
                 {/* Weak Topics */}
                 <div className="card border-l-4 border-warning-500">
-                    <div className="flex items-center gap-2 mb-4">
-                        <ArrowTrendingDownIcon className="w-5 h-5 text-warning-600" />
-                        <h2 className="text-lg font-bold text-gray-900">Topics to Improve</h2>
+                    <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center gap-2">
+                            <ArrowTrendingDownIcon className="w-5 h-5 text-warning-600" />
+                            <h2 className="text-lg font-bold text-gray-900">Topics to Improve</h2>
+                            {weakTopics.length > 0 && (
+                                <span className="text-sm text-gray-500">({weakTopics.length})</span>
+                            )}
+                        </div>
                     </div>
                     <div className="space-y-3">
                         {weakTopics.length > 0 ? (
-                            weakTopics.map((topic, idx) => (
-                                <TopicRow key={idx} {...topic} />
-                            ))
+                            <>
+                                {(showAllWeakTopics ? weakTopics : weakTopics.slice(0, MAX_VISIBLE_TOPICS)).map((topic, idx) => (
+                                    <TopicRow key={idx} {...topic} />
+                                ))}
+                                {weakTopics.length > MAX_VISIBLE_TOPICS && (
+                                    <button
+                                        onClick={() => setShowAllWeakTopics(!showAllWeakTopics)}
+                                        className="w-full flex items-center justify-center gap-2 py-2 mt-2 text-sm font-medium text-warning-600 hover:text-warning-700 hover:bg-warning-50 rounded-lg transition-colors"
+                                    >
+                                        {showAllWeakTopics ? (
+                                            <>
+                                                <ChevronUpIcon className="w-4 h-4" />
+                                                Show Less
+                                            </>
+                                        ) : (
+                                            <>
+                                                <ChevronDownIcon className="w-4 h-4" />
+                                                Show {weakTopics.length - MAX_VISIBLE_TOPICS} More
+                                            </>
+                                        )}
+                                    </button>
+                                )}
+                            </>
                         ) : (
                             <p className="text-gray-500 text-sm">No weak topics - great job!</p>
                         )}
@@ -195,15 +235,40 @@ export default function ProgressPage() {
 
                 {/* Strong Topics */}
                 <div className="card border-l-4 border-success-500">
-                    <div className="flex items-center gap-2 mb-4">
-                        <ArrowTrendingUpIcon className="w-5 h-5 text-success-600" />
-                        <h2 className="text-lg font-bold text-gray-900">Strong Topics</h2>
+                    <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center gap-2">
+                            <ArrowTrendingUpIcon className="w-5 h-5 text-success-600" />
+                            <h2 className="text-lg font-bold text-gray-900">Strong Topics</h2>
+                            {strongTopics.length > 0 && (
+                                <span className="text-sm text-gray-500">({strongTopics.length})</span>
+                            )}
+                        </div>
                     </div>
                     <div className="space-y-3">
                         {strongTopics.length > 0 ? (
-                            strongTopics.map((topic, idx) => (
-                                <TopicRow key={idx} {...topic} />
-                            ))
+                            <>
+                                {(showAllStrongTopics ? strongTopics : strongTopics.slice(0, MAX_VISIBLE_TOPICS)).map((topic, idx) => (
+                                    <TopicRow key={idx} {...topic} />
+                                ))}
+                                {strongTopics.length > MAX_VISIBLE_TOPICS && (
+                                    <button
+                                        onClick={() => setShowAllStrongTopics(!showAllStrongTopics)}
+                                        className="w-full flex items-center justify-center gap-2 py-2 mt-2 text-sm font-medium text-success-600 hover:text-success-700 hover:bg-success-50 rounded-lg transition-colors"
+                                    >
+                                        {showAllStrongTopics ? (
+                                            <>
+                                                <ChevronUpIcon className="w-4 h-4" />
+                                                Show Less
+                                            </>
+                                        ) : (
+                                            <>
+                                                <ChevronDownIcon className="w-4 h-4" />
+                                                Show {strongTopics.length - MAX_VISIBLE_TOPICS} More
+                                            </>
+                                        )}
+                                    </button>
+                                )}
+                            </>
                         ) : (
                             <p className="text-gray-500 text-sm">Keep studying to build strong topics!</p>
                         )}

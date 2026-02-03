@@ -136,6 +136,51 @@ def get_dashboard():
     }), 200
 
 
+# ==================== Classroom Management ====================
+
+@admin_bp.route("/classrooms", methods=["GET"])
+@admin_required
+def list_classrooms():
+    """List all classrooms in organization"""
+    from app.models.classroom import Classroom, StudentClassroom
+    
+    user = request.current_user
+    org = Organization.query.filter_by(admin_user_id=user.id).first()
+    
+    if not org:
+        return jsonify({"error": "No organization found"}), 404
+    
+    classrooms = Classroom.query.filter_by(organization_id=org.id).all()
+    
+    result = []
+    for classroom in classrooms:
+        # Get teacher info
+        teacher = User.query.get(classroom.teacher_id)
+        teacher_name = f"{teacher.first_name or ''} {teacher.last_name or ''}".strip() if teacher else "Unknown"
+        
+        # Get student count
+        student_count = StudentClassroom.query.filter_by(classroom_id=classroom.id, is_active=True).count()
+        
+        result.append({
+            "id": classroom.id,
+            "name": classroom.name,
+            "grade": classroom.grade,
+            "section": classroom.section,
+            "subject": classroom.subject,
+            "teacher_id": classroom.teacher_id,
+            "teacher_name": teacher_name,
+            "student_count": student_count,
+            "teacher_count": 1,  # Each classroom has one primary teacher
+            "is_active": classroom.is_active,
+            "created_at": classroom.created_at.isoformat() if classroom.created_at else None
+        })
+    
+    return jsonify({
+        "classrooms": result,
+        "count": len(result)
+    }), 200
+
+
 # ==================== Teacher Management ====================
 
 @admin_bp.route("/teachers", methods=["GET"])

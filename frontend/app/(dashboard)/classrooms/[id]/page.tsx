@@ -34,6 +34,7 @@ import PDFViewer from '@/components/PDFViewer'
 import ImageViewer from '@/components/ImageViewer'
 import { RecordingsList } from '@/components/meeting/RecordingsList'
 import { MeetingQA } from '@/components/meeting/MeetingQA'
+import StudentTopicsViewer from '@/components/classroom/StudentTopicsViewer'
 
 interface Material {
     id: string
@@ -137,7 +138,7 @@ interface Classroom {
     has_syllabus?: boolean
 }
 
-type TabType = 'stream' | 'materials' | 'sessions' | 'assignments' | 'results'
+type TabType = 'stream' | 'materials' | 'sessions' | 'assignments' | 'topics' | 'results'
 type DateFilter = 'all' | 'today' | 'yesterday' | 'week' | 'custom'
 
 export default function StudentClassroomDetailPage() {
@@ -708,6 +709,7 @@ export default function StudentClassroomDetailPage() {
                     { id: 'materials', label: 'Materials', icon: FolderIcon },
                     { id: 'sessions', label: 'Class Sessions', icon: VideoCameraIcon },
                     { id: 'assignments', label: `Assignments (${assignments.length})`, icon: AcademicCapIcon },
+                    { id: 'topics', label: 'Topics', icon: BookOpenIcon },
                     { id: 'results', label: `Results${examResults.length > 0 ? ` (${examResults.length})` : ''}`, icon: CheckCircleIcon },
                 ].map(tab => (
                     <button
@@ -1496,6 +1498,13 @@ export default function StudentClassroomDetailPage() {
                     accessToken={localStorage.getItem('accessToken') || ''}
                     aiServiceUrl={process.env.NEXT_PUBLIC_AI_SERVICE_URL || 'http://localhost:9001'}
                 />
+            )}
+
+            {/* Topics Tab */}
+            {activeTab === 'topics' && (
+                <div className="card">
+                    <StudentTopicsViewer classroomId={classroomId} />
+                </div>
             )}
 
             {/* Results Tab */}

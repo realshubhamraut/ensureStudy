@@ -1491,6 +1491,60 @@ export default function TeacherClassroomDetailPage() {
                             </button>
                         </div>
                     </div>
+
+                    {/* Danger Zone */}
+                    <div className="card border-2 border-red-200 bg-red-50/30">
+                        <h3 className="text-lg font-bold text-red-600 mb-4 flex items-center gap-2">
+                            ⚠️ Danger Zone
+                        </h3>
+                        <div className="space-y-4">
+                            <div className="flex items-center justify-between p-4 bg-white rounded-lg border border-red-200">
+                                <div>
+                                    <p className="font-medium text-gray-900">Delete Classroom</p>
+                                    <p className="text-sm text-gray-500">
+                                        Permanently delete this classroom and all its data (materials, announcements, meetings, students enrollments).
+                                    </p>
+                                </div>
+                                <button
+                                    onClick={async () => {
+                                        const confirmText = prompt(
+                                            `This action cannot be undone. All materials, announcements, meetings, and student enrollments will be permanently deleted.\n\nType "${classroom.name}" to confirm deletion:`
+                                        )
+                                        if (confirmText !== classroom.name) {
+                                            if (confirmText !== null) {
+                                                alert('Classroom name did not match. Deletion cancelled.')
+                                            }
+                                            return
+                                        }
+
+                                        try {
+                                            const res = await fetch(`${getApiBaseUrl()}/api/classroom/${classroomId}`, {
+                                                method: 'DELETE',
+                                                headers: {
+                                                    'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
+                                                }
+                                            })
+
+                                            if (res.ok) {
+                                                alert('Classroom deleted successfully')
+                                                router.push('/teacher/classrooms')
+                                            } else {
+                                                const data = await res.json()
+                                                alert(`Failed to delete classroom: ${data.error || 'Unknown error'}`)
+                                            }
+                                        } catch (error) {
+                                            console.error('Delete failed:', error)
+                                            alert('Failed to delete classroom')
+                                        }
+                                    }}
+                                    className="px-4 py-2 bg-red-600 text-white font-medium rounded-lg hover:bg-red-700 transition-colors flex items-center gap-2 whitespace-nowrap"
+                                >
+                                    <TrashIcon className="w-4 h-4" />
+                                    Delete Classroom
+                                </button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             )}
 

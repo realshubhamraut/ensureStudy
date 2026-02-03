@@ -1,9 +1,14 @@
 """
 Curriculum Routes - Subject, Topic, Subtopic API
 """
+from datetime import datetime, date, timedelta
 from flask import Blueprint, request, jsonify
 from app import db
-from app.models.curriculum import Subject, Topic, Subtopic, SubtopicAssessment, StudentSubtopicProgress
+from app.models.curriculum import (
+    Subject, Topic, Subtopic, SubtopicAssessment, StudentSubtopicProgress,
+    StudyScheduleEntry, ClassroomTopic, Chapter
+)
+from app.models.classroom import StudentClassroom, Classroom
 from app.models.user import User
 from app.utils.jwt_handler import verify_token
 
@@ -390,4 +395,283 @@ def get_progress():
         "by_subject": subject_progress,
         "total_completed": sum(s["completed"] for s in subject_progress.values()),
         "total_mastered": sum(s["mastered"] for s in subject_progress.values())
+    }), 200
+
+
+# ==================== Study Schedule ====================
+
+@curriculum_bp.route("/study-schedule", methods=["GET"])
+@auth_required
+def get_study_schedule():
+    """Get student's study schedule for a date range"""
+    user = request.current_user
+    
+    if user.role != "student":
+        return jsonify({"error": "Only students can view study schedule"}), 403
+    
+    # Parse date range (default: current week)
+    start_date_str = request.args.get("start_date")
+    end_date_str = request.args.get("end_date")
+    
+    if start_date_str:
+        start_date = date.fromisoformat(start_date_str)
+    else:
+        today = date.today()
+        start_date = today - timedelta(days=today.weekday())  # Monday of current week
+    
+    if end_date_str:
+        end_date = date.fromisoformat(end_date_str)
+    else:
+        end_date = start_date + timedelta(days=6)  # Sunday
+    
+    # Fetch schedule entries
+    entries = StudyScheduleEntry.query.filter(
+        StudyScheduleEntry.user_id == user.id,
+        StudyScheduleEntry.scheduled_date >= start_date,
+        StudyScheduleEntry.scheduled_date <= end_date
+    ).order_by(StudyScheduleEntry.scheduled_date).all()
+    
+    # Group by date
+    schedule_by_date = {}
+    for entry in entries:
+        date_key = entry.scheduled_date.isoformat()
+        if date_key not in schedule_by_date:
+            schedule_by_date[date_key] = []
+        schedule_by_date[date_key].append(entry.to_dict())
+    
+    return jsonify({
+        "schedule": schedule_by_date,
+        "start_date": start_date.isoformat(),
+        "end_date": end_date.isoformat(),
+        "total_entries": len(entries)
+    }), 200
+
+
+@curriculum_bp.route("/study-schedule", methods=["POST"])
+@auth_required
+def add_to_schedule():
+    """Add a topic to student's study schedule"""
+    user = request.current_user
+    
+    if user.role != "student":
+        return jsonify({"error": "Only students can modify study schedule"}), 403
+    
+    data = request.get_json()
+    
+    # Required fields
+    classroom_topic_id = data.get("classroom_topic_id")
+    scheduled_date_str = data.get("scheduled_date")
+    
+    if not classroom_topic_id or not scheduled_date_str:
+        return jsonify({"error": "classroom_topic_id and scheduled_date are required"}), 400
+    
+    # Parse date
+    try:
+        scheduled_date = date.fromisoformat(scheduled_date_str)
+    except ValueError:
+        return jsonify({"error": "Invalid date format. Use YYYY-MM-DD"}), 400
+    
+    # Get topic details
+    topic = ClassroomTopic.query.get(classroom_topic_id)
+    if not topic:
+        return jsonify({"error": "Topic not found"}), 404
+    
+    # Get chapter and classroom for denormalized data
+    chapter = Chapter.query.get(topic.chapter_id)
+    classroom = Classroom.query.get(topic.classroom_id)
+    
+    # Create schedule entry
+    entry = StudyScheduleEntry(
+        user_id=user.id,
+        classroom_topic_id=classroom_topic_id,
+        topic_name=topic.name,
+        topic_description=topic.description,
+        subject_name=classroom.name if classroom else None,
+        chapter_name=chapter.name if chapter else None,
+        scheduled_date=scheduled_date,
+        estimated_hours=topic.estimated_hours or 1.0,
+        status="scheduled"
+    )
+    
+    db.session.add(entry)
+    db.session.commit()
+    
+    return jsonify({
+        "message": "Topic added to schedule",
+        "entry": entry.to_dict()
+    }), 201
+
+
+@curriculum_bp.route("/study-schedule/<entry_id>", methods=["PUT"])
+@auth_required
+def update_schedule_entry(entry_id):
+    """Update a schedule entry (reschedule or mark complete)"""
+    user = request.current_user
+    
+    if user.role != "student":
+        return jsonify({"error": "Only students can modify study schedule"}), 403
+    
+    entry = StudyScheduleEntry.query.filter_by(id=entry_id, user_id=user.id).first()
+    
+    if not entry:
+        return jsonify({"error": "Schedule entry not found"}), 404
+    
+    data = request.get_json()
+    
+    # Update allowed fields
+    if "scheduled_date" in data:
+        try:
+            entry.scheduled_date = date.fromisoformat(data["scheduled_date"])
+        except ValueError:
+            return jsonify({"error": "Invalid date format"}), 400
+    
+    if "status" in data:
+        valid_statuses = ["scheduled", "in_progress", "completed", "skipped"]
+        if data["status"] not in valid_statuses:
+            return jsonify({"error": f"Invalid status. Use: {valid_statuses}"}), 400
+        entry.status = data["status"]
+        if data["status"] == "completed":
+            entry.completed_at = datetime.utcnow()
+    
+    if "actual_hours" in data:
+        entry.actual_hours = float(data["actual_hours"])
+    
+    if "notes" in data:
+        entry.notes = data["notes"]
+    
+    db.session.commit()
+    
+    return jsonify({
+        "message": "Schedule entry updated",
+        "entry": entry.to_dict()
+    }), 200
+
+
+@curriculum_bp.route("/study-schedule/<entry_id>", methods=["DELETE"])
+@auth_required
+def delete_schedule_entry(entry_id):
+    """Remove a topic from schedule"""
+    user = request.current_user
+    
+    if user.role != "student":
+        return jsonify({"error": "Only students can modify study schedule"}), 403
+    
+    entry = StudyScheduleEntry.query.filter_by(id=entry_id, user_id=user.id).first()
+    
+    if not entry:
+        return jsonify({"error": "Schedule entry not found"}), 404
+    
+    db.session.delete(entry)
+    db.session.commit()
+    
+    return jsonify({"message": "Entry removed from schedule"}), 200
+
+
+# ==================== Classroom Topics ====================
+
+@curriculum_bp.route("/classroom-topics/<topic_id>", methods=["GET"])
+@auth_required
+def get_classroom_topic(topic_id):
+    """Get a classroom topic by ID."""
+    topic = ClassroomTopic.query.get(topic_id)
+    
+    if not topic:
+        return jsonify({"error": "Topic not found"}), 404
+    
+    return jsonify({
+        "success": True,
+        "topic": topic.to_dict()
+    }), 200
+
+
+# ==================== Enrolled Topics ====================
+
+
+@curriculum_bp.route("/enrolled-topics", methods=["GET"])
+@auth_required
+def get_enrolled_topics():
+    """
+    Get all topics from enrolled classrooms, grouped by classroom/subject.
+    Used for the curriculum page topic sidebar.
+    """
+    user = request.current_user
+    
+    if user.role != "student":
+        return jsonify({"error": "Only students can view enrolled topics"}), 403
+    
+    # Get all classrooms the student is enrolled in
+    enrollments = StudentClassroom.query.filter_by(student_id=user.id).all()
+    classroom_ids = [e.classroom_id for e in enrollments]
+    
+    if not classroom_ids:
+        return jsonify({
+            "classrooms": [],
+            "total_topics": 0,
+            "total_chapters": 0
+        }), 200
+    
+    result = []
+    total_topics = 0
+    total_chapters = 0
+    
+    for classroom_id in classroom_ids:
+        classroom = Classroom.query.get(classroom_id)
+        if not classroom:
+            continue
+        
+        # Get chapters for this classroom
+        chapters = Chapter.query.filter_by(
+            classroom_id=classroom_id,
+            is_active=True
+        ).order_by(Chapter.order).all()
+        
+        if not chapters:
+            continue
+        
+        classroom_data = {
+            "classroom_id": classroom.id,
+            "classroom_name": classroom.name,
+            "subject": classroom.subject,
+            "chapters": []
+        }
+        
+        for chapter in chapters:
+            # Get topics for this chapter
+            topics = ClassroomTopic.query.filter_by(
+                chapter_id=chapter.id,
+                is_active=True
+            ).order_by(ClassroomTopic.order).all()
+            
+            chapter_data = {
+                "id": chapter.id,
+                "name": chapter.name,
+                "color": chapter.color,
+                "order": chapter.order,
+                "topics": []
+            }
+            
+            for topic in topics:
+                topic_data = {
+                    "id": topic.id,
+                    "name": topic.name,
+                    "description": topic.description,
+                    "key_concepts": topic.key_concepts or [],
+                    "difficulty": topic.difficulty,
+                    "estimated_hours": topic.estimated_hours or 1.0,
+                    "order": topic.order
+                }
+                chapter_data["topics"].append(topic_data)
+                total_topics += 1
+            
+            if chapter_data["topics"]:  # Only include chapters with topics
+                classroom_data["chapters"].append(chapter_data)
+                total_chapters += 1
+        
+        if classroom_data["chapters"]:  # Only include classrooms with chapters
+            result.append(classroom_data)
+    
+    return jsonify({
+        "classrooms": result,
+        "total_topics": total_topics,
+        "total_chapters": total_chapters
     }), 200

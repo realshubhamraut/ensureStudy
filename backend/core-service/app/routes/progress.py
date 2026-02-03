@@ -223,12 +223,23 @@ def get_study_streak():
 @progress_bp.route("/overview", methods=["GET"])
 @require_auth
 def get_progress_overview():
-    """Get overview stats matching frontend Progress page"""
+    """Get overview stats matching frontend Progress page.
+    
+    Now uses ONLY StudentTopicScore data (from classroom assessments).
+    Legacy Progress model data is excluded to avoid test/dummy topics.
+    """
+    from app.models.curriculum import StudentTopicScore, ClassroomTopic, Chapter
+    from app.models.classroom import Classroom, StudentClassroom
+    
     user_id = request.user_id
     
-    all_progress = Progress.query.filter_by(user_id=user_id).all()
+    # Get enrolled classrooms
+    enrollments = StudentClassroom.query.filter_by(
+        student_id=user_id, is_active=True
+    ).all()
+    classroom_ids = [e.classroom_id for e in enrollments]
     
-    if not all_progress:
+    if not classroom_ids:
         return jsonify({
             "avgConfidence": 0,
             "topicsMastered": 0,
@@ -238,17 +249,85 @@ def get_progress_overview():
             "subjects": []
         }), 200
     
+    # Get all classroom topics
+    all_topics = ClassroomTopic.query.filter(
+        ClassroomTopic.classroom_id.in_(classroom_ids),
+        ClassroomTopic.is_active == True
+    ).all()
+    
+    # Get student's scores for these topics
+    topic_scores = db.session.query(
+        StudentTopicScore,
+        ClassroomTopic,
+        Chapter,
+        Classroom
+    ).join(
+        ClassroomTopic, StudentTopicScore.classroom_topic_id == ClassroomTopic.id
+    ).outerjoin(
+        Chapter, ClassroomTopic.chapter_id == Chapter.id
+    ).outerjoin(
+        Classroom, ClassroomTopic.classroom_id == Classroom.id
+    ).filter(
+        StudentTopicScore.user_id == user_id,
+        ClassroomTopic.classroom_id.in_(classroom_ids)
+    ).all()
+    
+    # Build scores map
+    scores_map = {score.classroom_topic_id: score for score, _, _, _ in topic_scores}
+    
+    # Build classroom map for all topics (so we can get subject even for unattempted topics)
+    classrooms_map = {}
+    for classroom_id in classroom_ids:
+        classroom = Classroom.query.get(classroom_id)
+        if classroom:
+            classrooms_map[classroom_id] = classroom
+    
     # Calculate stats
-    avg_confidence = round(sum(p.confidence_score for p in all_progress) / len(all_progress), 1)
-    topics_mastered = len([p for p in all_progress if p.confidence_score >= 70])
-    topics_need_attention = len([p for p in all_progress if p.is_weak or p.confidence_score < 50])
+    all_confidence_scores = []
+    topics_mastered_count = 0
+    topics_need_attention_count = 0
+    study_dates = set()
+    subjects_dict = {}
+    
+    for topic in all_topics:
+        score = scores_map.get(topic.id)
+        mastery = score.mastery_percentage if score else 0
+        
+        all_confidence_scores.append(mastery)
+        
+        if mastery >= 70:
+            topics_mastered_count += 1
+        if mastery < 50 and mastery > 0:  # Only count as needing attention if attempted
+            topics_need_attention_count += 1
+        
+        if score and score.last_activity_at:
+            study_dates.add(score.last_activity_at.date())
+        
+        # Get subject from classroom - use topic's classroom_id directly
+        classroom = classrooms_map.get(topic.classroom_id)
+        subject = classroom.subject if classroom and classroom.subject else "General"
+        
+        if subject not in subjects_dict:
+            subjects_dict[subject] = {"scores": [], "count": 0}
+        subjects_dict[subject]["scores"].append(mastery)
+        subjects_dict[subject]["count"] += 1
+    
+    # Handle empty case
+    if not all_confidence_scores:
+        return jsonify({
+            "avgConfidence": 0,
+            "topicsMastered": 0,
+            "topicsNeedAttention": 0,
+            "studyStreak": 0,
+            "totalTopics": 0,
+            "subjects": []
+        }), 200
+    
+    # Calculate average confidence (only from attempted topics)
+    attempted_scores = [s for s in all_confidence_scores if s > 0]
+    avg_confidence = round(sum(attempted_scores) / len(attempted_scores), 1) if attempted_scores else 0
     
     # Calculate streak
-    study_dates = set()
-    for p in all_progress:
-        if p.last_studied:
-            study_dates.add(p.last_studied.date())
-    
     current_streak = 0
     if study_dates:
         sorted_dates = sorted(study_dates, reverse=True)
@@ -260,18 +339,11 @@ def get_progress_overview():
             else:
                 break
     
-    # Group by subject
-    subjects_dict = {}
-    for p in all_progress:
-        if p.subject not in subjects_dict:
-            subjects_dict[p.subject] = {"scores": [], "count": 0}
-        subjects_dict[p.subject]["scores"].append(p.confidence_score)
-        subjects_dict[p.subject]["count"] += 1
-    
+    # Build subjects list
     subjects = [
         {
             "subject": name,
-            "avgConfidence": round(sum(data["scores"]) / len(data["scores"]), 1),
+            "avgConfidence": round(sum(s for s in data["scores"] if s > 0) / max(len([s for s in data["scores"] if s > 0]), 1), 1),
             "topicCount": data["count"]
         }
         for name, data in subjects_dict.items()
@@ -279,10 +351,10 @@ def get_progress_overview():
     
     return jsonify({
         "avgConfidence": avg_confidence,
-        "topicsMastered": topics_mastered,
-        "topicsNeedAttention": topics_need_attention,
+        "topicsMastered": topics_mastered_count,
+        "topicsNeedAttention": topics_need_attention_count,
         "studyStreak": current_streak,
-        "totalTopics": len(all_progress),
+        "totalTopics": len(all_confidence_scores),
         "subjects": sorted(subjects, key=lambda x: x["avgConfidence"], reverse=True)
     }), 200
 
@@ -290,12 +362,16 @@ def get_progress_overview():
 @progress_bp.route("/topics-list", methods=["GET"])
 @require_auth
 def get_topics_list():
-    """Get all topics matching frontend TopicProgress interface"""
-    user_id = request.user_id
+    """Get all topics matching frontend TopicProgress interface.
     
-    all_progress = Progress.query.filter_by(user_id=user_id).order_by(
-        Progress.confidence_score.desc()
-    ).all()
+    Combines data from:
+    - Progress model (generic topic progress)
+    - StudentTopicScore model (classroom topic mastery from assessments)
+    """
+    from app.models.curriculum import StudentTopicScore, ClassroomTopic, Chapter
+    from app.models.classroom import Classroom, StudentClassroom
+    
+    user_id = request.user_id
     
     def format_relative_time(dt):
         if not dt:
@@ -313,17 +389,69 @@ def get_topics_list():
         else:
             return "Just now"
     
-    return jsonify([
-        {
+    topics_list = []
+    
+    # 1. Get generic Progress records
+    all_progress = Progress.query.filter_by(user_id=user_id).order_by(
+        Progress.confidence_score.desc()
+    ).all()
+    
+    for p in all_progress:
+        topics_list.append({
             "topic": p.topic,
             "subject": p.subject,
             "confidence": round(p.confidence_score, 1),
             "isWeak": p.is_weak or p.confidence_score < 50,
             "timesStudied": p.times_studied or 0,
-            "lastStudied": format_relative_time(p.last_studied)
-        }
-        for p in all_progress
-    ]), 200
+            "lastStudied": format_relative_time(p.last_studied),
+            "source": "progress"
+        })
+    
+    # 2. Get StudentTopicScore records (classroom topics from assessments)
+    topic_scores = db.session.query(
+        StudentTopicScore,
+        ClassroomTopic,
+        Chapter,
+        Classroom
+    ).join(
+        ClassroomTopic, StudentTopicScore.classroom_topic_id == ClassroomTopic.id
+    ).outerjoin(
+        Chapter, ClassroomTopic.chapter_id == Chapter.id
+    ).outerjoin(
+        Classroom, ClassroomTopic.classroom_id == Classroom.id
+    ).filter(
+        StudentTopicScore.user_id == user_id
+    ).all()
+    
+    for score, topic, chapter, classroom in topic_scores:
+        # Check if we already have this topic from Progress
+        existing = next((t for t in topics_list if t["topic"] == topic.name), None)
+        if existing:
+            # Merge - use higher confidence and combine attempts
+            existing["confidence"] = max(existing["confidence"], round(score.mastery_percentage, 1))
+            existing["timesStudied"] += score.mcq_attempts + score.descriptive_attempts
+            existing["isWeak"] = existing["confidence"] < 50
+            if score.last_activity_at:
+                existing["lastStudied"] = format_relative_time(score.last_activity_at)
+            existing["source"] = "merged"
+        else:
+            # Add new entry from classroom topic
+            topics_list.append({
+                "topic": topic.name,
+                "subject": classroom.subject if classroom else "Unknown",
+                "confidence": round(score.mastery_percentage, 1),
+                "isWeak": score.mastery_percentage < 50,
+                "timesStudied": score.mcq_attempts + score.descriptive_attempts,
+                "lastStudied": format_relative_time(score.last_activity_at),
+                "source": "classroom",
+                "classroom_id": classroom.id if classroom else None,
+                "chapter_name": chapter.name if chapter else None
+            })
+    
+    # Sort by confidence descending
+    topics_list.sort(key=lambda x: x["confidence"], reverse=True)
+    
+    return jsonify(topics_list), 200
 
 
 # ============================================================================
@@ -449,6 +577,10 @@ def get_topic_mastery():
                 "total_attempts": 0,
                 "last_activity": "Never"
             })
+    
+    # Sort by mastery_level ascending (1% first, 100% last)
+    # BUT: 0% (new/unstudied) topics go to the bottom
+    topic_list.sort(key=lambda x: (x["mastery_level"] == 0, x["mastery_level"]))
     
     # Calculate stats
     total_topics = len(topics)

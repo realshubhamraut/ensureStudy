@@ -1,8 +1,8 @@
 'use client'
+
+import { Suspense } from 'react'
 import { getApiBaseUrl } from '@/utils/api'
-
-
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { signIn } from 'next-auth/react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
@@ -23,16 +23,23 @@ const roles = [
     { id: 'parent' as Role, name: 'Parent', icon: UserIcon },
 ]
 
-export default function SignInPage() {
+function SignInContent() {
     const router = useRouter()
     const searchParams = useSearchParams()
-    const initialRole = (searchParams.get('role') as Role) || 'student'
 
-    const [selectedRole, setSelectedRole] = useState<Role>(initialRole)
+    const [selectedRole, setSelectedRole] = useState<Role>('student')
     const [email, setEmail] = useState('')
     const [password, setPassword] = useState('')
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState('')
+
+    // Update role from URL after mount
+    useEffect(() => {
+        const roleFromUrl = searchParams.get('role') as Role
+        if (roleFromUrl && ['admin', 'teacher', 'student', 'parent'].includes(roleFromUrl)) {
+            setSelectedRole(roleFromUrl)
+        }
+    }, [searchParams])
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
@@ -110,103 +117,130 @@ export default function SignInPage() {
     }
 
     return (
-        <main className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary-50 via-white to-secondary-50 p-4">
-            <div className="w-full max-w-md">
-                {/* Logo */}
-                <div className="text-center mb-8">
-                    <Link href="/" className="inline-flex items-center gap-2">
-                        <AcademicCapIcon className="w-10 h-10 text-primary-600" />
-                        <span className="text-3xl font-bold gradient-text">ensureStudy</span>
-                    </Link>
+        <div className="w-full max-w-md">
+            {/* Logo */}
+            <div className="text-center mb-8">
+                <Link href="/" className="inline-flex items-center gap-2">
+                    <AcademicCapIcon className="w-10 h-10 text-primary-600" />
+                    <span className="text-3xl font-bold gradient-text">ensureStudy</span>
+                </Link>
+            </div>
+
+            <div className="card">
+                {/* Role Toggle Tabs */}
+                <div className="flex rounded-xl bg-gray-100 p-1 mb-6">
+                    {roles.map((role) => (
+                        <button
+                            key={role.id}
+                            onClick={() => setSelectedRole(role.id)}
+                            className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-lg text-sm font-medium transition-all ${selectedRole === role.id
+                                ? 'bg-white text-primary-600 shadow-sm'
+                                : 'text-gray-500 hover:text-gray-700'
+                                }`}
+                        >
+                            <role.icon className="w-4 h-4" />
+                            <span className="hidden sm:inline">{role.name}</span>
+                        </button>
+                    ))}
                 </div>
 
-                <div className="card">
-                    {/* Role Toggle Tabs */}
-                    <div className="flex rounded-xl bg-gray-100 p-1 mb-6">
-                        {roles.map((role) => (
-                            <button
-                                key={role.id}
-                                onClick={() => setSelectedRole(role.id)}
-                                className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-lg text-sm font-medium transition-all ${selectedRole === role.id
-                                    ? 'bg-white text-primary-600 shadow-sm'
-                                    : 'text-gray-500 hover:text-gray-700'
-                                    }`}
-                            >
-                                <role.icon className="w-4 h-4" />
-                                <span className="hidden sm:inline">{role.name}</span>
-                            </button>
-                        ))}
+                {/* Sign In Heading */}
+                <h1 className="text-xl font-bold text-gray-900 text-center mb-6">
+                    Sign in as {roles.find(r => r.id === selectedRole)?.name}
+                </h1>
+
+                {error && (
+                    <div className="p-3 bg-red-50 text-red-700 rounded-lg mb-4 text-sm">
+                        {error}
+                    </div>
+                )}
+
+                {/* Login Form */}
+                <form onSubmit={handleSubmit} className="space-y-4">
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Email
+                        </label>
+                        <input
+                            type="email"
+                            value={email}
+                            onChange={(e) => setEmail(e.target.value)}
+                            className="input-field"
+                            placeholder="you@example.com"
+                            required
+                        />
                     </div>
 
-                    {/* Sign In Heading */}
-                    <h1 className="text-xl font-bold text-gray-900 text-center mb-6">
-                        Sign in as {roles.find(r => r.id === selectedRole)?.name}
-                    </h1>
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Password
+                        </label>
+                        <input
+                            type="password"
+                            value={password}
+                            onChange={(e) => setPassword(e.target.value)}
+                            className="input-field"
+                            placeholder="••••••••"
+                            required
+                        />
+                    </div>
 
-                    {error && (
-                        <div className="p-3 bg-red-50 text-red-700 rounded-lg mb-4 text-sm">
-                            {error}
-                        </div>
-                    )}
+                    <button
+                        type="submit"
+                        disabled={loading}
+                        className="w-full btn-primary flex items-center justify-center gap-2"
+                    >
+                        {loading ? (
+                            <div className="spinner"></div>
+                        ) : (
+                            <>
+                                Sign In
+                                <ArrowRightIcon className="w-5 h-5" />
+                            </>
+                        )}
+                    </button>
+                </form>
 
-                    {/* Login Form */}
-                    <form onSubmit={handleSubmit} className="space-y-4">
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">
-                                Email
-                            </label>
-                            <input
-                                type="email"
-                                value={email}
-                                onChange={(e) => setEmail(e.target.value)}
-                                className="input-field"
-                                placeholder="you@example.com"
-                                required
-                            />
-                        </div>
+                {/* Footer */}
+                <p className="text-center text-sm text-gray-500 mt-6">
+                    Don&apos;t have an account?{' '}
+                    <Link
+                        href={`/auth/signup?role=${selectedRole}`}
+                        className="text-primary-600 font-medium hover:underline"
+                    >
+                        Create one
+                    </Link>
+                </p>
+            </div>
+        </div>
+    )
+}
 
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">
-                                Password
-                            </label>
-                            <input
-                                type="password"
-                                value={password}
-                                onChange={(e) => setPassword(e.target.value)}
-                                className="input-field"
-                                placeholder="••••••••"
-                                required
-                            />
-                        </div>
-
-                        <button
-                            type="submit"
-                            disabled={loading}
-                            className="w-full btn-primary flex items-center justify-center gap-2"
-                        >
-                            {loading ? (
-                                <div className="spinner"></div>
-                            ) : (
-                                <>
-                                    Sign In
-                                    <ArrowRightIcon className="w-5 h-5" />
-                                </>
-                            )}
-                        </button>
-                    </form>
-
-                    {/* Footer */}
-                    <p className="text-center text-sm text-gray-500 mt-6">
-                        Don't have an account?{' '}
-                        <Link
-                            href={`/auth/signup?role=${selectedRole}`}
-                            className="text-primary-600 font-medium hover:underline"
-                        >
-                            Create one
-                        </Link>
-                    </p>
+// Loading fallback for Suspense
+function SignInLoading() {
+    return (
+        <div className="w-full max-w-md">
+            <div className="text-center mb-8">
+                <div className="inline-flex items-center gap-2">
+                    <AcademicCapIcon className="w-10 h-10 text-primary-600" />
+                    <span className="text-3xl font-bold gradient-text">ensureStudy</span>
                 </div>
             </div>
+            <div className="card">
+                <div className="flex items-center justify-center py-12">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
+                </div>
+            </div>
+        </div>
+    )
+}
+
+export default function SignInPage() {
+    return (
+        <main className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary-50 via-white to-secondary-50 p-4">
+            <Suspense fallback={<SignInLoading />}>
+                <SignInContent />
+            </Suspense>
         </main>
     )
 }

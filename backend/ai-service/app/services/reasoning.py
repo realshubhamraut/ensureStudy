@@ -417,7 +417,9 @@ def generate_answer(
     
     return LLMResponse(
         answer_short=parsed.get("answer_short", raw_response[:500]),
-        answer_detailed=parsed.get("answer_detailed") if response_mode == ResponseMode.DETAILED else None,
+        # Always include answer_detailed for frontend display (even in SHORT mode)
+        # The frontend renders answer_detailed and uses answer_short as fallback
+        answer_detailed=parsed.get("answer_detailed", raw_response),
         confidence=parsed.get("confidence", 0.7),
         reasoning=parsed.get("reasoning", "Generated from context"),
         suggested_topics=parsed.get("suggested_topics", []),

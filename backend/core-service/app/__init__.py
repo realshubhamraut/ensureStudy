@@ -66,6 +66,8 @@ def create_app(config_name=None):
     from app.routes.web_resources import web_resources_bp
     from app.routes.chat import chat_bp
     from app.routes.feedback import feedback_bp
+    from app.routes.question_progress import question_progress_bp
+    from app.routes.interview_questions import interview_questions_bp
     
     app.register_blueprint(auth_bp)
     app.register_blueprint(users_bp)
@@ -91,6 +93,8 @@ def create_app(config_name=None):
     app.register_blueprint(web_resources_bp)
     app.register_blueprint(chat_bp)
     app.register_blueprint(feedback_bp)
+    app.register_blueprint(question_progress_bp)
+    app.register_blueprint(interview_questions_bp)
     
     # Import models for table creation
     from app.models.organization import Organization, LicensePurchase

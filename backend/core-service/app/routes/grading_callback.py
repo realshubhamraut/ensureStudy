@@ -154,3 +154,55 @@ def request_regrade(submission_id):
     except Exception as e:
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
+
+
+@grading_bp.route('/reset/<submission_id>', methods=['POST'])
+def reset_grading_status(submission_id):
+    """
+    Reset a stuck submission from 'grading' back to 'submitted'.
+    Use this when grading gets stuck and needs to be re-triggered.
+    """
+    try:
+        from app.utils.jwt_handler import verify_token
+        
+        # Verify authorization
+        auth_header = request.headers.get("Authorization")
+        if not auth_header:
+            return jsonify({"error": "Authentication required"}), 401
+        
+        token = auth_header.split()[1]
+        payload = verify_token(token)
+        
+        submission = Submission.query.get(submission_id)
+        if not submission:
+            return jsonify({'error': 'Submission not found'}), 404
+        
+        # Allow student who owns submission or teacher who owns classroom
+        assignment = submission.assignment
+        is_student = submission.student_id == payload.get('user_id')
+        is_teacher = assignment.classroom.teacher_id == payload.get('user_id')
+        
+        if not is_student and not is_teacher:
+            return jsonify({'error': 'Unauthorized'}), 403
+        
+        # Only reset if currently stuck in grading
+        if submission.status == 'grading':
+            submission.status = 'submitted'
+            db.session.commit()
+            print(f"[Grading] Reset stuck submission {submission_id} to 'submitted'")
+            return jsonify({
+                'success': True,
+                'message': 'Submission reset to submitted status',
+                'submission_id': submission_id,
+                'new_status': 'submitted'
+            }), 200
+        else:
+            return jsonify({
+                'success': False,
+                'message': f'Submission not in grading status (current: {submission.status})',
+                'submission_id': submission_id
+            }), 400
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500

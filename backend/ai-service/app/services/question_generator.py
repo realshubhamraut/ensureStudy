@@ -70,15 +70,37 @@ class QuestionGeneratorService:
     
     def __init__(self):
         """Initialize the question generator"""
-        self.api_key = os.getenv("HUGGINGFACE_API_KEY", "")
+        # Handle comma-separated HuggingFace keys
+        hf_keys = os.getenv("HUGGINGFACE_API_KEY", "")
+        self.api_key = hf_keys.split(",")[0].strip() if hf_keys else ""
+        
+        # Groq API key (preferred)
+        self.groq_api_key = os.getenv("GROQ_API_KEY", "")
         self.model_name = os.getenv("LLM_MODEL", "meta-llama/Meta-Llama-3-8B-Instruct")
         
         # Lazy load clients
         self._llm_client = None
+        self._groq_client = None
         self._embedder = None
         self._qdrant = None
         
-        logger.info(f"[QuestionGenerator] Initialized with model: {self.model_name}")
+        # Prefer Groq for question generation
+        self.use_groq = bool(self.groq_api_key)
+        
+        logger.info(f"[QuestionGenerator] Initialized with model: {self.model_name}, using_groq: {self.use_groq}")
+    
+    @property
+    def groq_client(self):
+        """Lazy load Groq client"""
+        if self._groq_client is None and self.groq_api_key:
+            try:
+                from groq import Groq
+                self._groq_client = Groq(api_key=self.groq_api_key)
+                logger.info("[QuestionGenerator] Groq client initialized")
+            except Exception as e:
+                logger.error(f"[QuestionGenerator] Failed to init Groq client: {e}")
+                self._groq_client = None
+        return self._groq_client
     
     @property
     def llm_client(self):
@@ -123,7 +145,7 @@ class QuestionGeneratorService:
         return self._qdrant
     
     def _create_mcq_prompt(self, content: str, num_questions: int, difficulty: str) -> str:
-        """Create prompt for MCQ generation"""
+        """Create prompt for MCQ generation with per-option explanations"""
         difficulty_guidance = {
             "easy": "Focus on basic definitions, simple facts, and straightforward concepts.",
             "medium": "Include application-based questions and concepts that require understanding.",
@@ -139,19 +161,23 @@ INSTRUCTIONS:
 1. Generate exactly {num_questions} multiple choice questions
 2. Difficulty level: {difficulty.upper()} - {difficulty_guidance.get(difficulty, difficulty_guidance['medium'])}
 3. Each question MUST have exactly 4 options (A, B, C, D)
-4. Questions must be directly answerable from the content
-5. DO NOT use phrases like "According to the passage" or "Based on the text"
-6. Start questions directly (What, Which, How, Why, etc.)
+4. IMPORTANT: For each option, provide a brief explanation of why it is correct or incorrect
+5. Questions must be directly answerable from the content
+6. DO NOT use phrases like "According to the passage" or "Based on the text"
+7. Start questions directly (What, Which, How, Why, etc.)
 
 OUTPUT FORMAT (use this EXACT format for each question):
 QUESTION_1:
 Text: [Your question here]
-A) [Option A]
-B) [Option B]
-C) [Option C]
-D) [Option D]
+A) [Option A text]
+A_Explanation: [Why option A is correct or incorrect]
+B) [Option B text]
+B_Explanation: [Why option B is correct or incorrect]
+C) [Option C text]
+C_Explanation: [Why option C is correct or incorrect]
+D) [Option D text]
+D_Explanation: [Why option D is correct or incorrect]
 Correct: [A/B/C/D]
-Explanation: [Why this answer is correct]
 
 Generate {num_questions} questions now:"""
     
@@ -208,7 +234,7 @@ Expected Answer: [The expected 1-2 sentence answer]
 Generate {num_questions} questions now:"""
     
     def _parse_mcq_response(self, response: str) -> List[GeneratedQuestion]:
-        """Parse LLM response into MCQ objects"""
+        """Parse LLM response into MCQ objects with per-option explanations"""
         questions = []
         
         # Split by QUESTION_ markers
@@ -223,23 +249,35 @@ Generate {num_questions} questions now:"""
                 text_match = re.search(r'Text:\s*(.+?)(?=\n[A-D]\))', block, re.DOTALL)
                 question_text = text_match.group(1).strip() if text_match else ""
                 
-                # Extract options
+                # Extract options with their explanations
                 options = []
+                overall_explanation = ""
+                
                 for opt_id in ['A', 'B', 'C', 'D']:
-                    opt_match = re.search(rf'{opt_id}\)\s*(.+?)(?=\n[A-D]\)|Correct:|$)', block, re.DOTALL)
-                    if opt_match:
+                    # Extract option text
+                    opt_match = re.search(rf'{opt_id}\)\s*(.+?)(?=\n{opt_id}_Explanation:|\n[A-D]\)|Correct:|$)', block, re.DOTALL)
+                    opt_text = opt_match.group(1).strip() if opt_match else ""
+                    
+                    # Extract option explanation
+                    exp_match = re.search(rf'{opt_id}_Explanation:\s*(.+?)(?=\n[A-D]\)|Correct:|$)', block, re.DOTALL)
+                    opt_explanation = exp_match.group(1).strip() if exp_match else ""
+                    
+                    if opt_text:
                         options.append({
                             "id": opt_id,
-                            "text": opt_match.group(1).strip()
+                            "text": opt_text,
+                            "explanation": opt_explanation
                         })
                 
                 # Extract correct answer
                 correct_match = re.search(r'Correct:\s*([A-D])', block, re.IGNORECASE)
                 correct_answer = correct_match.group(1).upper() if correct_match else "A"
                 
-                # Extract explanation
-                exp_match = re.search(r'Explanation:\s*(.+?)(?=QUESTION_|$)', block, re.DOTALL)
-                explanation = exp_match.group(1).strip() if exp_match else ""
+                # Mark correct option and build overall explanation
+                for opt in options:
+                    opt["is_correct"] = opt["id"] == correct_answer
+                    if opt["is_correct"]:
+                        overall_explanation = opt.get("explanation", "")
                 
                 if question_text and len(options) >= 4:
                     questions.append(GeneratedQuestion(
@@ -247,7 +285,7 @@ Generate {num_questions} questions now:"""
                         question_text=question_text,
                         options=options[:4],
                         correct_answer=correct_answer,
-                        explanation=explanation,
+                        explanation=overall_explanation,
                         key_points=[],
                         difficulty="medium",
                         source_content="",
@@ -389,14 +427,33 @@ Generate {num_questions} questions now:"""
                 {"role": "user", "content": prompt}
             ]
             
-            response = self.llm_client.chat_completion(
-                messages=messages,
-                model=self.model_name,
-                max_tokens=2000,
-                temperature=0.7
-            )
+            response_text = ""
             
-            response_text = response.choices[0].message.content or ""
+            # Try Groq first (more reliable)
+            if self.use_groq and self.groq_client:
+                try:
+                    logger.info("[QuestionGenerator] Using Groq API")
+                    response = self.groq_client.chat.completions.create(
+                        messages=messages,
+                        model="llama-3.1-8b-instant",  # Fast Groq model
+                        max_tokens=2000,
+                        temperature=0.7
+                    )
+                    response_text = response.choices[0].message.content or ""
+                except Exception as e:
+                    logger.warning(f"[QuestionGenerator] Groq failed, falling back to HuggingFace: {e}")
+            
+            # Fallback to HuggingFace
+            if not response_text:
+                logger.info("[QuestionGenerator] Using HuggingFace API")
+                response = self.llm_client.chat_completion(
+                    messages=messages,
+                    model=self.model_name,
+                    max_tokens=2000,
+                    temperature=0.7
+                )
+                response_text = response.choices[0].message.content or ""
+            
             logger.info(f"[QuestionGenerator] Received response ({len(response_text)} chars)")
             
             # Parse response based on question type

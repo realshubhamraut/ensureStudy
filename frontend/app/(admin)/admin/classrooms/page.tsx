@@ -3,6 +3,7 @@
 import { useSession } from 'next-auth/react'
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
+import { getApiBaseUrl } from '@/utils/api'
 import {
     AcademicCapIcon,
     PlusIcon,
@@ -10,7 +11,8 @@ import {
     TrashIcon,
     XMarkIcon,
     MagnifyingGlassIcon,
-    ChevronRightIcon
+    ChevronRightIcon,
+    ArrowPathIcon
 } from '@heroicons/react/24/outline'
 
 interface Classroom {
@@ -18,20 +20,16 @@ interface Classroom {
     name: string
     grade: string
     section: string
+    subject?: string
+    teacher_name?: string
     teacher_count: number
     student_count: number
 }
 
 export default function ClassroomsPage() {
     const { data: session } = useSession()
-    const [classrooms, setClassrooms] = useState<Classroom[]>([
-        { id: '1', name: 'Class 10-A', grade: '10', section: 'A', teacher_count: 3, student_count: 35 },
-        { id: '2', name: 'Class 10-B', grade: '10', section: 'B', teacher_count: 3, student_count: 32 },
-        { id: '3', name: 'Class 11-Science', grade: '11', section: 'Science', teacher_count: 5, student_count: 40 },
-        { id: '4', name: 'Class 11-Commerce', grade: '11', section: 'Commerce', teacher_count: 4, student_count: 38 },
-        { id: '5', name: 'Class 12-Science', grade: '12', section: 'Science', teacher_count: 5, student_count: 42 },
-    ])
-    const [loading, setLoading] = useState(false)
+    const [classrooms, setClassrooms] = useState<Classroom[]>([])
+    const [loading, setLoading] = useState(true)
     const [search, setSearch] = useState('')
     const [showModal, setShowModal] = useState(false)
     const [editingId, setEditingId] = useState<string | null>(null)
@@ -41,10 +39,42 @@ export default function ClassroomsPage() {
         section: ''
     })
 
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || getApiBaseUrl()
+
+    useEffect(() => {
+        fetchClassrooms()
+    }, [session?.accessToken])
+
+    const fetchClassrooms = async () => {
+        if (!session?.accessToken) {
+            setLoading(false)
+            return
+        }
+
+        try {
+            const res = await fetch(`${apiUrl}/api/admin/classrooms`, {
+                headers: {
+                    'Authorization': `Bearer ${session.accessToken}`
+                }
+            })
+
+            if (res.ok) {
+                const data = await res.json()
+                setClassrooms(data.classrooms || data || [])
+            } else {
+                console.error('Failed to fetch classrooms')
+            }
+        } catch (error) {
+            console.error('Error fetching classrooms:', error)
+        } finally {
+            setLoading(false)
+        }
+    }
+
     const filteredClassrooms = classrooms.filter(c =>
         c.name.toLowerCase().includes(search.toLowerCase()) ||
-        c.grade.includes(search) ||
-        c.section.toLowerCase().includes(search.toLowerCase())
+        c.grade?.includes(search) ||
+        c.section?.toLowerCase().includes(search.toLowerCase())
     )
 
     const openAddModal = () => {
@@ -57,37 +87,44 @@ export default function ClassroomsPage() {
         e.preventDefault()
         e.stopPropagation()
         setEditingId(classroom.id)
-        setFormData({ name: classroom.name, grade: classroom.grade, section: classroom.section })
+        setFormData({ name: classroom.name, grade: classroom.grade || '', section: classroom.section || '' })
         setShowModal(true)
     }
 
-    const handleSave = () => {
-        if (editingId) {
-            setClassrooms(classrooms.map(c =>
-                c.id === editingId
-                    ? { ...c, name: formData.name, grade: formData.grade, section: formData.section }
-                    : c
-            ))
-        } else {
-            const newClassroom: Classroom = {
-                id: Date.now().toString(),
-                name: formData.name || `Class ${formData.grade}-${formData.section}`,
-                grade: formData.grade,
-                section: formData.section,
-                teacher_count: 0,
-                student_count: 0
-            }
-            setClassrooms([...classrooms, newClassroom])
-        }
+    const handleSave = async () => {
+        // TODO: Implement API call for save
         setShowModal(false)
     }
 
-    const handleDelete = (e: React.MouseEvent, id: string) => {
+    const handleDelete = async (e: React.MouseEvent, id: string) => {
         e.preventDefault()
         e.stopPropagation()
         if (confirm('Are you sure you want to delete this classroom?')) {
-            setClassrooms(classrooms.filter(c => c.id !== id))
+            try {
+                const res = await fetch(`${apiUrl}/api/classroom/${id}`, {
+                    method: 'DELETE',
+                    headers: {
+                        'Authorization': `Bearer ${session?.accessToken}`
+                    }
+                })
+
+                if (res.ok) {
+                    setClassrooms(classrooms.filter(c => c.id !== id))
+                } else {
+                    alert('Failed to delete classroom')
+                }
+            } catch (error) {
+                console.error('Delete error:', error)
+            }
         }
+    }
+
+    if (loading) {
+        return (
+            <div className="flex items-center justify-center h-64">
+                <ArrowPathIcon className="w-8 h-8 animate-spin text-blue-600" />
+            </div>
+        )
     }
 
     return (

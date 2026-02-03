@@ -13,7 +13,8 @@ import {
     SpeakerWaveIcon,
     VideoCameraIcon,
     ClockIcon,
-    ExclamationTriangleIcon
+    ExclamationTriangleIcon,
+    SparklesIcon
 } from '@heroicons/react/24/outline'
 import { useSpeechEngine, useSpeechRecognition } from '@/components/avatar/SpeechEngine'
 
@@ -27,21 +28,27 @@ const TalkingHeadAvatar = dynamic(() => import('@/components/avatar/TalkingHeadA
     )
 })
 
+// Question interface from backend
+interface InterviewQuestion {
+    id: string
+    question: string
+    topic_id: string
+    topic_name: string
+    difficulty: string
+}
 
+// Evaluation result from backend
+interface AnswerEvaluation {
+    question_id: string
+    score: number
+    concept_scores: Record<string, number>
+    covered_concepts: string[]
+    missed_concepts: string[]
+    feedback: string
+    expected_answer_summary: string
+}
 
-
-
-
-// Mock questions for demo
-const DEMO_QUESTIONS = [
-    "Can you explain Newton's first law of motion and give an example from everyday life?",
-    "What is the relationship between force, mass, and acceleration?",
-    "Describe the concept of inertia and how it affects objects at rest and in motion.",
-    "How does friction affect the motion of objects?",
-    "Explain the difference between speed and velocity."
-]
-
-type SessionState = 'ready' | 'speaking' | 'listening' | 'processing' | 'complete'
+type SessionState = 'loading' | 'ready' | 'speaking' | 'listening' | 'processing' | 'complete' | 'error'
 type PermissionState = 'pending' | 'granted' | 'denied' | 'error'
 
 function InterviewSessionContent() {
@@ -71,11 +78,12 @@ function InterviewSessionContent() {
     const subject = displayTopicName
     const chapter = displayTopicName
 
-    const [sessionState, setSessionState] = useState<SessionState>('ready')
+    const [sessionState, setSessionState] = useState<SessionState>('loading')
+    const [sessionId, setSessionId] = useState<string>('')
+    const [questions, setQuestions] = useState<InterviewQuestion[]>([])
     const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0)
     const [answers, setAnswers] = useState<string[]>([])
-    const [scores, setScores] = useState<number[]>([])
-    const [feedbacks, setFeedbacks] = useState<string[]>([])
+    const [evaluations, setEvaluations] = useState<AnswerEvaluation[]>([])
     const [isEvaluating, setIsEvaluating] = useState(false)
     const [isCameraOn, setIsCameraOn] = useState(false)
     const [avatarReady, setAvatarReady] = useState(false)
@@ -84,6 +92,9 @@ function InterviewSessionContent() {
     const [permissionError, setPermissionError] = useState<string>('')
     const [textToSpeak, setTextToSpeak] = useState<string>('')
     const [isSpeaking, setIsSpeaking] = useState(false)
+    const [loadingError, setLoadingError] = useState<string>('')
+    const [isGeneratingQuestions, setIsGeneratingQuestions] = useState(false)
+    const [manualAnswer, setManualAnswer] = useState<string>('')  // Text input fallback for STT
 
     const AI_SERVICE_URL = process.env.NEXT_PUBLIC_AI_SERVICE_URL || 'http://localhost:8001'
 
@@ -91,6 +102,9 @@ function InterviewSessionContent() {
     const videoRef = useRef<HTMLVideoElement>(null)
     const mediaStreamRef = useRef<MediaStream | null>(null)
     const timerRef = useRef<NodeJS.Timeout | null>(null)
+    const answerStartTimeRef = useRef<number>(0)
+    const isInitializingRef = useRef<boolean>(false)
+    const hasInitializedRef = useRef<boolean>(false)
 
 
     // Speech function - sets text for TalkingHead avatar to speak with lip sync
@@ -117,6 +131,7 @@ function InterviewSessionContent() {
         setIsSpeaking(false)
         setTextToSpeak('')
         setSessionState('listening')
+        answerStartTimeRef.current = Date.now()
     }, [])
 
 
@@ -126,15 +141,109 @@ function InterviewSessionContent() {
         startListening,
         stopListening,
         resetTranscript,
-        isSupported: sttSupported
+        isSupported: sttSupported,
+        error: sttError
     } = useSpeechRecognition()
 
-    const currentQuestion = DEMO_QUESTIONS[currentQuestionIndex]
+    const currentQuestion = questions[currentQuestionIndex]
+
+    // Initialize session - fetch questions from backend
+    useEffect(() => {
+        const initSession = async () => {
+            // Prevent duplicate calls
+            if (isInitializingRef.current || hasInitializedRef.current) {
+                console.log('[MockInterview] Skipping duplicate init call')
+                return
+            }
+            isInitializingRef.current = true
+
+            if (topicIds.length === 0) {
+                setLoadingError('No topics selected. Please go back and select topics.')
+                setSessionState('error')
+                isInitializingRef.current = false
+                return
+            }
+
+            try {
+                const token = localStorage.getItem('accessToken')
+                if (!token) {
+                    setLoadingError('Not authenticated. Please log in.')
+                    setSessionState('error')
+                    isInitializingRef.current = false
+                    return
+                }
+
+                console.log('[MockInterview] Starting session with topics:', topicIds)
+
+                const response = await fetch(`${AI_SERVICE_URL}/api/mock-interview/start-topic-interview`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({
+                        user_id: 'current-user', // Will be extracted from token on backend
+                        topic_ids: topicIds,
+                        avatar: avatarId,
+                        questions_per_topic: 3,
+                        token: token
+                    })
+                })
+
+                if (response.status === 404) {
+                    // No questions available - offer to generate
+                    setIsGeneratingQuestions(true)
+                    setLoadingError('No questions available for these topics yet. Would you like to generate them?')
+                    setSessionState('error')
+                    return
+                }
+
+                if (!response.ok) {
+                    throw new Error(`Failed to start session: ${response.status}`)
+                }
+
+                const data = await response.json()
+                console.log('[MockInterview] Session started:', data)
+
+                setSessionId(data.session_id)
+                // Build full questions array from batch response
+                // The backend returns questions one at a time, but we need them all for progress display
+                // For now, we'll fetch them progressively
+                setQuestions([{
+                    id: data.question.id,
+                    question: data.question.question,
+                    topic_id: data.question.topic_id,
+                    topic_name: data.question.topic_name,
+                    difficulty: data.question.difficulty
+                }])
+                setSessionState('ready')
+                hasInitializedRef.current = true
+                isInitializingRef.current = false
+
+            } catch (error) {
+                console.error('[MockInterview] Session init error:', error)
+                setLoadingError('Failed to load interview questions. Please try again.')
+                setSessionState('error')
+                isInitializingRef.current = false
+            }
+        }
+
+        initSession()
+    }, [topicIds, avatarId, AI_SERVICE_URL])
 
     // Check permissions on mount
     useEffect(() => {
         checkPermissions()
     }, [])
+
+    // Debug: Log STT support status
+    useEffect(() => {
+        console.log('[MockInterview] STT Supported:', sttSupported)
+        console.log('[MockInterview] STT Error:', sttError)
+        if (!sttSupported) {
+            console.warn('[MockInterview] Speech recognition is NOT supported in this browser. User can use text input instead.')
+        }
+    }, [sttSupported, sttError])
 
     const checkPermissions = async () => {
         try {
@@ -216,136 +325,109 @@ function InterviewSessionContent() {
         }, 1000)
 
         // Ask first question
-        setSessionState('speaking')
-        await speak(currentQuestion)
+        if (currentQuestion) {
+            setSessionState('speaking')
+            await speak(currentQuestion.question)
+        }
     }, [startCamera, speak, currentQuestion])
 
-    // Evaluate answer using backend API
-    const evaluateAnswer = useCallback(async (question: string, answer: string): Promise<{ score: number; feedback: string }> => {
-        console.log('[MockInterview] Evaluating answer...')
-        console.log('[MockInterview] Question:', question)
-        console.log('[MockInterview] Answer:', answer)
-
-        try {
-            const response = await fetch(`${AI_SERVICE_URL}/api/softskills/interview/evaluate-answer`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    question,
-                    user_answer: answer,
-                    subject,
-                    difficulty: 'medium'
-                })
-            })
-
-            if (!response.ok) {
-                console.error('[MockInterview] Evaluation API error:', response.status)
-                throw new Error(`API error: ${response.status}`)
-            }
-
-            const result = await response.json()
-            console.log('[MockInterview] Evaluation result:', result)
-
-            return {
-                score: result.score,
-                feedback: result.feedback
-            }
-        } catch (error) {
-            console.error('[MockInterview] Evaluation failed:', error)
-            // Fallback to basic heuristic
-            const wordCount = answer.split(' ').length
-            const score = Math.min(100, 40 + wordCount * 2)
-            return {
-                score,
-                feedback: 'Answer recorded. Keep practicing for better results!'
-            }
-        }
-    }, [AI_SERVICE_URL, subject])
-
-    // Save interview results to update topic progress
-    const saveInterviewResults = useCallback(async (finalScores: number[]) => {
-        if (topicIds.length === 0) {
-            console.log('[MockInterview] No topic IDs - skipping save')
-            return
-        }
-
-        const averageScore = finalScores.length > 0
-            ? Math.round(finalScores.reduce((a, b) => a + b, 0) / finalScores.length)
-            : 0
-
-        console.log('[MockInterview] Saving interview results - topicIds:', topicIds, 'score:', averageScore)
-
-        try {
-            // Update topic progress for each topic
-            const response = await fetch(`${AI_SERVICE_URL}/api/softskills/interview/save-results`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
-                },
-                body: JSON.stringify({
-                    topic_ids: topicIds,
-                    score: averageScore,
-                    questions_count: finalScores.length,
-                    time_spent_minutes: Math.round(timeElapsed / 60)
-                })
-            })
-
-            if (response.ok) {
-                console.log('[MockInterview] Results saved successfully')
-            } else {
-                console.error('[MockInterview] Failed to save results:', response.status)
-            }
-        } catch (error) {
-            console.error('[MockInterview] Error saving results:', error)
-        }
-    }, [topicIds, AI_SERVICE_URL, timeElapsed])
-
-    // Submit current answer and move to next question
+    // Submit answer using new API
     const submitAnswer = useCallback(async () => {
         console.log('[MockInterview] Submit answer called')
         console.log('[MockInterview] Current transcript:', transcript)
+        console.log('[MockInterview] Manual answer:', manualAnswer)
 
         stopListening()
         setIsEvaluating(true)
         setSessionState('processing')
 
-        // Save answer
-        const answer = transcript.trim()
+        // Use transcript from speech or manual text input as fallback
+        const answer = transcript.trim() || manualAnswer.trim()
         setAnswers(prev => [...prev, answer])
+        setManualAnswer('')  // Clear manual input
         console.log('[MockInterview] Answer saved:', answer)
 
-        // Evaluate answer using backend API
-        const { score, feedback } = await evaluateAnswer(currentQuestion, answer)
-        console.log('[MockInterview] Score:', score, 'Feedback:', feedback)
+        const responseTime = Math.round((Date.now() - answerStartTimeRef.current) / 1000)
 
-        setScores(prev => [...prev, score])
-        setFeedbacks(prev => [...prev, feedback])
-        setIsEvaluating(false)
+        try {
+            const token = localStorage.getItem('accessToken')
 
-        resetTranscript()
+            const response = await fetch(`${AI_SERVICE_URL}/api/mock-interview/submit-topic-answer`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({
+                    session_id: sessionId,
+                    question_id: currentQuestion.id,
+                    answer_text: answer,
+                    response_time_seconds: responseTime,
+                    token: token
+                })
+            })
 
-        // Move to next question or complete
-        if (currentQuestionIndex < DEMO_QUESTIONS.length - 1) {
-            console.log('[MockInterview] Moving to next question')
-            setCurrentQuestionIndex(prev => prev + 1)
-            setSessionState('speaking')
-            await speak(DEMO_QUESTIONS[currentQuestionIndex + 1])
-        } else {
-            // Interview complete - save results and update UI
-            console.log('[MockInterview] Interview complete!')
+            if (!response.ok) {
+                throw new Error(`Evaluation failed: ${response.status}`)
+            }
 
-            // Calculate final score from all scores including this one
-            const finalScores = [...scores, score]
-            await saveInterviewResults(finalScores)
+            const data = await response.json()
+            console.log('[MockInterview] Evaluation result:', data)
 
-            setSessionState('complete')
-            stopCamera()
-            if (timerRef.current) {
-                clearInterval(timerRef.current)
+            // Store evaluation
+            setEvaluations(prev => [...prev, data.evaluation])
+            setIsEvaluating(false)
+            resetTranscript()
+
+            // Check if more questions
+            if (!data.is_complete && data.next_question) {
+                console.log('[MockInterview] Moving to next question')
+                setQuestions(prev => [...prev, data.next_question])
+                setCurrentQuestionIndex(prev => prev + 1)
+                setSessionState('speaking')
+                await speak(data.next_question.question)
+            } else {
+                // Interview complete
+                console.log('[MockInterview] Interview complete!')
+                setSessionState('complete')
+                stopCamera()
+                if (timerRef.current) {
+                    clearInterval(timerRef.current)
+                }
+            }
+
+        } catch (error) {
+            console.error('[MockInterview] Evaluation failed:', error)
+            // Fallback - still allow progress
+            setIsEvaluating(false)
+            resetTranscript()
+
+            // Create fallback evaluation
+            const wordCount = answer.split(' ').length
+            const fallbackScore = Math.min(100, 40 + wordCount * 2)
+            setEvaluations(prev => [...prev, {
+                question_id: currentQuestion.id,
+                score: fallbackScore,
+                concept_scores: {},
+                covered_concepts: [],
+                missed_concepts: [],
+                feedback: 'Answer recorded. Keep practicing for better results!',
+                expected_answer_summary: ''
+            }])
+
+            if (currentQuestionIndex < questions.length - 1) {
+                setCurrentQuestionIndex(prev => prev + 1)
+                setSessionState('speaking')
+                await speak(questions[currentQuestionIndex + 1].question)
+            } else {
+                setSessionState('complete')
+                stopCamera()
+                if (timerRef.current) {
+                    clearInterval(timerRef.current)
+                }
             }
         }
-    }, [transcript, currentQuestion, currentQuestionIndex, stopListening, resetTranscript, speak, stopCamera, evaluateAnswer, scores, saveInterviewResults])
+    }, [transcript, currentQuestion, sessionId, currentQuestionIndex, questions, stopListening, resetTranscript, speak, stopCamera, AI_SERVICE_URL])
 
     // Format time
     const formatTime = (seconds: number) => {
@@ -365,10 +447,61 @@ function InterviewSessionContent() {
         }
     }, [stopCamera, stopSpeaking])
 
-    // Calculate average score
-    const averageScore = scores.length > 0
-        ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length)
+    // Calculate average score from evaluations
+    const averageScore = evaluations.length > 0
+        ? Math.round(evaluations.reduce((sum, e) => sum + e.score, 0) / evaluations.length)
         : 0
+
+    // Loading state
+    if (sessionState === 'loading') {
+        return (
+            <div className="min-h-screen bg-gradient-to-br from-gray-900 to-gray-800 flex items-center justify-center">
+                <div className="text-center">
+                    <div className="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+                    <p className="text-white/60">Loading interview questions...</p>
+                </div>
+            </div>
+        )
+    }
+
+    // Error state
+    if (sessionState === 'error') {
+        return (
+            <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50 p-6">
+                <div className="max-w-md mx-auto">
+                    <div className="bg-white rounded-3xl shadow-xl p-8 text-center">
+                        <div className="w-20 h-20 rounded-full bg-amber-100 flex items-center justify-center mx-auto mb-6">
+                            <ExclamationTriangleIcon className="w-10 h-10 text-amber-600" />
+                        </div>
+                        <h1 className="text-2xl font-bold text-gray-900 mb-2">Unable to Start</h1>
+                        <p className="text-gray-500 mb-6">{loadingError}</p>
+
+                        {isGeneratingQuestions && (
+                            <button
+                                onClick={async () => {
+                                    // TODO: Trigger question generation
+                                    setIsGeneratingQuestions(false)
+                                    setSessionState('loading')
+                                    // Retry init
+                                }}
+                                className="w-full py-3 rounded-xl bg-gradient-to-r from-purple-500 to-indigo-600 font-medium text-white hover:shadow-lg transition-all mb-3 flex items-center justify-center gap-2"
+                            >
+                                <SparklesIcon className="w-5 h-5" />
+                                Generate Questions
+                            </button>
+                        )}
+
+                        <Link
+                            href="/softskills/mock-interview"
+                            className="block w-full py-3 rounded-xl border border-gray-200 font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                        >
+                            Go Back
+                        </Link>
+                    </div>
+                </div>
+            </div>
+        )
+    }
 
     // Permission denied state
     if (permissionState === 'denied') {
@@ -425,7 +558,7 @@ function InterviewSessionContent() {
                         <div className="grid grid-cols-2 gap-4 mb-6">
                             <div className="bg-gray-50 rounded-xl p-4">
                                 <p className="text-sm text-gray-500">Questions</p>
-                                <p className="text-2xl font-bold text-gray-900">{DEMO_QUESTIONS.length}</p>
+                                <p className="text-2xl font-bold text-gray-900">{evaluations.length}</p>
                             </div>
                             <div className="bg-gray-50 rounded-xl p-4">
                                 <p className="text-sm text-gray-500">Duration</p>
@@ -473,7 +606,7 @@ function InterviewSessionContent() {
                             <span className="text-sm font-mono">{formatTime(timeElapsed)}</span>
                         </div>
                         <div className="text-sm">
-                            Question {currentQuestionIndex + 1} of {DEMO_QUESTIONS.length}
+                            Question {currentQuestionIndex + 1} of {questions.length || '...'}
                         </div>
                     </div>
                 </div>
@@ -525,9 +658,32 @@ function InterviewSessionContent() {
 
                         {/* Question Display */}
                         <div className="bg-white/10 backdrop-blur-sm rounded-2xl p-6">
-                            <p className="text-sm text-white/60 mb-2">Current Question:</p>
-                            <p className="text-lg font-medium">{currentQuestion}</p>
+                            <p className="text-sm text-white/60 mb-2">Current Question{currentQuestion?.topic_name ? ` (${currentQuestion.topic_name})` : ''}:</p>
+                            <p className="text-lg font-medium">{currentQuestion?.question || 'Loading...'}</p>
                         </div>
+
+                        {/* STT Warning */}
+                        {!sttSupported && (
+                            <div className="bg-yellow-500/20 border border-yellow-500/30 rounded-xl p-4">
+                                <p className="text-yellow-200 text-sm font-medium">⚠️ Speech Recognition Not Supported</p>
+                                <p className="text-yellow-200/70 text-xs mt-1">
+                                    Your browser doesn't support speech recognition. Please use Chrome or Edge for the best experience,
+                                    or type your answer in the text box below.
+                                </p>
+                            </div>
+                        )}
+
+                        {/* STT Error */}
+                        {sttError && sttError !== 'no-speech' && (
+                            <div className="bg-red-500/20 border border-red-500/30 rounded-xl p-4">
+                                <p className="text-red-200 text-sm font-medium">🎤 Microphone Error: {sttError}</p>
+                                <p className="text-red-200/70 text-xs mt-1">
+                                    {sttError === 'not-allowed'
+                                        ? 'Microphone permission denied. Please allow microphone access and refresh the page.'
+                                        : 'Please check your microphone settings and try again.'}
+                                </p>
+                            </div>
+                        )}
 
                         {/* Transcript Display */}
                         {(isListening || transcript) && (
@@ -536,6 +692,21 @@ function InterviewSessionContent() {
                                 <p className="text-white/90">
                                     {transcript || <span className="text-white/40 italic">Listening...</span>}
                                 </p>
+                            </div>
+                        )}
+
+                        {/* Text Input Fallback (when STT not available or user prefers typing) */}
+                        {sessionState === 'listening' && (
+                            <div className="bg-white/5 rounded-2xl p-6 space-y-4">
+                                <p className="text-sm text-white/60 mb-2">
+                                    {sttSupported ? 'Or type your answer:' : 'Type your answer:'}
+                                </p>
+                                <textarea
+                                    value={manualAnswer}
+                                    onChange={(e) => setManualAnswer(e.target.value)}
+                                    placeholder="Type your answer here..."
+                                    className="w-full h-32 bg-white/10 backdrop-blur-sm rounded-xl p-4 text-white placeholder-white/40 border border-white/10 focus:border-blue-500 focus:outline-none resize-none"
+                                />
                             </div>
                         )}
 
@@ -572,13 +743,24 @@ function InterviewSessionContent() {
                                     </button>
                                     <button
                                         onClick={submitAnswer}
-                                        disabled={!transcript.trim()}
+                                        disabled={!transcript.trim() && !manualAnswer.trim()}
                                         className="flex-1 py-4 rounded-xl bg-gradient-to-r from-blue-500 to-indigo-600 font-semibold flex items-center justify-center gap-2 hover:shadow-lg transition-all disabled:opacity-50"
                                     >
                                         <CheckCircleIcon className="w-5 h-5" />
                                         Submit Answer
                                     </button>
                                 </>
+                            )}
+
+                            {/* Submit button for text-only input (when not listening but has typed answer) */}
+                            {sessionState === 'listening' && !isListening && manualAnswer.trim() && (
+                                <button
+                                    onClick={submitAnswer}
+                                    className="flex-1 py-4 rounded-xl bg-gradient-to-r from-blue-500 to-indigo-600 font-semibold flex items-center justify-center gap-2 hover:shadow-lg transition-all"
+                                >
+                                    <CheckCircleIcon className="w-5 h-5" />
+                                    Submit Typed Answer
+                                </button>
                             )}
 
                             {sessionState === 'speaking' && (
@@ -599,7 +781,7 @@ function InterviewSessionContent() {
 
                         {/* Progress */}
                         <div className="flex gap-2">
-                            {DEMO_QUESTIONS.map((_, idx) => (
+                            {questions.map((_, idx) => (
                                 <div
                                     key={idx}
                                     className={`flex-1 h-2 rounded-full ${idx < currentQuestionIndex

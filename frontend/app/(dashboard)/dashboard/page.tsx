@@ -65,6 +65,17 @@ export default function DashboardPage() {
     const { data: session } = useSession()
     const [notifications, setNotifications] = useState<Notification[]>([])
     const [loadingNotifications, setLoadingNotifications] = useState(true)
+    // Progress stats
+    const [progressStats, setProgressStats] = useState<{
+        avgConfidence: number
+        topicsMastered: number
+        topicsNeedAttention: number
+        studyStreak: number
+        totalTopics: number
+    } | null>(null)
+    const [weakTopics, setWeakTopics] = useState<{ topic: string; confidence: number }[]>([])
+    const [recentActivity, setRecentActivity] = useState<{ title: string; time: string; type: string }[]>([])
+    const [loadingStats, setLoadingStats] = useState(true)
 
     const apiUrl = getApiBaseUrl()
 
@@ -89,7 +100,54 @@ export default function DashboardPage() {
             }
         }
 
+        async function fetchProgressStats() {
+            try {
+                setLoadingStats(true)
+                // Fetch overview stats
+                const overviewRes = await fetch(`${apiUrl}/api/progress/overview`, {
+                    headers: { 'Authorization': `Bearer ${session?.accessToken}` }
+                })
+                if (overviewRes.ok) {
+                    const data = await overviewRes.json()
+                    setProgressStats(data)
+                }
+
+                // Fetch weak topics from topic-mastery (only classroom-based data, not legacy Progress)
+                const topicsRes = await fetch(`${apiUrl}/api/progress/topic-mastery`, {
+                    headers: { 'Authorization': `Bearer ${session?.accessToken}` }
+                })
+                if (topicsRes.ok) {
+                    const data = await topicsRes.json()
+                    // Filter weak topics (mastery_level < 50) from classroom topics only
+                    const weak = (data.topics || [])
+                        .filter((t: any) => t.mastery_level < 50 && t.mastery_level > 0)
+                        .slice(0, 5)
+                        .map((t: any) => ({ topic: t.topic_name, confidence: t.mastery_level }))
+                    setWeakTopics(weak)
+                }
+
+                // Fetch recent activity from assessments
+                const activityRes = await fetch(`${apiUrl}/api/assessments?limit=3`, {
+                    headers: { 'Authorization': `Bearer ${session?.accessToken}` }
+                })
+                if (activityRes.ok) {
+                    const data = await activityRes.json()
+                    const activities = (data.assessments || []).slice(0, 3).map((a: any) => ({
+                        title: a.title || `Assessment - ${Math.round(a.score || 0)}%`,
+                        time: a.completed_at ? formatRelativeTime(a.completed_at) : 'Recently',
+                        type: 'assessment'
+                    }))
+                    setRecentActivity(activities)
+                }
+            } catch (err) {
+                console.error('Error fetching progress stats:', err)
+            } finally {
+                setLoadingStats(false)
+            }
+        }
+
         fetchNotifications()
+        fetchProgressStats()
     }, [session?.accessToken, apiUrl])
 
     const getNotificationIcon = (type: Notification['type']) => {
@@ -244,30 +302,34 @@ export default function DashboardPage() {
                 <StatCard
                     icon={<FireIcon className="w-6 h-6" />}
                     label="Study Streak"
-                    value="7 days"
-                    change="+2 from last week"
+                    value={progressStats ? `${progressStats.studyStreak} days` : '--'}
+                    change={progressStats?.studyStreak ? 'Keep it up!' : 'Start studying!'}
                     color="orange"
+                    loading={loadingStats}
                 />
                 <StatCard
                     icon={<AcademicCapIcon className="w-6 h-6" />}
                     label="Topics Mastered"
-                    value="12"
-                    change="3 this week"
+                    value={progressStats ? String(progressStats.topicsMastered) : '--'}
+                    change={progressStats?.totalTopics ? `of ${progressStats.totalTopics} total` : ''}
                     color="green"
+                    loading={loadingStats}
                 />
                 <StatCard
                     icon={<ClipboardDocumentListIcon className="w-6 h-6" />}
-                    label="Assessments"
-                    value="24"
-                    change="Avg: 82%"
+                    label="Avg Confidence"
+                    value={progressStats ? `${Math.round(progressStats.avgConfidence)}%` : '--'}
+                    change={progressStats?.avgConfidence ? (progressStats.avgConfidence >= 70 ? 'Great progress!' : 'Room to improve') : ''}
                     color="blue"
+                    loading={loadingStats}
                 />
                 <StatCard
                     icon={<TrophyIcon className="w-6 h-6" />}
-                    label="Global Rank"
-                    value="#42"
-                    change="↑ 5 positions"
+                    label="Topics to Review"
+                    value={progressStats ? String(progressStats.topicsNeedAttention) : '--'}
+                    change={progressStats?.topicsNeedAttention === 0 ? 'All caught up! 🎉' : 'Need attention'}
                     color="purple"
+                    loading={loadingStats}
                 />
             </div>
 
@@ -299,54 +361,57 @@ export default function DashboardPage() {
                 </div>
             </div>
 
-            {/* Weak Topics Alert */}
-            <div className="card border-l-4 border-warning-500">
-                <div className="flex items-start gap-4">
-                    <div className="p-3 bg-warning-100 rounded-lg">
-                        <ArrowTrendingUpIcon className="w-6 h-6 text-warning-600" />
-                    </div>
-                    <div>
-                        <h3 className="font-bold text-gray-900">Topics Needing Attention</h3>
-                        <p className="text-gray-600 mt-1">
-                            Based on your recent assessments, you might want to review these topics:
-                        </p>
-                        <div className="flex flex-wrap gap-2 mt-3">
-                            <span className="px-3 py-1 bg-warning-100 text-warning-700 rounded-full text-sm font-medium">
-                                Photosynthesis
-                            </span>
-                            <span className="px-3 py-1 bg-warning-100 text-warning-700 rounded-full text-sm font-medium">
-                                Quadratic Equations
-                            </span>
-                            <span className="px-3 py-1 bg-warning-100 text-warning-700 rounded-full text-sm font-medium">
-                                World War II
-                            </span>
+            {/* Weak Topics Alert - Only show if there are weak topics */}
+            {weakTopics.length > 0 && (
+                <div className="card border-l-4 border-warning-500">
+                    <div className="flex items-start gap-4">
+                        <div className="p-3 bg-warning-100 rounded-lg">
+                            <ArrowTrendingUpIcon className="w-6 h-6 text-warning-600" />
+                        </div>
+                        <div>
+                            <h3 className="font-bold text-gray-900">Topics Needing Attention</h3>
+                            <p className="text-gray-600 mt-1">
+                                Based on your assessments, you might want to review these topics:
+                            </p>
+                            <div className="flex flex-wrap gap-2 mt-3">
+                                {weakTopics.map((wt, idx) => (
+                                    <span
+                                        key={idx}
+                                        className="px-3 py-1 bg-warning-100 text-warning-700 rounded-full text-sm font-medium"
+                                    >
+                                        {wt.topic} ({Math.round(wt.confidence)}%)
+                                    </span>
+                                ))}
+                            </div>
                         </div>
                     </div>
                 </div>
-            </div>
+            )}
 
             {/* Recent Activity */}
             <div>
                 <h2 className="text-xl font-bold text-gray-900 mb-4">Recent Activity</h2>
                 <div className="card divide-y divide-gray-100">
-                    <ActivityItem
-                        icon={<ChatBubbleLeftRightIcon className="w-5 h-5" />}
-                        title="Asked about mitochondria function"
-                        time="2 hours ago"
-                        color="blue"
-                    />
-                    <ActivityItem
-                        icon={<ClipboardDocumentListIcon className="w-5 h-5" />}
-                        title="Completed Biology Quiz - 85%"
-                        time="Yesterday"
-                        color="green"
-                    />
-                    <ActivityItem
-                        icon={<BookOpenIcon className="w-5 h-5" />}
-                        title="Reviewed Calculus notes"
-                        time="2 days ago"
-                        color="purple"
-                    />
+                    {recentActivity.length > 0 ? (
+                        recentActivity.map((activity, idx) => (
+                            <ActivityItem
+                                key={idx}
+                                icon={<ClipboardDocumentListIcon className="w-5 h-5" />}
+                                title={activity.title}
+                                time={activity.time}
+                                color="green"
+                            />
+                        ))
+                    ) : loadingStats ? (
+                        <div className="flex items-center justify-center py-8">
+                            <ArrowPathIcon className="w-6 h-6 animate-spin text-primary-600" />
+                        </div>
+                    ) : (
+                        <div className="py-8 text-center text-gray-500">
+                            <p className="font-medium">No recent activity</p>
+                            <p className="text-sm mt-1">Complete an assessment to see your activity here</p>
+                        </div>
+                    )}
                 </div>
             </div>
         </div>
@@ -358,13 +423,15 @@ function StatCard({
     label,
     value,
     change,
-    color
+    color,
+    loading = false
 }: {
     icon: React.ReactNode
     label: string
     value: string
     change: string
     color: 'orange' | 'green' | 'blue' | 'purple'
+    loading?: boolean
 }) {
     const colors = {
         orange: 'bg-orange-100 text-orange-600',
@@ -379,8 +446,17 @@ function StatCard({
                 {icon}
             </div>
             <p className="text-gray-500 text-sm">{label}</p>
-            <p className="text-2xl font-bold text-gray-900 mt-1">{value}</p>
-            <p className="text-sm text-gray-500 mt-1">{change}</p>
+            {loading ? (
+                <>
+                    <div className="h-8 w-20 bg-gray-200 rounded animate-pulse mt-1" />
+                    <div className="h-4 w-24 bg-gray-100 rounded animate-pulse mt-2" />
+                </>
+            ) : (
+                <>
+                    <p className="text-2xl font-bold text-gray-900 mt-1">{value}</p>
+                    <p className="text-sm text-gray-500 mt-1">{change}</p>
+                </>
+            )}
         </div>
     )
 }

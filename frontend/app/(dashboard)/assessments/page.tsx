@@ -16,6 +16,7 @@ import {
     SparklesIcon
 } from '@heroicons/react/24/outline'
 import clsx from 'clsx'
+import { getApiBaseUrl } from '@/utils/api'
 import CreateAssessmentModal from '@/components/assessments/CreateAssessmentModal'
 import ChallengeModal from '@/components/assessments/ChallengeModal'
 import ReceivedChallenges from '@/components/assessments/ReceivedChallenges'
@@ -63,12 +64,16 @@ export default function AssessmentsPage() {
     const fetchAssessments = async () => {
         setIsLoading(true)
         try {
-            let url = '/api/assessments'
+            let url = `${getApiBaseUrl()}/api/assessments/`
             if (activeTab === 'my-assessments') {
-                url = '/api/assessments/my-assessments'
+                url = `${getApiBaseUrl()}/api/assessments/my-assessments`
             }
 
-            const res = await fetch(url)
+            const res = await fetch(url, {
+                headers: {
+                    'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
+                }
+            })
             if (res.ok) {
                 const data = await res.json()
                 setAssessments(data.assessments || [])
@@ -81,7 +86,11 @@ export default function AssessmentsPage() {
 
     const fetchClassrooms = async () => {
         try {
-            const res = await fetch('/api/classrooms/enrolled')
+            const res = await fetch(`${getApiBaseUrl()}/api/classroom/my-classrooms`, {
+                headers: {
+                    'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
+                }
+            })
             if (res.ok) {
                 const data = await res.json()
                 setClassrooms(data.classrooms || [])
@@ -93,7 +102,11 @@ export default function AssessmentsPage() {
 
     const fetchPendingChallenges = async () => {
         try {
-            const res = await fetch('/api/assessments/challenges/received?status=pending')
+            const res = await fetch(`${getApiBaseUrl()}/api/assessments/challenges/received?status=pending`, {
+                headers: {
+                    'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
+                }
+            })
             if (res.ok) {
                 const data = await res.json()
                 setPendingChallengeCount(data.count || 0)
@@ -310,7 +323,7 @@ export default function AssessmentsPage() {
                                 ) : (
                                     <div className="flex gap-2">
                                         <Link
-                                            href={`/assessments/${assessment.id}`}
+                                            href={`/assessments/take/${assessment.id}`}
                                             className="btn-primary flex-1 flex items-center justify-center gap-2"
                                         >
                                             <PlayIcon className="w-5 h-5" />
@@ -328,7 +341,7 @@ export default function AssessmentsPage() {
             <CreateAssessmentModal
                 isOpen={showCreateModal}
                 onClose={() => setShowCreateModal(false)}
-                onCreated={handleAssessmentCreated}
+                onSuccess={handleAssessmentCreated}
                 classrooms={classrooms}
             />
 

@@ -8,7 +8,7 @@ Handles:
 - Student topic score retrieval
 """
 
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Depends, Query
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Depends, Query, Header
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 import logging
@@ -112,7 +112,8 @@ async def extract_syllabus_hierarchy(
     classroom_id: str = Form(...),
     subject_name: str = Form(""),
     file: Optional[UploadFile] = File(None),
-    text: Optional[str] = Form(None)
+    text: Optional[str] = Form(None),
+    authorization: Optional[str] = Header(None)
 ):
     """
     Extract chapter-topic hierarchy from syllabus.
@@ -122,22 +123,72 @@ async def extract_syllabus_hierarchy(
     - Plain text (already extracted)
     
     Returns extracted hierarchy for review before saving.
+    Also saves the PDF to storage and updates classroom's syllabus URL.
     """
     extractor = get_syllabus_hierarchy_extractor()
+    core_api_url = os.getenv("CORE_SERVICE_URL", os.getenv("CORE_API_URL", "http://localhost:8000"))
+    
+    syllabus_url = None
+    syllabus_filename = None
     
     if file:
         # Handle PDF upload
         if not file.filename.lower().endswith('.pdf'):
             raise HTTPException(400, "Only PDF files are supported")
         
-        # Save to temp file
+        # Read file content
+        content = await file.read()
+        syllabus_filename = file.filename
+        
+        # Save to temp file for extraction
         with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tmp:
-            content = await file.read()
             tmp.write(content)
             tmp_path = tmp.name
         
         try:
+            # Extract hierarchy
             hierarchy = extractor.extract_hierarchy(tmp_path, subject_name)
+            
+            # Upload PDF to core service file storage
+            if authorization:
+                try:
+                    async with httpx.AsyncClient(verify=False, timeout=30.0) as client:
+                        # Reset file position for upload
+                        files = {"file": (file.filename, content, "application/pdf")}
+                        headers = {"Authorization": authorization}
+                        
+                        upload_resp = await client.post(
+                            f"{core_api_url}/api/files/upload",
+                            files=files,
+                            headers=headers
+                        )
+                        
+                        if upload_resp.status_code in (200, 201):
+                            upload_data = upload_resp.json()
+                            syllabus_url = upload_data.get("url")
+                            logger.info(f"Uploaded syllabus PDF: {syllabus_url}")
+                            
+                            # Update classroom with syllabus URL
+                            syllabus_update = {
+                                "syllabus_url": syllabus_url,
+                                "syllabus_filename": syllabus_filename
+                            }
+                            
+                            update_resp = await client.put(
+                                f"{core_api_url}/api/classroom/{classroom_id}/syllabus",
+                                json=syllabus_update,
+                                headers=headers
+                            )
+                            
+                            if update_resp.status_code == 200:
+                                logger.info(f"Updated classroom {classroom_id} syllabus URL")
+                            else:
+                                logger.warning(f"Failed to update classroom syllabus: {update_resp.text}")
+                        else:
+                            logger.warning(f"Failed to upload syllabus PDF: {upload_resp.text}")
+                            
+                except Exception as e:
+                    logger.error(f"Error uploading syllabus: {e}")
         finally:
             os.unlink(tmp_path)
     
@@ -150,14 +201,20 @@ async def extract_syllabus_hierarchy(
     
     result = extractor.hierarchy_to_dict(hierarchy)
     result["classroom_id"] = classroom_id
+    result["syllabus_url"] = syllabus_url
+    result["syllabus_filename"] = syllabus_filename
     
     logger.info(f"Extracted {result['total_chapters']} chapters, {result['total_topics']} topics")
     
     return result
 
 
+
 @router.post("/save", response_model=Dict[str, Any])
-async def save_syllabus_hierarchy(request: SyllabusHierarchyRequest):
+async def save_syllabus_hierarchy(
+    request: SyllabusHierarchyRequest,
+    authorization: Optional[str] = Header(None)
+):
     """
     Save extracted/edited hierarchy to database.
     
@@ -165,12 +222,17 @@ async def save_syllabus_hierarchy(request: SyllabusHierarchyRequest):
     Returns created IDs for confirmation.
     """
     # This will call the Core API to create records
-    core_api_url = os.getenv("CORE_API_URL", "http://localhost:8000")
+    core_api_url = os.getenv("CORE_SERVICE_URL", os.getenv("CORE_API_URL", "http://localhost:8000"))
     
     chapters_created = []
     topics_created = []
     
-    async with httpx.AsyncClient() as client:
+    # Prepare headers with auth token
+    headers = {}
+    if authorization:
+        headers["Authorization"] = authorization
+    
+    async with httpx.AsyncClient(verify=False) as client:
         for idx, chapter_data in enumerate(request.chapters):
             # Create chapter
             chapter_payload = {
@@ -187,6 +249,7 @@ async def save_syllabus_hierarchy(request: SyllabusHierarchyRequest):
                 resp = await client.post(
                     f"{core_api_url}/api/classroom/{request.classroom_id}/chapters",
                     json=chapter_payload,
+                    headers=headers,
                     timeout=30.0
                 )
                 
@@ -211,6 +274,7 @@ async def save_syllabus_hierarchy(request: SyllabusHierarchyRequest):
                         topic_resp = await client.post(
                             f"{core_api_url}/api/classroom/{request.classroom_id}/topics",
                             json=topic_payload,
+                            headers=headers,
                             timeout=30.0
                         )
                         
@@ -245,9 +309,9 @@ async def get_classroom_hierarchy(
     
     If include_scores=True and user_id provided, includes student's mastery scores.
     """
-    core_api_url = os.getenv("CORE_API_URL", "http://localhost:8000")
+    core_api_url = os.getenv("CORE_SERVICE_URL", os.getenv("CORE_API_URL", "http://localhost:8000"))
     
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(verify=False) as client:
         # Get chapters and topics from Core API
         try:
             resp = await client.get(
@@ -295,9 +359,9 @@ async def get_student_topic_scores(
     
     Useful for curriculum page to show mastery across all enrolled classrooms.
     """
-    core_api_url = os.getenv("CORE_API_URL", "http://localhost:8000")
+    core_api_url = os.getenv("CORE_SERVICE_URL", os.getenv("CORE_API_URL", "http://localhost:8000"))
     
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(verify=False) as client:
         try:
             params = {}
             if classroom_id:
@@ -331,9 +395,9 @@ async def sync_student_topics(
     - Student enrolls in a classroom
     - Teacher updates classroom syllabus
     """
-    core_api_url = os.getenv("CORE_API_URL", "http://localhost:8000")
+    core_api_url = os.getenv("CORE_SERVICE_URL", os.getenv("CORE_API_URL", "http://localhost:8000"))
     
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(verify=False) as client:
         try:
             resp = await client.post(
                 f"{core_api_url}/api/classroom/users/{user_id}/sync-topics",

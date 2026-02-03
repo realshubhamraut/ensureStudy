@@ -98,7 +98,7 @@ class AssignmentGradingService:
     
     def __init__(self):
         self._model: Optional[SentenceTransformer] = None
-        self.callback_url = os.getenv('CORE_SERVICE_URL', 'http://localhost:9000') + '/api/grading/callback'
+        self.callback_url = os.getenv('CORE_SERVICE_URL', 'http://localhost:8000') + '/api/grading/callback'
     
     @property
     def embedding_model(self) -> Optional[SentenceTransformer]:

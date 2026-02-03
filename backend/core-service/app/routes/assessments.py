@@ -67,6 +67,54 @@ def get_assessment(assessment_id):
     return jsonify({"assessment": assessment.to_dict(include_questions=True)}), 200
 
 
+@assessments_bp.route("/<assessment_id>/start", methods=["GET"])
+@require_auth
+def start_assessment(assessment_id):
+    """
+    Start taking an assessment.
+    Returns assessment with questions but WITHOUT correct answers visible.
+    """
+    assessment = Assessment.query.get(assessment_id)
+    
+    if not assessment:
+        return jsonify({"error": "Assessment not found"}), 404
+    
+    # Build questions without revealing correct answers
+    questions_for_taking = []
+    for i, q in enumerate(assessment.questions or []):
+        question_data = {
+            "id": q.get("id", str(i)),
+            "question_type": q.get("question_type", "mcq"),
+            "question_text": q.get("question_text", ""),
+            "marks": q.get("marks", 1),
+            "difficulty": q.get("difficulty", "medium"),
+        }
+        
+        # For MCQ: include options WITHOUT is_correct flag or explanation
+        if q.get("question_type") == "mcq" and q.get("options"):
+            question_data["options"] = [
+                {"id": opt.get("id"), "text": opt.get("text")}
+                for opt in q.get("options", [])
+            ]
+        
+        questions_for_taking.append(question_data)
+    
+    # Calculate total marks
+    total_marks = sum(q.get("marks", 1) for q in assessment.questions or [])
+    
+    return jsonify({
+        "assessment": {
+            "id": assessment.id,
+            "title": assessment.title,
+            "topic": assessment.topic,
+            "subject": assessment.subject,
+            "time_limit_minutes": assessment.time_limit_minutes or 30,
+            "questions": questions_for_taking,
+            "total_marks": total_marks
+        }
+    }), 200
+
+
 @assessments_bp.route("/", methods=["POST"])
 @require_auth
 def create_assessment():
@@ -224,13 +272,86 @@ def submit_assessment(assessment_id):
     if assessment.is_challenge:
         _update_challenge_score(assessment, request.user_id, score)
     
+    # =========================================================================
+    # Update StudentTopicScore for each topic involved in the assessment
+    # This tracks per-topic mastery based on question performance
+    # =========================================================================
+    from app.models.curriculum import StudentTopicScore
+    
+    # Group questions by topic_id and update scores
+    topic_scores_updated = set()
+    for i, question in enumerate(assessment.questions):
+        topic_id = question.get("topic_id") or question.get("classroom_topic_id")
+        if not topic_id:
+            continue
+        
+        # Get or create StudentTopicScore for this topic
+        topic_score = StudentTopicScore.query.filter_by(
+            user_id=request.user_id,
+            classroom_topic_id=topic_id
+        ).first()
+        
+        if not topic_score:
+            topic_score = StudentTopicScore(
+                user_id=request.user_id,
+                classroom_topic_id=topic_id,
+                first_activity_at=datetime.utcnow()
+            )
+            db.session.add(topic_score)
+        
+        # Update MCQ score for this question
+        is_correct = feedback[i]["is_correct"]
+        marks = question.get("marks", 1)
+        topic_score.update_mcq_score(correct=is_correct, marks=marks)
+        topic_score.last_activity_at = datetime.utcnow()
+        topic_scores_updated.add(topic_id)
+        
+        # Create StudentQuestionResponse record if question is linked to TopicQuestion
+        question_id = question.get("id")
+        # Note: Skip if question_id is just a generated UUID (not from TopicQuestions table)
+        # Only create response records when questions are stored in topic_questions table
+        # For AI-generated assessment questions, we track score via StudentTopicScore only
+    
     db.session.commit()
     
+    # Build full assessment with answers for review
+    questions_with_answers = []
+    for i, q in enumerate(assessment.questions or []):
+        question_data = {
+            "id": q.get("id", str(i)),
+            "question_type": q.get("question_type", "mcq"),
+            "question_text": q.get("question_text", ""),
+            "marks": q.get("marks", 1),
+            "difficulty": q.get("difficulty", "medium"),
+            "correct_answer": q.get("correct_answer"),
+            "explanation": q.get("explanation", ""),
+        }
+        
+        # Include options WITH is_correct and explanation
+        if q.get("question_type") == "mcq" and q.get("options"):
+            question_data["options"] = q.get("options")
+        
+        questions_with_answers.append(question_data)
+    
+    # Calculate total marks
+    total_marks = sum(q.get("marks", 1) for q in assessment.questions or [])
+    
     return jsonify({
-        "result": result.to_dict(),
-        "score": score,
-        "correct": correct,
-        "total": total,
+        "result": {
+            "score": correct,
+            "total_marks": total_marks,
+            "percentage": round(score, 1),
+            "correct_count": correct,
+            "total_questions": total,
+        },
+        "assessment_with_answers": {
+            "id": assessment.id,
+            "title": assessment.title,
+            "topic": assessment.topic,
+            "time_limit_minutes": assessment.time_limit_minutes or 30,
+            "questions": questions_with_answers,
+            "total_marks": total_marks
+        },
         "feedback": feedback
     }), 200
 

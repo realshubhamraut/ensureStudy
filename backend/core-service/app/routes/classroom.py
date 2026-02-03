@@ -157,6 +157,67 @@ def update_classroom(classroom_id):
     }), 200
 
 
+@classroom_bp.route("/<classroom_id>", methods=["DELETE"])
+@teacher_required
+def delete_classroom(classroom_id):
+    """Delete a classroom (teacher only)"""
+    from app.models.classroom import ClassroomMaterial
+    from app.models.announcement import Announcement
+    from app.models.meeting import Meeting, MeetingParticipant, MeetingRecording
+    from app.models.curriculum import Chapter, ClassroomTopic
+    from app.models.assignment import Assignment, AssignmentAttachment, Submission, SubmissionFile
+    
+    user = request.current_user
+    
+    classroom = Classroom.query.filter_by(id=classroom_id, teacher_id=user.id).first()
+    
+    if not classroom:
+        return jsonify({"error": "Classroom not found or you don't have permission"}), 404
+    
+    try:
+        # Delete related data (cascade)
+        # Delete student enrollments
+        StudentClassroom.query.filter_by(classroom_id=classroom_id).delete()
+        
+        # Delete materials
+        ClassroomMaterial.query.filter_by(classroom_id=classroom_id).delete()
+        
+        # Delete announcements
+        Announcement.query.filter_by(classroom_id=classroom_id).delete()
+        
+        # Delete meeting-related data (must delete participants and recordings first)
+        meeting_ids = [m.id for m in Meeting.query.filter_by(classroom_id=classroom_id).all()]
+        for meeting_id in meeting_ids:
+            MeetingParticipant.query.filter_by(meeting_id=meeting_id).delete()
+            MeetingRecording.query.filter_by(meeting_id=meeting_id).delete()
+        Meeting.query.filter_by(classroom_id=classroom_id).delete()
+        
+        # Delete assignment-related data (must delete submissions first)
+        assignment_ids = [a.id for a in Assignment.query.filter_by(classroom_id=classroom_id).all()]
+        for assignment_id in assignment_ids:
+            # Delete submission files first
+            submission_ids = [s.id for s in Submission.query.filter_by(assignment_id=assignment_id).all()]
+            for submission_id in submission_ids:
+                SubmissionFile.query.filter_by(submission_id=submission_id).delete()
+            Submission.query.filter_by(assignment_id=assignment_id).delete()
+            AssignmentAttachment.query.filter_by(assignment_id=assignment_id).delete()
+        Assignment.query.filter_by(classroom_id=classroom_id).delete()
+        
+        # Delete topics and chapters
+        ClassroomTopic.query.filter_by(classroom_id=classroom_id).delete()
+        Chapter.query.filter_by(classroom_id=classroom_id).delete()
+        
+        # Finally delete the classroom itself
+        db.session.delete(classroom)
+        db.session.commit()
+        
+        return jsonify({"message": "Classroom deleted successfully"}), 200
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": f"Failed to delete classroom: {str(e)}"}), 500
+
+
 @classroom_bp.route("/<classroom_id>/syllabus", methods=["PUT"])
 @teacher_required
 def update_syllabus(classroom_id):
@@ -1101,6 +1162,26 @@ def delete_chapter(chapter_id):
     db.session.commit()
     
     return jsonify({"message": "Chapter deleted"}), 200
+
+@classroom_bp.route("/topics/<topic_id>", methods=["GET"])
+def get_topic(topic_id):
+    """Get a single topic by ID"""
+    from app.models.curriculum import ClassroomTopic
+    topic = ClassroomTopic.query.get(topic_id)
+    
+    if not topic:
+        return jsonify({"error": "Topic not found"}), 404
+    
+    return jsonify({
+        "topic": {
+            "id": topic.id,
+            "name": topic.name,
+            "description": topic.description,
+            "key_concepts": topic.key_concepts or [],
+            "chapter_id": topic.chapter_id,
+            "order": topic.order
+        }
+    }), 200
 
 
 @classroom_bp.route("/topics/<topic_id>", methods=["PUT"])

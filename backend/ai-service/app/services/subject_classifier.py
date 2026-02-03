@@ -254,7 +254,24 @@ class SubjectClassifier:
             logger.warning("[SUBJECT-LLM] No GROQ_API_KEY found")
             return None
         
-        prompt = SUBJECT_EXTRACTION_PROMPT.format(question=query[:200])
+        # Stricter prompt that emphasizes only returning subject names
+        prompt = f"""Classify this academic question into 1-3 subject categories.
+
+RULES:
+- Return ONLY subject names, comma-separated
+- First = most specific (e.g., Gravity, Thermodynamics, Algebra)
+- Last = broad field (e.g., Physics, Chemistry, Mathematics, Biology, Computer Science, History)
+- Use 1-3 words per subject
+- NO question text, NO explanations
+
+Examples:
+"How do I write a for loop in bash?" → Linux, Shell Scripting, Computer Science
+"Explain Newton's law of gravitation" → Gravity, Classical Mechanics, Physics
+"What is photosynthesis?" → Photosynthesis, Plant Biology, Biology
+"Solve x^2 - 5x + 6 = 0" → Quadratic Equations, Algebra, Mathematics
+
+Question: "{query[:150]}"
+Subjects:"""
         
         try:
             # Call Groq API (fast, <500ms)
@@ -267,8 +284,8 @@ class SubjectClassifier:
                 json={
                     "model": "llama-3.1-8b-instant",  # Fast model for classification
                     "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": 50,
-                    "temperature": 0.1  # Low temp for consistent results
+                    "max_tokens": 30,  # Reduced - we only need subject names
+                    "temperature": 0.0  # Zero temp for deterministic results
                 },
                 timeout=5.0
             )
@@ -280,11 +297,35 @@ class SubjectClassifier:
             result = response.json()
             content = result["choices"][0]["message"]["content"].strip()
             
+            # Clean up the response
+            # Remove any echo of the question (LLM sometimes repeats input)
+            if "→" in content:
+                content = content.split("→")[-1].strip()
+            if ":" in content and len(content.split(":")[0]) < 20:
+                content = content.split(":")[-1].strip()
+            
             # Parse comma-separated subjects
             raw_subjects = [s.strip() for s in content.split(",") if s.strip()]
             
             if not raw_subjects:
                 return None
+            
+            # Valid academic subjects for filtering garbage
+            valid_subjects = {
+                "physics", "chemistry", "biology", "mathematics", "math", "maths",
+                "computer_science", "history", "geography", "english", "literature",
+                "economics", "psychology", "algebra", "geometry", "calculus",
+                "trigonometry", "statistics", "mechanics", "thermodynamics",
+                "electromagnetism", "optics", "quantum", "gravity", "gravitation",
+                "genetics", "ecology", "evolution", "anatomy", "botany", "zoology",
+                "organic_chemistry", "inorganic_chemistry", "biochemistry",
+                "programming", "data_structures", "algorithms", "networking",
+                "operating_systems", "databases", "linux", "python", "java",
+                "ancient_history", "modern_history", "world_history", "geography",
+                "classical_mechanics", "nuclear_physics", "particle_physics",
+                "plant_biology", "cell_biology", "molecular_biology",
+                "shell_scripting", "web_development", "machine_learning"
+            }
             
             # Normalize to lowercase keys and proper display names
             subjects = []
@@ -294,11 +335,21 @@ class SubjectClassifier:
             for i, subj in enumerate(raw_subjects[:3]):  # Max 3
                 # Create normalized key (lowercase, underscores)
                 key = subj.lower().replace(" ", "_").replace("-", "_")
+                
+                # Skip if it looks like query text (too long or contains question words)
+                if len(key) > 30 or any(q in key for q in ["what", "how", "why", "tell", "explain", "about"]):
+                    logger.warning(f"[SUBJECT-LLM] Skipping garbage subject: {key[:50]}")
+                    continue
+                
                 subjects.append(key)
                 display_names.append(subj.title())  # Proper case
                 # Confidence decreases for broader subjects
                 conf = 0.95 - (i * 0.05)
                 confidences.append(conf)
+            
+            if not subjects:
+                logger.warning("[SUBJECT-LLM] No valid subjects extracted, falling back")
+                return None
             
             logger.info(f"[SUBJECT-LLM] Extracted: {subjects} from query: '{query[:50]}...'")
             

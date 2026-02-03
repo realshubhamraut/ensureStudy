@@ -116,6 +116,7 @@ async def process_tutor_query(request: TutorQueryRequest) -> TutorQueryResponse:
         # Step 1.6: Match classroom by subject (try multiple)
         # ========================================
         matched_classroom_id = request.classroom_id  # Use existing if provided
+        matched_subject_name = None  # Track which subject matched
         
         if not matched_classroom_id and detected_subjects and request.user_id:
             try:
@@ -125,6 +126,7 @@ async def process_tutor_query(request: TutorQueryRequest) -> TutorQueryResponse:
                     matched = await match_classroom_by_subject(request.user_id, subj)
                     if matched:
                         matched_classroom_id = matched["classroom_id"]
+                        matched_subject_name = subj  # Store which subject matched
                         print(f"[CLASSROOM] 📚 Matched '{subj}' → '{matched['name']}' (ID: {matched_classroom_id[:8]}...)")
                         break
                 else:
@@ -778,7 +780,8 @@ async def process_tutor_query(request: TutorQueryRequest) -> TutorQueryResponse:
                 retrieval_time_ms=retrieval_time,
                 llm_time_ms=llm_time,
                 request_id=request_id,
-                detected_subject=detected_subject if detected_subject else None,
+                # Use matched classroom subject if available, else most specific detected subject
+                detected_subject=matched_subject_name if matched_subject_name else (detected_subject if detected_subject else None),
                 subject_confidence=round(subject_confidence, 3) if detected_subject else None
             ),
             web_resources=web_resources_dict,

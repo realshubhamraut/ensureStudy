@@ -13,7 +13,7 @@ import {
     SparklesIcon,
     CheckCircleIcon,
     ExclamationTriangleIcon,
-    ArrowTrendingDownIcon
+    ClockIcon
 } from '@heroicons/react/24/outline'
 import Link from 'next/link'
 import { getApiBaseUrl } from '@/utils/api'
@@ -30,12 +30,13 @@ interface Topic {
     id: string
     name: string
     description?: string
-    subject_name?: string
-    subject_icon?: string
-    confidence_score: number
-    subtopics_count: number
-    subtopics_mastered: number
-    is_weak: boolean
+    difficulty?: string
+    estimated_hours?: number
+    chapter_name?: string
+    classroom_name?: string
+    classroom_id?: string
+    confidence?: number  // Mastery percentage from StudentTopicScore
+    status?: 'not_started' | 'learning' | 'practicing' | 'mastered'
 }
 
 const avatars = [
@@ -43,17 +44,14 @@ const avatars = [
     { id: 'male', name: 'Alex', gender: 'Male', image: '/avatars/male-avatar.png' }
 ]
 
-// Confidence color helper
-const getConfidenceColor = (score: number) => {
-    if (score >= 75) return { bg: 'bg-green-100', text: 'text-green-700', ring: 'ring-green-500' }
-    if (score >= 50) return { bg: 'bg-yellow-100', text: 'text-yellow-700', ring: 'ring-yellow-500' }
-    return { bg: 'bg-red-100', text: 'text-red-700', ring: 'ring-red-500' }
-}
-
-const getConfidenceEmoji = (score: number) => {
-    if (score >= 75) return '🟢'
-    if (score >= 50) return '🟡'
-    return '🔴'
+// Difficulty badge colors
+const getDifficultyColor = (difficulty?: string) => {
+    switch (difficulty) {
+        case 'easy': return { bg: 'bg-green-100', text: 'text-green-700' }
+        case 'medium': return { bg: 'bg-yellow-100', text: 'text-yellow-700' }
+        case 'hard': return { bg: 'bg-red-100', text: 'text-red-700' }
+        default: return { bg: 'bg-gray-100', text: 'text-gray-700' }
+    }
 }
 
 export default function MockInterviewPage() {
@@ -103,23 +101,80 @@ export default function MockInterviewPage() {
             setSelectedTopics([])
 
             try {
-                const classroomIds = allClassroomsSelected ? ['all'] : selectedClassrooms
+                const token = localStorage.getItem('accessToken')
 
-                const res = await fetch(`${getApiBaseUrl()}/api/topics/by-classrooms`, {
-                    method: 'POST',
+                // Fetch topics from enrolled-topics API
+                const res = await fetch(`${getApiBaseUrl()}/api/curriculum/enrolled-topics`, {
                     headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
-                    },
-                    body: JSON.stringify({
-                        classroom_ids: classroomIds,
-                        sort_by_confidence: 'asc' // Weak topics first
-                    })
+                        'Authorization': `Bearer ${token}`
+                    }
                 })
+
+                // Also fetch topic mastery scores
+                const scoresRes = await fetch(`${getApiBaseUrl()}/api/progress/topic-mastery`, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                })
+
+                // Build scores map
+                const scoresMap: Record<string, { confidence: number, status: string }> = {}
+                if (scoresRes.ok) {
+                    const scoresData = await scoresRes.json()
+                    for (const t of (scoresData.topics || [])) {
+                        scoresMap[t.topic_id] = {
+                            confidence: t.mastery_level || 0,
+                            status: t.mastery_level >= 80 ? 'mastered' :
+                                t.mastery_level >= 50 ? 'practicing' :
+                                    t.total_attempts > 0 ? 'learning' : 'not_started'
+                        }
+                    }
+                }
 
                 if (res.ok) {
                     const data = await res.json()
-                    setTopics(data.topics || [])
+
+                    // Flatten the hierarchical data into a flat list of topics
+                    const flatTopics: Topic[] = []
+                    const selectedClassroomSet = new Set(selectedClassrooms)
+
+                    for (const classroom of (data.classrooms || [])) {
+                        // Filter by selected classrooms if not "all"
+                        if (!allClassroomsSelected && !selectedClassroomSet.has(classroom.classroom_id)) {
+                            continue
+                        }
+
+                        for (const chapter of (classroom.chapters || [])) {
+                            for (const topic of (chapter.topics || [])) {
+                                flatTopics.push({
+                                    id: topic.id,
+                                    name: topic.name,
+                                    description: topic.description,
+                                    difficulty: topic.difficulty,
+                                    estimated_hours: topic.estimated_hours,
+                                    chapter_name: chapter.name,
+                                    classroom_name: classroom.classroom_name,
+                                    classroom_id: classroom.classroom_id,
+                                    confidence: scoresMap[topic.id]?.confidence || 0,
+                                    status: scoresMap[topic.id]?.status as Topic['status'] || 'not_started'
+                                })
+                            }
+                        }
+                    }
+
+                    // Sort by confidence ascending (lowest first - topics that need most work)
+                    // BUT: 0% (new/unstudied) topics go to the bottom, 1-100% sorted ascending
+                    flatTopics.sort((a, b) => {
+                        const confA = a.confidence || 0
+                        const confB = b.confidence || 0
+                        // Put 0% topics at the end
+                        if (confA === 0 && confB !== 0) return 1
+                        if (confB === 0 && confA !== 0) return -1
+                        // Otherwise sort ascending (1% first, 100% last)
+                        return confA - confB
+                    })
+
+                    setTopics(flatTopics)
                 }
             } catch (error) {
                 console.error('Failed to fetch topics:', error)
@@ -130,6 +185,8 @@ export default function MockInterviewPage() {
 
         if (classrooms.length > 0 && (allClassroomsSelected || selectedClassrooms.length > 0)) {
             fetchTopics()
+        } else {
+            setTopics([])
         }
     }, [classrooms, selectedClassrooms, allClassroomsSelected])
 
@@ -285,10 +342,10 @@ export default function MockInterviewPage() {
                                 )}
                             </div>
 
-                            {/* Weak topics hint */}
-                            <div className="flex items-center gap-2 mb-4 text-sm text-amber-600 bg-amber-50 px-3 py-2 rounded-lg">
-                                <ArrowTrendingDownIcon className="w-4 h-4" />
-                                <span>Topics are sorted by confidence — weak topics appear first</span>
+                            {/* Topic hint */}
+                            <div className="flex items-center gap-2 mb-4 text-sm text-blue-600 bg-blue-50 px-3 py-2 rounded-lg">
+                                <BookOpenIcon className="w-4 h-4" />
+                                <span>Select topics from your enrolled classrooms to practice</span>
                             </div>
 
                             {loading.topics ? (
@@ -304,7 +361,7 @@ export default function MockInterviewPage() {
                             ) : (
                                 <div className="space-y-2 max-h-[400px] overflow-y-auto pr-2">
                                     {topics.map((topic) => {
-                                        const colors = getConfidenceColor(topic.confidence_score)
+                                        const colors = getDifficultyColor(topic.difficulty)
                                         const isSelected = selectedTopics.some(t => t.id === topic.id)
 
                                         return (
@@ -328,26 +385,37 @@ export default function MockInterviewPage() {
                                                         <span className={`font-medium ${isSelected ? 'text-blue-700' : 'text-gray-800'}`}>
                                                             {topic.name}
                                                         </span>
-                                                        {topic.is_weak && (
-                                                            <span className="text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded-full">
-                                                                Needs Practice
+                                                        {/* Confidence Badge */}
+                                                        {typeof topic.confidence === 'number' && (
+                                                            <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${topic.confidence >= 70 ? 'bg-green-100 text-green-700' :
+                                                                topic.confidence >= 50 ? 'bg-yellow-100 text-yellow-700' :
+                                                                    topic.confidence > 0 ? 'bg-red-100 text-red-700' :
+                                                                        'bg-gray-100 text-gray-500'
+                                                                }`}>
+                                                                {topic.confidence > 0 ? `${Math.round(topic.confidence)}%` : 'New'}
                                                             </span>
                                                         )}
                                                     </div>
-                                                    {topic.subject_name && (
+                                                    {(topic.chapter_name || topic.classroom_name) && (
                                                         <span className="text-xs text-gray-500">
-                                                            {topic.subject_icon} {topic.subject_name}
+                                                            📖 {topic.chapter_name}{topic.classroom_name && ` • ${topic.classroom_name}`}
                                                         </span>
                                                     )}
                                                 </div>
 
-                                                {/* Confidence Score */}
-                                                <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full ${colors.bg}`}>
-                                                    <span className="text-sm">{getConfidenceEmoji(topic.confidence_score)}</span>
-                                                    <span className={`text-sm font-semibold ${colors.text}`}>
-                                                        {topic.confidence_score}%
+                                                {/* Difficulty Badge */}
+                                                {topic.difficulty && (
+                                                    <div className={`px-2.5 py-1 rounded-full text-xs font-medium capitalize ${colors.bg} ${colors.text}`}>
+                                                        {topic.difficulty}
+                                                    </div>
+                                                )}
+
+                                                {/* Estimated Hours */}
+                                                {topic.estimated_hours && (
+                                                    <span className="text-xs text-gray-400 whitespace-nowrap">
+                                                        {topic.estimated_hours}h
                                                     </span>
-                                                </div>
+                                                )}
                                             </button>
                                         )
                                     })}
@@ -420,10 +488,10 @@ export default function MockInterviewPage() {
                                     </div>
                                     {selectedTopics.length > 0 && (
                                         <div className="flex items-center justify-between">
-                                            <span className="text-blue-200">Avg Confidence</span>
-                                            <span className="font-medium">
-                                                {getConfidenceEmoji(Math.round(selectedTopics.reduce((acc, t) => acc + t.confidence_score, 0) / selectedTopics.length))}
-                                                {Math.round(selectedTopics.reduce((acc, t) => acc + t.confidence_score, 0) / selectedTopics.length)}%
+                                            <span className="text-blue-200">Est. Time</span>
+                                            <span className="font-medium flex items-center gap-1">
+                                                <ClockIcon className="w-3.5 h-3.5" />
+                                                {selectedTopics.reduce((acc, t) => acc + (t.estimated_hours || 1), 0)}h total
                                             </span>
                                         </div>
                                     )}

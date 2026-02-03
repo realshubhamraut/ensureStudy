@@ -462,11 +462,11 @@ async def generate_assessment(request: GenerateAssessmentRequest):
         topics_content = []
         topic_names = []
         
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=30.0, verify=False) as client:
             # Fetch content from selected chapters
             for chapter_id in request.chapter_ids:
                 try:
-                    resp = await client.get(f"{core_service_url}/api/classrooms/chapters/{chapter_id}")
+                    resp = await client.get(f"{core_service_url}/api/classroom/chapters/{chapter_id}")
                     if resp.status_code == 200:
                         chapter = resp.json().get("chapter", {})
                         topic_names.append(chapter.get("name", "Chapter"))
@@ -485,7 +485,7 @@ async def generate_assessment(request: GenerateAssessmentRequest):
             # Fetch content from selected topics
             for topic_id in request.topic_ids:
                 try:
-                    resp = await client.get(f"{core_service_url}/api/classrooms/topics/{topic_id}")
+                    resp = await client.get(f"{core_service_url}/api/classroom/topics/{topic_id}")
                     if resp.status_code == 200:
                         topic = resp.json().get("topic", {})
                         topic_names.append(topic.get("name", "Topic"))
@@ -518,6 +518,8 @@ async def generate_assessment(request: GenerateAssessmentRequest):
                     logger.warning(f"Failed to fetch weak topics: {e}")
         
         # Build content string for question generation
+        logger.info(f"[Assessment] Topics content found: {len(topics_content)}")
+        
         if not topics_content:
             return {
                 "success": False,
@@ -532,7 +534,10 @@ async def generate_assessment(request: GenerateAssessmentRequest):
                 part += f"{tc['description']}\n"
             if tc['key_concepts']:
                 part += f"Key concepts: {', '.join(tc['key_concepts'])}\n"
+            # Even if no description, include the topic name for generation
             content_parts.append(part)
+        
+        logger.info(f"[Assessment] Content parts built: {len(content_parts)}")
         
         # Enhance with actual syllabus content from Qdrant
         try:
@@ -581,6 +586,9 @@ async def generate_assessment(request: GenerateAssessmentRequest):
         
         generator = get_question_generator()
         
+        # Build list of topic IDs for assignment to questions
+        all_topic_ids = list(request.topic_ids)  # Start with explicitly selected topics
+        
         if request.question_type == "mixed":
             # Generate mixed assessment
             mcq_count = int(request.num_questions * 0.7)  # 70% MCQ
@@ -595,13 +603,21 @@ async def generate_assessment(request: GenerateAssessmentRequest):
             )
             
             all_questions = []
+            question_idx = 0
             for q in result.get("mcq", []):
                 qd = q.to_dict()
                 qd["id"] = str(uuid.uuid4())[:8]
+                # Assign topic_id by distributing across topics
+                if all_topic_ids:
+                    qd["topic_id"] = all_topic_ids[question_idx % len(all_topic_ids)]
+                question_idx += 1
                 all_questions.append(qd)
             for q in result.get("descriptive", []):
                 qd = q.to_dict()
                 qd["id"] = str(uuid.uuid4())[:8]
+                if all_topic_ids:
+                    qd["topic_id"] = all_topic_ids[question_idx % len(all_topic_ids)]
+                question_idx += 1
                 all_questions.append(qd)
         else:
             # Generate MCQ only
@@ -613,9 +629,12 @@ async def generate_assessment(request: GenerateAssessmentRequest):
             )
             
             all_questions = []
-            for q in questions:
+            for idx, q in enumerate(questions):
                 qd = q.to_dict()
                 qd["id"] = str(uuid.uuid4())[:8]
+                # Assign topic_id by distributing across topics
+                if all_topic_ids:
+                    qd["topic_id"] = all_topic_ids[idx % len(all_topic_ids)]
                 all_questions.append(qd)
         
         # Build assessment title
