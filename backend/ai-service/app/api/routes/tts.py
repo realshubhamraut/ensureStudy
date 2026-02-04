@@ -11,7 +11,7 @@ import logging
 from app.services.polly_service import get_polly_service
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/tts", tags=["Text-to-Speech"])
+router = APIRouter(prefix="/api/tts", tags=["Text-to-Speech"])
 
 
 class TTSSynthesizeRequest(BaseModel):

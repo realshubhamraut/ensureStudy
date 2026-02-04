@@ -64,6 +64,7 @@ export default function MockInterviewPage() {
     const [topics, setTopics] = useState<Topic[]>([])
     const [selectedTopics, setSelectedTopics] = useState<Topic[]>([])
     const [selectedAvatar, setSelectedAvatar] = useState<string>('female')
+    const [questionsPerTopic, setQuestionsPerTopic] = useState<number>(3)  // 1-10 questions per topic
     const [loading, setLoading] = useState({ classrooms: true, topics: false })
     const [isReady, setIsReady] = useState(false)
 
@@ -222,7 +223,7 @@ export default function MockInterviewPage() {
             const classroomParam = allClassroomsSelected ? 'all' : selectedClassrooms.join(',')
             const topicIds = selectedTopics.map(t => t.id).join(',')
             const topicNames = selectedTopics.map(t => t.name).join(',')
-            router.push(`/softskills/mock-interview/session?topics=${topicIds}&topic_names=${encodeURIComponent(topicNames)}&classrooms=${classroomParam}&avatar=${selectedAvatar}`)
+            router.push(`/softskills/mock-interview/session?topics=${topicIds}&topic_names=${encodeURIComponent(topicNames)}&classrooms=${classroomParam}&avatar=${selectedAvatar}&questions_per_topic=${questionsPerTopic}`)
         }
     }
 
