@@ -428,7 +428,8 @@ async def health_check():
 
 class GenerateAssessmentRequest(BaseModel):
     """Request to generate a complete assessment from selected topics/chapters"""
-    classroom_id: str = Field(..., description="Classroom ID")
+    classroom_id: str = Field(..., description="Primary classroom ID")
+    classroom_ids: List[str] = Field(default=[], description="Multiple classroom IDs for mixed-subject assessments")
     topic_ids: List[str] = Field(default=[], description="List of ClassroomTopic IDs")
     chapter_ids: List[str] = Field(default=[], description="List of Chapter IDs")
     include_weak_topics: bool = Field(default=False, description="Include user's weak topics")
@@ -454,6 +455,10 @@ async def generate_assessment(request: GenerateAssessmentRequest):
     import os
     import httpx
     import uuid
+    
+    # Debug logging
+    logger.info(f"[Assessment] Received request: classroom_id={request.classroom_id}, "
+                f"classroom_ids={request.classroom_ids}, topic_ids={request.topic_ids}")
     
     try:
         # Get topic/chapter content from core service

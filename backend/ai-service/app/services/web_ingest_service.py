@@ -509,9 +509,9 @@ async def worker6b_pdf_search(
         from .search_api import MultiSourceSearcher
         from .pdf_extractor import pdf_extractor
         
-        # Create enhanced query with '+ pdf download' modifier
-        pdf_query = f"{topic} + pdf download filetype:pdf"
-        print(f"[WORKER-6B] 🔍 Enhanced query: '{pdf_query}'")
+        # Create enhanced query with filetype:pdf modifier
+        pdf_query = f"{topic} filetype:pdf"
+        print(f"[WORKER-6B] 🔍 PDF query: '{pdf_query}'")
         
         # Search for PDFs using multi-source searcher
         print(f"[WORKER-6B] 🌐 Searching multiple sources...")
@@ -660,6 +660,243 @@ async def worker6b_pdf_search(
     except Exception as e:
         print(f"[WORKER-6B] ❌ PDF search error: {e}")
         logger.error(f"[WORKER-6B] PDF search error: {e}")
+        import traceback
+        traceback.print_exc()
+        return []
+
+
+# ============================================================================
+# Worker-6C: Presentation Search & Download (PPTX/PPT)
+# ============================================================================
+
+async def worker6c_presentation_search(
+    topic: str,
+    user_id: str = "",
+    max_presentations: int = 3,
+    classroom_id: str = None,
+    subject: str = None
+) -> List[Dict[str, Any]]:
+    """
+    WORKER-6C: Search for educational presentations (PPTX/PPT) and download them.
+    
+    Uses 'presentation slides' keyword for better discovery.
+    
+    Args:
+        topic: Extracted topic/keyword from user query
+        user_id: User ID for tracking downloads
+        max_presentations: Maximum number of presentations to download (default 3)
+        classroom_id: Optional classroom to store downloaded files in
+        subject: Optional subject for tagging
+        
+    Returns:
+        List of downloaded presentation info with extracted text
+    """
+    import os
+    import httpx
+    
+    print(f"\n{'='*62}")
+    print(f"[WORKER-6C] 📊 Presentation Search: '{topic}'")
+    print(f"[WORKER-6C] 📚 Classroom ID: {classroom_id or 'None (not storing)'}")
+    print(f"[WORKER-6C] 🎯 Subject: {subject or 'None (auto-detect)'}")
+    print(f"{'='*62}")
+    
+    try:
+        from .pdf_downloader import WebPDFDownloader, WEB_UPLOADS_BASE
+        from .search_api import MultiSourceSearcher
+        from .pptx_extractor import pptx_extractor
+        
+        # Create enhanced query for presentations
+        pptx_query = f"{topic} presentation slides filetype:pptx"
+        print(f"[WORKER-6C] 🔍 PPTX query: '{pptx_query}'")
+        
+        # Search for presentations
+        print(f"[WORKER-6C] 🌐 Searching for presentations...")
+        searcher = MultiSourceSearcher()
+        results = await searcher.search(pptx_query, num_results=max_presentations * 2)
+        print(f"[WORKER-6C] 📊 Search returned {len(results)} results")
+        
+        # Filter to only PPTX/PPT URLs
+        pptx_urls = []
+        for r in results:
+            url = r.url.lower()
+            print(f"[WORKER-6C] 🔗 Checking URL: {r.url[:80]}...")
+            if url.endswith('.pptx') or url.endswith('.ppt') or 'pptx' in url or 'ppt' in url:
+                # Skip Google Slides (requires auth)
+                if 'docs.google.com' not in url and 'drive.google.com' not in url:
+                    pptx_urls.append(r.url)
+                    print(f"[WORKER-6C] ✓ Found presentation: {r.url[:60]}...")
+                    if len(pptx_urls) >= max_presentations:
+                        break
+                else:
+                    print(f"[WORKER-6C] ⊘ Skipping Google Slides (auth required)")
+            else:
+                print(f"[WORKER-6C] ⊘ Not a presentation, skipping")
+        
+        if not pptx_urls:
+            print(f"[WORKER-6C] ⚠ No presentations found for: '{topic}'")
+            print(f"[WORKER-6C] 💡 Try a more specific query or different topic")
+            return []
+        
+        print(f"\n[WORKER-6C] 📥 Downloading {len(pptx_urls)} presentations...")
+        
+        # Download presentations (reuse PDF downloader with modified accept header)
+        presentations = []
+        
+        for url in pptx_urls:
+            try:
+                print(f"[WORKER-6C] Downloading: {url[:80]}...")
+                
+                headers = {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                    "Accept": "application/vnd.openxmlformats-officedocument.presentationml.presentation,*/*",
+                }
+                
+                async with httpx.AsyncClient(timeout=60.0, follow_redirects=True, headers=headers) as client:
+                    response = await client.get(url)
+                    
+                    if response.status_code != 200:
+                        print(f"[WORKER-6C] ❌ HTTP {response.status_code}")
+                        continue
+                    
+                    content = response.content
+                    file_size = len(content)
+                    
+                    # Extract filename and decode URL encoding
+                    from urllib.parse import urlparse, unquote
+                    path = urlparse(url).path
+                    original_name = unquote(os.path.basename(path))  # Decode %20 to spaces, etc.
+                    if not original_name or '.' not in original_name:
+                        original_name = f"presentation_{len(presentations)+1}.pptx"
+                    
+                    # Create storage directory
+                    import uuid
+                    storage_dir = os.path.join(WEB_UPLOADS_BASE, 'presentations')
+                    if classroom_id:
+                        storage_dir = os.path.join(storage_dir, classroom_id)
+                    os.makedirs(storage_dir, exist_ok=True)
+                    
+                    # Save file
+                    unique_id = uuid.uuid4().hex[:8]
+                    safe_topic = "".join(c for c in topic if c.isalnum() or c in ' -_')[:30]
+                    file_name = f"{safe_topic}_{unique_id}_{original_name}"
+                    file_path = os.path.join(storage_dir, file_name)
+                    
+                    with open(file_path, 'wb') as f:
+                        f.write(content)
+                    
+                    print(f"[WORKER-6C] ✅ Downloaded: {file_name} ({file_size/1024:.1f}KB)")
+                    
+                    # Extract text from PPTX first (before converting)
+                    text, has_images, slide_count = pptx_extractor.extract_text_from_pptx(file_path)
+                    
+                    # Convert PPTX to PDF for in-browser viewing
+                    from .pptx_extractor import convert_pptx_to_pdf
+                    pdf_path = convert_pptx_to_pdf(file_path, storage_dir)
+                    
+                    if pdf_path and os.path.exists(pdf_path):
+                        # PDF conversion successful
+                        pdf_relative_path = pdf_path[len(WEB_UPLOADS_BASE):].lstrip(os.sep)
+                        pdf_url = f"/api/files/web/{pdf_relative_path}"
+                        print(f"[WORKER-6C] ✅ PDF created: {pdf_url}")
+                        
+                        # Delete the original PPTX immediately - we only keep PDFs
+                        try:
+                            os.remove(file_path)
+                            print(f"[WORKER-6C] 🗑️ Deleted PPTX: {file_name}")
+                        except Exception as del_err:
+                            print(f"[WORKER-6C] ⚠ Failed to delete PPTX: {del_err}")
+                        
+                        # Build local URL using PDF path
+                        pdf_file_name = os.path.basename(pdf_path)
+                        
+                        presentation = {
+                            'file_path': pdf_path,  # Now points to PDF
+                            'file_name': pdf_file_name,  # PDF filename
+                            'source_url': url,
+                            'local_url': pdf_url,  # PDF URL
+                            'pdf_url': pdf_url,
+                            'file_size': os.path.getsize(pdf_path),  # PDF size
+                            'extracted_text': text[:50000] if text else "",
+                            'word_count': len(text.split()) if text else 0,
+                            'slide_count': slide_count,
+                            'has_images': has_images,
+                            'type': 'pdf'  # Changed: Store as PDF type
+                        }
+                        presentations.append(presentation)
+                        print(f"[WORKER-6C] ✅ Extracted {slide_count} slides, {len(text) if text else 0} chars")
+                        
+                        # Store to classroom if classroom_id provided (store PDF, not PPTX)
+                        if classroom_id:
+                            try:
+                                core_service_url = os.getenv('CORE_SERVICE_URL') or os.getenv('CORE_API_URL') or 'https://localhost:8000'
+                                
+                                print(f"[WORKER-6C] 💾 Storing PDF in classroom {classroom_id}...")
+                                
+                                async with httpx.AsyncClient(timeout=10.0, verify=False) as client:
+                                    response = await client.post(
+                                        f"{core_service_url}/api/classroom/{classroom_id}/web-materials",
+                                        headers={"X-Service-Key": "internal-ai-service"},
+                                        json={
+                                            "name": pdf_file_name,  # PDF filename
+                                            "url": pdf_url,  # PDF URL
+                                            "type": "application/pdf",  # Changed: PDF type
+                                            "size": os.path.getsize(pdf_path),  # PDF size
+                                            "source_url": url,
+                                            "description": f"Web search: {topic} (converted from PPTX)",
+                                            "subject": subject
+                                        }
+                                    )
+                                    
+                                    if response.status_code in [200, 201]:
+                                        data = response.json()
+                                        if data.get('duplicate'):
+                                            print(f"[WORKER-6C] ⚠ Already exists in classroom")
+                                        else:
+                                            print(f"[WORKER-6C] ✅ PDF stored in classroom materials!")
+                                    else:
+                                        print(f"[WORKER-6C] ⚠ Failed to store: {response.status_code}")
+                                        
+                            except Exception as store_err:
+                                print(f"[WORKER-6C] ⚠ Storage error (non-fatal): {store_err}")
+                    else:
+                        # PDF conversion failed - keep PPTX as fallback but log warning
+                        print(f"[WORKER-6C] ⚠ PDF conversion failed, keeping PPTX for download")
+                        relative_path = file_path[len(WEB_UPLOADS_BASE):].lstrip(os.sep)
+                        local_url = f"/api/files/web/{relative_path}"
+                        
+                        presentation = {
+                            'file_path': file_path,
+                            'file_name': file_name,
+                            'source_url': url,
+                            'local_url': local_url,
+                            'pdf_url': None,
+                            'file_size': file_size,
+                            'extracted_text': text[:50000] if text else "",
+                            'word_count': len(text.split()) if text else 0,
+                            'slide_count': slide_count,
+                            'has_images': has_images,
+                            'type': 'pptx'
+                        }
+                        presentations.append(presentation)
+                    
+                    
+            except Exception as e:
+                print(f"[WORKER-6C] ⚠ Download error for {url[:60]}: {e}")
+                continue
+        
+        print(f"\n{'='*62}")
+        print(f"[WORKER-6C] ✅ COMPLETE: {len(presentations)} presentations processed")
+        if classroom_id:
+            print(f"[WORKER-6C] 📚 Materials stored in classroom: {classroom_id}")
+        print(f"{'='*62}\n")
+        
+        return presentations
+        
+    except ImportError as e:
+        print(f"[WORKER-6C] ⚠ Import error: {e}")
+        return []
+    except Exception as e:
+        print(f"[WORKER-6C] ❌ Presentation search error: {e}")
         import traceback
         traceback.print_exc()
         return []

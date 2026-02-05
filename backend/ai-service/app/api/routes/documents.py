@@ -390,3 +390,121 @@ def _generate_summary(title: str, match_count: int) -> str:
         return f"Found 1 relevant section in '{title}'."
     else:
         return f"Found {match_count} relevant sections in '{title}'."
+
+
+# ============================================================
+# PPTX to PDF Conversion Endpoint
+# ============================================================
+
+class ConversionResponse(BaseModel):
+    """Response after PPTX to PDF conversion."""
+    success: bool
+    pdf_url: Optional[str] = None
+    error: Optional[str] = None
+
+
+@router.post(
+    "/convert/pptx-to-pdf",
+    response_model=ConversionResponse,
+    summary="Convert PPTX to PDF"
+)
+async def convert_pptx_to_pdf_endpoint(
+    pptx_url: str = Query(..., description="URL or path to the PPTX file"),
+    classroom_id: Optional[str] = Query(None, description="Classroom ID for storage")
+):
+    """
+    Convert a PPTX file to PDF for in-browser viewing.
+    
+    - Checks if PDF already exists in cache (by URL hash)
+    - Downloads PPTX if remote URL
+    - Converts using LibreOffice headless
+    - Deletes PPTX immediately after conversion
+    - Returns URL to the cached PDF
+    """
+    import tempfile
+    import hashlib
+    import httpx
+    import shutil
+    from pathlib import Path
+    
+    try:
+        # Generate cache key from URL
+        url_hash = hashlib.md5(pptx_url.encode()).hexdigest()[:16]
+        
+        # Check for cached PDF first - use same path as pdf_downloader
+        from ...services.pdf_downloader import WEB_UPLOADS_BASE
+        base_path = WEB_UPLOADS_BASE
+        storage_dir = os.path.join(base_path, 'conversions')
+        os.makedirs(storage_dir, exist_ok=True)
+        
+        # Look for existing PDF with this hash
+        cached_pdf_name = f"{url_hash}.pdf"
+        cached_pdf_path = os.path.join(storage_dir, cached_pdf_name)
+        
+        if os.path.exists(cached_pdf_path) and os.path.getsize(cached_pdf_path) > 1024:
+            # PDF already cached and has valid size, return immediately
+            pdf_url = f"/api/files/web/conversions/{cached_pdf_name}"
+            logger.info(f"[CONVERT] ✅ Using cached PDF: {pdf_url} ({os.path.getsize(cached_pdf_path)} bytes)")
+            return ConversionResponse(success=True, pdf_url=pdf_url)
+        
+        # Not cached - need to download and convert
+        pptx_path = None
+        temp_dir = tempfile.mkdtemp()
+        
+        try:
+            if pptx_url.startswith('http'):
+                # Download remote PPTX
+                logger.info(f"[CONVERT] Downloading PPTX from: {pptx_url}")
+                
+                # Skip SSL verification for localhost (self-signed dev certs)
+                verify_ssl = not ('localhost' in pptx_url or '127.0.0.1' in pptx_url)
+                
+                async with httpx.AsyncClient(verify=verify_ssl) as client:
+                    response = await client.get(pptx_url, follow_redirects=True, timeout=60.0)
+                    if response.status_code != 200:
+                        return ConversionResponse(success=False, error=f"Failed to download: {response.status_code}")
+                    
+                    # Save to temp file
+                    pptx_path = os.path.join(temp_dir, f"{url_hash}.pptx")
+                    with open(pptx_path, 'wb') as f:
+                        f.write(response.content)
+            elif pptx_url.startswith('/api/files/'):
+                # Local file served via API
+                relative_path = pptx_url.replace('/api/files/web/', '')
+                pptx_path = os.path.join(base_path, relative_path)
+                if not os.path.exists(pptx_path):
+                    return ConversionResponse(success=False, error=f"File not found: {relative_path}")
+            else:
+                # Assume local path
+                pptx_path = pptx_url
+                if not os.path.exists(pptx_path):
+                    return ConversionResponse(success=False, error=f"File not found: {pptx_url}")
+            
+            # Convert using LibreOffice
+            from ...services.pptx_extractor import convert_pptx_to_pdf
+            
+            pdf_path = convert_pptx_to_pdf(pptx_path, temp_dir)
+            
+            if not pdf_path or not os.path.exists(pdf_path):
+                return ConversionResponse(success=False, error="Conversion failed - LibreOffice may not be installed")
+            
+            # Move PDF to cache with hash-based name
+            shutil.copy(pdf_path, cached_pdf_path)
+            
+            # Build URL
+            pdf_url = f"/api/files/web/conversions/{cached_pdf_name}"
+            
+            logger.info(f"[CONVERT] ✅ PPTX converted to PDF: {pdf_url}")
+            
+            return ConversionResponse(success=True, pdf_url=pdf_url)
+            
+        finally:
+            # Clean up temp directory (including downloaded PPTX)
+            if temp_dir and os.path.exists(temp_dir):
+                shutil.rmtree(temp_dir, ignore_errors=True)
+                logger.info(f"[CONVERT] 🗑️ Cleaned up temp files")
+        
+    except Exception as e:
+        logger.error(f"[CONVERT] Error: {e}", exc_info=True)
+        return ConversionResponse(success=False, error=str(e))
+

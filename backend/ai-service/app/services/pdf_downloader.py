@@ -91,7 +91,7 @@ class WebPDFDownloader:
         
         # Fall back to URL path
         path = urlparse(url).path
-        filename = os.path.basename(path)
+        filename = unquote(os.path.basename(path))  # Decode %20 to spaces, etc.
         
         # If no filename or no extension, generate one
         if not filename or '.' not in filename:

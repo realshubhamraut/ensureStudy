@@ -84,7 +84,38 @@ async def process_tutor_query(request: TutorQueryRequest) -> TutorQueryResponse:
     
     try:
         # ========================================
-        # Step 1.5: Auto-detect subject if not provided
+        # Step 1.5: Academic Moderation (LLM-based)
+        # ========================================
+        moderation_result = moderate_query(
+            user_id=request.user_id,
+            question=request.question
+        )
+        
+        log_moderation_result(
+            request_id=request_id,
+            user_id=request.user_id,
+            decision=moderation_result.decision,
+            confidence=moderation_result.confidence,
+            category=moderation_result.category
+        )
+        
+        if moderation_result.decision == "block":
+            log_error(
+                "non_academic_query",
+                moderation_result.reason or "Query blocked",
+                request_id
+            )
+            return TutorQueryResponse(
+                success=False,
+                error={
+                    "code": "non_academic_query",
+                    "message": moderation_result.reason or "Please ask academic questions only."
+                }
+            )
+        
+        # ========================================
+        # Step 1.6: Auto-detect subject if not provided
+        # (Only runs if moderation passed)
         # ========================================
         detected_subject = None
         subject_confidence = 0.0
@@ -113,7 +144,7 @@ async def process_tutor_query(request: TutorQueryRequest) -> TutorQueryResponse:
                     pass
         
         # ========================================
-        # Step 1.6: Match classroom by subject (try multiple)
+        # Step 1.7: Match classroom by subject (try multiple)
         # ========================================
         matched_classroom_id = request.classroom_id  # Use existing if provided
         matched_subject_name = None  # Track which subject matched
@@ -133,36 +164,6 @@ async def process_tutor_query(request: TutorQueryRequest) -> TutorQueryResponse:
                     print(f"[CLASSROOM] ℹ️ No classroom match for subjects: {detected_subjects}")
             except Exception as e:
                 print(f"[CLASSROOM] ⚠️ Classroom matching failed: {e}")
-        
-        # ========================================
-        # Step 2: Academic Moderation (No LLM)
-        # ========================================
-        moderation_result = moderate_query(
-            user_id=request.user_id,
-            question=request.question
-        )
-        
-        log_moderation_result(
-            request_id=request_id,
-            user_id=request.user_id,
-            decision=moderation_result.decision,
-            confidence=moderation_result.confidence,
-            category=moderation_result.category
-        )
-        
-        if moderation_result.decision == "block":
-            log_error(
-                "non_academic_query",
-                moderation_result.reason or "Query blocked",
-                request_id
-            )
-            return TutorQueryResponse(
-                success=False,
-                error={
-                    "code": "non_academic_query",
-                    "message": moderation_result.reason or "Please ask academic questions only."
-                }
-            )
         
         # ========================================
         # Step 3 & 4: Embed + Retrieve (Qdrant)
@@ -445,9 +446,47 @@ async def process_tutor_query(request: TutorQueryRequest) -> TutorQueryResponse:
                                         response_mode=resp_mode
                                     )
                                 
-                                # Signal completion
-                                await push_complete(request_id, pdf_count)
                                 print(f"[BACKGROUND] ✅ Crawl complete: {len(result.resources)} sources, {pdf_count} PDFs, cached!")
+                                
+                                # Search for PPTX presentations BEFORE closing SSE stream
+                                pptx_count = 0
+                                try:
+                                    from ...services.web_ingest_service import worker6c_presentation_search
+                                    from .sse import push_pptx_update
+                                    print(f"[BACKGROUND] 📊 Searching for presentations...")
+                                    presentations = await worker6c_presentation_search(
+                                        topic=topic,
+                                        user_id=request.user_id,
+                                        max_presentations=2,
+                                        classroom_id=matched_classroom_id,
+                                        subject=request.subject.value if request.subject else None
+                                    )
+                                    if presentations:
+                                        pptx_count = len(presentations)
+                                        print(f"[BACKGROUND] ✅ Found {pptx_count} presentations")
+                                        # Push presentation updates via SSE using dedicated pptx_added event
+                                        for i, pres in enumerate(presentations):
+                                            await push_pptx_update(request_id, {
+                                                "id": f"ppt_{i+1}",
+                                                "title": pres.get('file_name', f"Presentation {i+1}"),
+                                                "url": pres.get('local_url', ''),
+                                                "pdf_url": pres.get('pdf_url'),  # PDF URL for in-browser viewing
+                                                "source": "Web Presentation",
+                                                "snippet": (pres.get('extracted_text', '') or "")[:200],
+                                                "type": "pptx",
+                                                "slide_count": pres.get('slide_count', 0),
+                                                "relevance": 80
+                                            })
+                                            # Debug logging for pdf_url
+                                            if pres.get('pdf_url'):
+                                                print(f"[SSE] ✅ Pushed pptx_added for ppt_{i+1} WITH pdf_url: {pres.get('pdf_url')}")
+                                            else:
+                                                print(f"[SSE] ⚠ Pushed pptx_added for ppt_{i+1} WITHOUT pdf_url (conversion failed)")
+                                except Exception as pptx_err:
+                                    print(f"[BACKGROUND] ⚠ Presentation search error: {pptx_err}")
+                                
+                                # NOW signal completion (after all resources pushed)
+                                await push_complete(request_id, pdf_count + pptx_count)
                             else:
                                 await push_complete(request_id, 0)
                                 print(f"[BACKGROUND] ⚠ Crawl failed: {result.error}")
@@ -488,29 +527,48 @@ async def process_tutor_query(request: TutorQueryRequest) -> TutorQueryResponse:
                     # ALSO fetch Serper articles for educational sources (Khan Academy, Byju's, etc.)
                     try:
                         from ...services.search_api import SerperSearchClient
+                        from ...services.fast_content_fetcher import fetch_articles_fast
+                        
                         serper = SerperSearchClient()
                         serper_results = await serper.search(topic, num_results=5)
                         
                         if serper_results:
                             print(f"[RAG-FAST] 🔍 Serper found {len(serper_results)} educational sources")
-                            for i, result in enumerate(serper_results[:4]):  # Top 4 results
-                                # Skip if it's a PDF or YouTube (handled separately)
-                                if result.url.endswith('.pdf') or 'youtube.com' in result.url:
-                                    continue
-                                articles_list.append({
-                                    "id": f"article_{i+2}",
-                                    "type": "article",
-                                    "title": result.title,
-                                    "url": result.url,
-                                    "source": result.domain,
-                                    "snippet": result.snippet[:200] if result.snippet else "",
-                                    "trustScore": result.trust_score,
-                                    "relevance": int(result.trust_score * 100)
-                                })
-                                # ALSO add snippet to web_context for LLM!
-                                if result.snippet:
-                                    web_context += f"\n\n--- {result.title} ({result.domain}) ---\n{result.snippet}"
-                            print(f"[RAG-FAST] ✅ Added {len(articles_list)} articles (Wikipedia + Serper) to context")
+                            
+                            # Collect URLs to fetch (skip PDFs and YouTube)
+                            urls_to_fetch = []
+                            for result in serper_results[:4]:
+                                if not result.url.endswith('.pdf') and 'youtube.com' not in result.url:
+                                    urls_to_fetch.append(result.url)
+                                    articles_list.append({
+                                        "id": f"article_{len(articles_list)+1}",
+                                        "type": "article",
+                                        "title": result.title,
+                                        "url": result.url,
+                                        "source": result.domain,
+                                        "snippet": result.snippet[:200] if result.snippet else "",
+                                        "trustScore": result.trust_score,
+                                        "relevance": int(result.trust_score * 100)
+                                    })
+                            
+                            # FAST FETCH: Get actual article content (3s timeout per URL)
+                            if urls_to_fetch:
+                                print(f"[RAG-FAST] 📄 Fetching {len(urls_to_fetch)} article contents...")
+                                fetched = await fetch_articles_fast(
+                                    urls_to_fetch, 
+                                    timeout_per_url=3.0,
+                                    max_chars_per_article=2500,
+                                    max_total_chars=8000
+                                )
+                                
+                                # Add fetched content to web_context
+                                for url, content in fetched.items():
+                                    if content.success and content.content:
+                                        web_context += f"\n\n--- {content.title} ---\n{content.content}"
+                                
+                                print(f"[RAG-FAST] ✅ Added {len(fetched)} article contents ({sum(len(c.content) for c in fetched.values())} chars)")
+                            
+                            print(f"[RAG-FAST] ✅ Added {len(articles_list)} articles to resources")
                     except Exception as serper_err:
                         print(f"[RAG-FAST] ⚠ Serper search error: {serper_err}")
                     
@@ -559,6 +617,27 @@ async def process_tutor_query(request: TutorQueryRequest) -> TutorQueryResponse:
                     for v in youtube_videos
                 ]
                 print(f"[RAG] 🎬 Added {len(youtube_videos)} YouTube videos")
+                
+                # FETCH YOUTUBE TRANSCRIPT for top video to add to context
+                try:
+                    from ...services.youtube_transcript_service import get_youtube_transcript, extract_video_id
+                    
+                    top_video = youtube_videos[0]
+                    # Strip 'yt_' prefix if present - video service adds this but transcript API needs raw ID
+                    raw_id = top_video.get("id", "")
+                    if raw_id.startswith("yt_"):
+                        raw_id = raw_id[3:]  # Remove 'yt_' prefix
+                    video_id = raw_id or extract_video_id(top_video.get("url", ""))
+                    
+                    if video_id:
+                        transcript = await get_youtube_transcript(video_id, max_chars=2000)
+                        if transcript:
+                            web_context += f"\n\n--- YouTube Video: {top_video.get('title', 'Video')} ---\n{transcript}"
+                            print(f"[RAG] 🎬 Added YouTube transcript ({len(transcript)} chars)")
+                        else:
+                            print(f"[RAG] 🎬 No transcript available for video {video_id}")
+                except Exception as transcript_err:
+                    print(f"[RAG] ⚠ YouTube transcript error: {transcript_err}")
         except Exception as vid_err:
             print(f"[RAG] ⚠ YouTube video error: {vid_err}")
         

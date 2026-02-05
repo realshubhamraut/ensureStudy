@@ -23,7 +23,7 @@ from sentence_transformers import SentenceTransformer
 
 # Cache settings
 CACHE_COLLECTION = "web_content_cache"
-CACHE_THRESHOLD = 0.85  # Minimum similarity to use cached result
+CACHE_THRESHOLD = 0.92  # Increased from 0.85 - stricter matching for specific queries
 EMBEDDING_DIM = 384  # MiniLM dimension
 
 
@@ -97,6 +97,117 @@ def embed_query(query: str) -> List[float]:
     return embedding.tolist()
 
 
+# ============================================================================
+# Industry-Standard Hybrid Cache Matching
+# ============================================================================
+# Uses spaCy for linguistically-aware noun chunk extraction
+# Combined with semantic similarity for robust matching
+
+_nlp_model = None
+
+
+def get_nlp_model():
+    """Lazy-load spaCy model for noun chunk extraction."""
+    global _nlp_model
+    
+    if _nlp_model is None:
+        try:
+            import spacy
+            # Try to load english model
+            try:
+                _nlp_model = spacy.load("en_core_web_sm")
+                print("[CACHE] ✅ Loaded spaCy en_core_web_sm model")
+            except OSError:
+                # Model not installed, download it
+                print("[CACHE] 📥 Downloading spaCy en_core_web_sm model...")
+                import subprocess
+                subprocess.run(["python", "-m", "spacy", "download", "en_core_web_sm"], check=True)
+                _nlp_model = spacy.load("en_core_web_sm")
+        except ImportError:
+            print("[CACHE] ⚠ spaCy not installed, using fallback word matching")
+            _nlp_model = "fallback"
+    
+    return _nlp_model
+
+
+def extract_noun_chunks(query: str) -> set:
+    """
+    Extract noun phrases using spaCy NLP.
+    
+    Industry-standard approach for extracting meaningful phrases like:
+    - "second maxwell equation"
+    - "detailed explanation"
+    - "physics concept"
+    """
+    nlp = get_nlp_model()
+    
+    if nlp == "fallback":
+        # Fallback: simple word tokenization
+        return set(query.lower().split())
+    
+    try:
+        doc = nlp(query.lower())
+        
+        chunks = set()
+        # Extract noun chunks (e.g., "second maxwell equation")
+        for chunk in doc.noun_chunks:
+            chunks.add(chunk.text.strip())
+        
+        # Also add individual nouns and adjectives for finer matching
+        for token in doc:
+            if token.pos_ in ('NOUN', 'PROPN', 'ADJ', 'NUM'):
+                chunks.add(token.text)
+        
+        return chunks
+        
+    except Exception as e:
+        print(f"[CACHE] ⚠ spaCy error: {e}, using fallback")
+        return set(query.lower().split())
+
+
+def compute_hybrid_match_score(
+    query: str, 
+    cached_query: str, 
+    semantic_score: float
+) -> tuple:
+    """
+    Industry-standard hybrid cache matching.
+    
+    Combines:
+    1. Semantic similarity (embedding cosine distance)
+    2. Lexical overlap (Jaccard similarity of noun chunks)
+    
+    Returns: (hybrid_score, noun_chunk_overlap, should_use_cache)
+    """
+    # Extract noun chunks from both queries
+    query_chunks = extract_noun_chunks(query)
+    cached_chunks = extract_noun_chunks(cached_query)
+    
+    print(f"[CACHE] Query chunks: {query_chunks}")
+    print(f"[CACHE] Cached chunks: {cached_chunks}")
+    
+    # Calculate Jaccard similarity of noun chunks
+    if query_chunks or cached_chunks:
+        intersection = query_chunks & cached_chunks
+        union = query_chunks | cached_chunks
+        chunk_overlap = len(intersection) / len(union) if union else 0
+    else:
+        # No chunks extracted = very short query, rely on semantic only
+        chunk_overlap = 1.0
+    
+    # Hybrid score: 70% semantic + 30% noun chunk overlap
+    hybrid_score = 0.7 * semantic_score + 0.3 * chunk_overlap
+    
+    # Decision criteria:
+    # - Semantic similarity must be >= 0.90 (high confidence)
+    # - Noun chunk overlap must be >= 0.4 (meaningful overlap)
+    should_cache = semantic_score >= 0.90 and chunk_overlap >= 0.4
+    
+    print(f"[CACHE] Hybrid: semantic={semantic_score:.3f}, chunks={chunk_overlap:.3f}, hybrid={hybrid_score:.3f}")
+    
+    return hybrid_score, chunk_overlap, should_cache
+
+
 def search_cache(
     query: str, 
     threshold: float = CACHE_THRESHOLD,
@@ -130,14 +241,24 @@ def search_cache(
             print(f"[CACHE] Best match similarity: {similarity:.3f} (threshold: {threshold})")
             
             if similarity >= threshold:
-                print(f"[CACHE] ✅ CACHE HIT!")
+                # Industry-standard: Use hybrid matching (semantic + noun chunks)
+                cached_query = best.payload.get('query', '')
+                hybrid_score, chunk_overlap, should_cache = compute_hybrid_match_score(
+                    query, cached_query, similarity
+                )
+                
+                if not should_cache:
+                    print(f"[CACHE] ❌ Hybrid match failed (overlap={chunk_overlap:.2f}) - will crawl fresh")
+                    return None
+                
+                print(f"[CACHE] ✅ CACHE HIT! (hybrid={hybrid_score:.3f}, overlap={chunk_overlap:.2f})")
                 return CacheHit(
                     query=best.payload.get('query', ''),
                     answer=best.payload.get('answer', ''),
                     sources=best.payload.get('sources', []),
                     confidence=best.payload.get('confidence', 0.0),
                     cached_at=best.payload.get('cached_at', ''),
-                    similarity=similarity
+                    similarity=hybrid_score  # Return hybrid score
                 )
             else:
                 print(f"[CACHE] ❌ Below threshold, will crawl fresh")
@@ -176,7 +297,6 @@ def store_in_cache(
         key_hash = hashlib.md5(cache_key.lower().strip().encode()).hexdigest()
         # Convert hash to valid UUID format
         point_id = str(uuid.UUID(key_hash))
-        
         client.upsert(
             collection_name=CACHE_COLLECTION,
             points=[

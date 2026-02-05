@@ -11,6 +11,7 @@ import {
 // Dynamic imports for components
 const TopicsSidebar = dynamic(() => import('@/components/curriculum/TopicsSidebar'), { ssr: false })
 const StudyCalendar = dynamic(() => import('@/components/curriculum/StudyCalendar'), { ssr: false })
+const RevisionCalendar = dynamic(() => import('@/components/curriculum/RevisionCalendar'), { ssr: false })
 
 // ============================================================================
 // Types
@@ -31,31 +32,56 @@ export default function CurriculumPage() {
     const [classrooms, setClassrooms] = useState<ClassroomOption[]>([])
     const [selectedClassroomIds, setSelectedClassroomIds] = useState<Set<string>>(new Set()) // Empty = All
 
-    // Resizable panel state
+    // Resizable panel state - horizontal (sidebar)
     const [sidebarWidth, setSidebarWidth] = useState(340) // Default width in pixels
     const containerRef = useRef<HTMLDivElement>(null)
-    const isResizing = useRef(false)
+    const isResizingHorizontal = useRef(false)
     const startX = useRef(0)
     const startWidth = useRef(0)
 
-    // Resize handlers
-    const handleMouseDown = useCallback((e: React.MouseEvent) => {
-        isResizing.current = true
+    // Resizable panel state - vertical (calendar split)
+    const [calendarSplitPercent, setCalendarSplitPercent] = useState(50) // 50% each
+    const isResizingVertical = useRef(false)
+    const startY = useRef(0)
+    const startPercent = useRef(0)
+    const calendarContainerRef = useRef<HTMLDivElement>(null)
+
+    // Horizontal resize handlers (sidebar)
+    const handleMouseDownHorizontal = useCallback((e: React.MouseEvent) => {
+        isResizingHorizontal.current = true
         startX.current = e.clientX
         startWidth.current = sidebarWidth
         document.body.style.cursor = 'col-resize'
         document.body.style.userSelect = 'none'
     }, [sidebarWidth])
 
+    // Vertical resize handlers (calendar split)
+    const handleMouseDownVertical = useCallback((e: React.MouseEvent) => {
+        isResizingVertical.current = true
+        startY.current = e.clientY
+        startPercent.current = calendarSplitPercent
+        document.body.style.cursor = 'row-resize'
+        document.body.style.userSelect = 'none'
+    }, [calendarSplitPercent])
+
     const handleMouseMove = useCallback((e: MouseEvent) => {
-        if (!isResizing.current) return
-        const delta = startX.current - e.clientX // Flip sign since moving left increases sidebar
-        const newWidth = Math.max(250, Math.min(600, startWidth.current + delta))
-        setSidebarWidth(newWidth)
+        if (isResizingHorizontal.current) {
+            const delta = startX.current - e.clientX
+            const newWidth = Math.max(250, Math.min(600, startWidth.current + delta))
+            setSidebarWidth(newWidth)
+        }
+        if (isResizingVertical.current && calendarContainerRef.current) {
+            const containerRect = calendarContainerRef.current.getBoundingClientRect()
+            const deltaY = e.clientY - startY.current
+            const deltaPercent = (deltaY / containerRect.height) * 100
+            const newPercent = Math.max(25, Math.min(75, startPercent.current + deltaPercent))
+            setCalendarSplitPercent(newPercent)
+        }
     }, [])
 
     const handleMouseUp = useCallback(() => {
-        isResizing.current = false
+        isResizingHorizontal.current = false
+        isResizingVertical.current = false
         document.body.style.cursor = ''
         document.body.style.userSelect = ''
     }, [])
@@ -185,17 +211,44 @@ export default function CurriculumPage() {
 
             {/* Two Panel Layout - Resizable */}
             <div ref={containerRef} className="flex gap-0 h-[calc(100%-60px)]">
-                {/* Left: Calendar - takes remaining space */}
-                <div className="flex-1 min-w-[300px]">
-                    <StudyCalendar
-                        selectedClassroomIds={Array.from(selectedClassroomIds)}
-                        selectedClassroomNames={selectedClassroomNames}
-                    />
+                {/* Left: Calendars (Split vertically) - takes remaining space */}
+                <div
+                    ref={calendarContainerRef}
+                    className="flex-1 min-w-[300px] flex flex-col gap-0"
+                >
+                    {/* Top: Manual Study Calendar */}
+                    <div style={{ height: `${calendarSplitPercent}%` }} className="min-h-[150px]">
+                        <StudyCalendar
+                            selectedClassroomIds={Array.from(selectedClassroomIds)}
+                            selectedClassroomNames={selectedClassroomNames}
+                        />
+                    </div>
+
+                    {/* Vertical Resizable Divider */}
+                    <div
+                        onMouseDown={handleMouseDownVertical}
+                        className="h-1.5 bg-gray-200 hover:bg-purple-400 active:bg-purple-500 cursor-row-resize transition-colors flex-shrink-0 rounded-full my-1.5 group relative"
+                    >
+                        {/* Drag handle indicator */}
+                        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 h-4 w-8 flex items-center justify-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <div className="w-1 h-1 bg-gray-400 rounded-full"></div>
+                            <div className="w-1 h-1 bg-gray-400 rounded-full"></div>
+                            <div className="w-1 h-1 bg-gray-400 rounded-full"></div>
+                        </div>
+                    </div>
+
+                    {/* Bottom: AI Revision Calendar */}
+                    <div style={{ height: `${100 - calendarSplitPercent}%` }} className="min-h-[150px]">
+                        <RevisionCalendar
+                            selectedClassroomIds={Array.from(selectedClassroomIds)}
+                            selectedClassroomNames={selectedClassroomNames}
+                        />
+                    </div>
                 </div>
 
-                {/* Resizable Divider */}
+                {/* Horizontal Resizable Divider */}
                 <div
-                    onMouseDown={handleMouseDown}
+                    onMouseDown={handleMouseDownHorizontal}
                     className="w-1.5 bg-gray-200 hover:bg-indigo-400 active:bg-indigo-500 cursor-col-resize transition-colors flex-shrink-0 rounded-full mx-1.5 group relative"
                 >
                     {/* Drag handle indicator */}
@@ -214,3 +267,4 @@ export default function CurriculumPage() {
         </div>
     )
 }
+

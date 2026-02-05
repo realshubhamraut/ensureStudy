@@ -238,8 +238,11 @@ class SerperSearchClient:
             logger.error("[Serper] Cannot search without API key")
             return []
         
-        # Add educational context to query
-        enhanced_query = f"{query} educational explanation"
+        # Add educational context to query (but not for PDF queries)
+        if 'filetype:pdf' in query:
+            enhanced_query = query  # Keep as-is for PDF searches
+        else:
+            enhanced_query = f"{query} educational explanation"
         
         payload = {
             "q": enhanced_query,

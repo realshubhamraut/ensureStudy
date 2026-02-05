@@ -1,7 +1,7 @@
 'use client'
 import { getApiBaseUrl, getAiServiceUrl } from '@/utils/api'
-
-
+import PDFViewerWithHighlight from '@/components/PDFViewerWithHighlight'
+import PptxToPdfViewer from '@/components/PptxToPdfViewer'
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import {
     PaperAirplaneIcon,
@@ -110,6 +110,7 @@ interface SourceItem {
     type: 'pdf' | 'note' | 'article' | 'video' | 'image' | 'pptx' | 'webpage' | 'flowchart'
     title: string
     url?: string
+    pdfUrl?: string  // PDF version URL (for converted PPTX)
     thumbnailUrl?: string
     embedUrl?: string
     relevance: number
@@ -121,6 +122,7 @@ interface SourceItem {
     cachedSummary?: string
     cachedImages?: string[]
     mermaidCode?: string
+    slideCount?: number  // For presentations
     // New fields for dynamic web resources
     trustScore?: number      // 0.0 - 1.0 trust score
     sourceType?: string      // 'encyclopedia', 'academic', 'educational', etc.
@@ -180,19 +182,20 @@ export default function AITutorPage() {
     const [activeSource, setActiveSource] = useState<SourceItem | null>(null)  // For preview panel
 
     // Embedded viewer state
-    const [viewerMode, setViewerMode] = useState<'list' | 'viewer'>('list')
+    const [viewerMode, setViewerMode] = useState<'list' | 'viewer' | 'resources'>('list')
     const [viewerLoading, setViewerLoading] = useState(false)
     const [viewerError, setViewerError] = useState<string | null>(null)
     const viewerRef = useRef<HTMLIFrameElement>(null)
 
     // Sidebar filter state
-    type SourceFilter = 'all' | 'documents' | 'videos' | 'websites' | 'flowcharts' | 'images'
+    type SourceFilter = 'all' | 'documents' | 'presentations' | 'videos' | 'websites' | 'flowcharts' | 'images'
     const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all')
     const [sidebarWidth, setSidebarWidth] = useState(500) // Default wider for better viewing
     const [isResizing, setIsResizing] = useState(false)
 
-    // PDF loading state (for SSE real-time updates)
+    // PDF and PPTX loading state (for SSE real-time updates)
     const [isLoadingPdfs, setIsLoadingPdfs] = useState(false)
+    const [isLoadingPptx, setIsLoadingPptx] = useState(false)
     const [currentRequestId, setCurrentRequestId] = useState<string | null>(null)
     const sseRef = useRef<EventSource | null>(null)
 
@@ -211,18 +214,20 @@ export default function AITutorPage() {
 
     // Source category counts - memoized to prevent recalculation on every render
     const sourceCounts = useMemo(() => {
-        const documents = sources.filter(s => ['pdf', 'pptx', 'note', 'docx'].includes(s.type)).length
+        const documents = sources.filter(s => ['pdf', 'note', 'docx'].includes(s.type)).length
+        const presentations = sources.filter(s => s.type === 'pptx' || s.type === 'ppt').length
         const videos = sources.filter(s => s.type === 'video').length
         const websites = sources.filter(s => s.type === 'article' || s.type === 'webpage').length
         const flowcharts = sources.filter(s => s.type === 'flowchart' as any).length
         const images = sources.filter(s => s.type === 'image').length
-        return { documents, videos, websites, flowcharts, images, all: sources.length }
+        return { documents, presentations, videos, websites, flowcharts, images, all: sources.length }
     }, [sources])
 
     // Filter sources by category - memoized
     const filteredSources = useMemo(() => {
         if (sourceFilter === 'all') return sources
-        if (sourceFilter === 'documents') return sources.filter(s => ['pdf', 'pptx', 'note', 'docx'].includes(s.type))
+        if (sourceFilter === 'documents') return sources.filter(s => ['pdf', 'note', 'docx'].includes(s.type))
+        if (sourceFilter === 'presentations') return sources.filter(s => s.type === 'pptx' || s.type === 'ppt')
         if (sourceFilter === 'videos') return sources.filter(s => s.type === 'video')
         if (sourceFilter === 'websites') return sources.filter(s => s.type === 'article' || s.type === 'webpage')
         if (sourceFilter === 'flowcharts') return sources.filter(s => s.type === 'flowchart' as any)
@@ -684,9 +689,10 @@ export default function AITutorPage() {
                 content: m.content
             }))
 
-            // Start PDF loading indicator immediately if findResources is enabled
+            // Start PDF and PPTX loading indicators immediately if findResources is enabled
             if (forceWebSearch || findResources) {
                 setIsLoadingPdfs(true)
+                setIsLoadingPptx(true)
             }
 
             const res = await fetch(`${getAiServiceUrl()}/api/ai-tutor/query`, {
@@ -851,6 +857,7 @@ export default function AITutorPage() {
                     // PDFs already in response - stop loading
                     console.log('[SSE] PDFs found in initial response, skipping SSE')
                     setIsLoadingPdfs(false)
+                    setIsLoadingPptx(false)
                 } else if (requestId && (forceWebSearch || findResources)) {
                     // No PDFs yet - connect to SSE for real-time updates
                     // Close any existing SSE connection
@@ -886,11 +893,60 @@ export default function AITutorPage() {
                                     snippet: pdf.snippet || '',
                                     source: pdf.source || 'Web PDF'
                                 }
-                                setSources(prev => [...prev, newPdf])
+                                // Deduplicate by URL or ID
+                                setSources(prev => {
+                                    const exists = prev.some(s =>
+                                        (s.url && newPdf.url && s.url === newPdf.url) ||
+                                        (s.id && newPdf.id && s.id === newPdf.id)
+                                    )
+                                    if (exists) {
+                                        console.log('[SSE] Skipping duplicate PDF:', newPdf.title)
+                                        return prev
+                                    }
+                                    return [...prev, newPdf]
+                                })
                                 // Don't stop loading here - wait for complete event
                             }
                         } catch (e) {
                             console.error('[SSE] Error parsing pdf_added:', e)
+                        }
+                    })
+
+                    // PPTX/Presentation event listener
+                    eventSource.addEventListener('pptx_added', (event) => {
+                        console.log('[SSE] PPTX added:', event.data)
+                        try {
+                            const eventData = JSON.parse(event.data)
+                            const pptx = eventData.pptx
+                            if (pptx) {
+                                // Keep type as 'pptx' for tab filtering, but store pdfUrl for viewing
+                                const newPptx: SourceItem = {
+                                    id: pptx.id,
+                                    type: 'pptx',  // Always 'pptx' so it shows in Presentations tab
+                                    title: pptx.title,
+                                    url: pptx.url,  // Original PPTX URL
+                                    pdfUrl: pptx.pdf_url,  // PDF URL for in-browser viewing (if converted)
+                                    relevance: pptx.relevance || 80,
+                                    snippet: pptx.snippet || '',
+                                    source: pptx.source || 'Web Presentation',
+                                    slideCount: pptx.slide_count || 0
+                                }
+                                // Deduplicate by URL or ID
+                                setSources(prev => {
+                                    const exists = prev.some(s =>
+                                        (s.url && newPptx.url && s.url === newPptx.url) ||
+                                        (s.id && newPptx.id && s.id === newPptx.id)
+                                    )
+                                    if (exists) {
+                                        console.log('[SSE] Skipping duplicate PPTX:', newPptx.title)
+                                        return prev
+                                    }
+                                    console.log('[SSE] Adding presentation:', newPptx.title, 'pdfUrl:', pptx.pdf_url || 'none')
+                                    return [...prev, newPptx]
+                                })
+                            }
+                        } catch (e) {
+                            console.error('[SSE] Error parsing pptx_added:', e)
                         }
                     })
 
@@ -901,6 +957,7 @@ export default function AITutorPage() {
                     eventSource.addEventListener('complete', async (event) => {
                         console.log('[SSE] Complete:', event.data)
                         setIsLoadingPdfs(false)
+                        setIsLoadingPptx(false)
                         eventSource.close()
                         sseRef.current = null
 
@@ -933,19 +990,21 @@ export default function AITutorPage() {
                         setTimeout(() => {
                             if (sseRef.current === eventSource) {
                                 setIsLoadingPdfs(false)
+                                setIsLoadingPptx(false)
                                 eventSource.close()
                                 sseRef.current = null
                             }
                         }, 5000)
                     }
 
-                    // Timeout: close SSE after 2 minutes max
+                    // Timeout: close SSE after 5 minutes max (resources can take 2-4 min)
                     setTimeout(() => {
                         if (sseRef.current) {
-                            console.log('[SSE] Timeout, closing connection')
+                            console.log('[SSE] Timeout (5 min), closing connection')
                             sseRef.current.close()
                             sseRef.current = null
                             setIsLoadingPdfs(false)
+                            setIsLoadingPptx(false)
 
                             // Save any sources that were added before timeout
                             setSources(currentSources => {
@@ -964,12 +1023,13 @@ export default function AITutorPage() {
                                 return currentSources
                             })
                         }
-                    }, 120000)
+                    }, 300000)  // 5 minutes
                 } else if (!hasPdfsAlready) {
                     // No PDFs and no SSE available - stop loading after a short delay
                     // (PDFs might come from classroom materials fetch)
                     setTimeout(() => {
                         setIsLoadingPdfs(false)
+                        setIsLoadingPptx(false)
                     }, 3000)
                 }
             }
@@ -1794,6 +1854,7 @@ export default function AITutorPage() {
                                     const filters: { key: SourceFilter; icon: React.ReactNode; label: string; count: number; loading?: boolean }[] = [
                                         { key: 'all', icon: <Squares2X2Icon className="w-5 h-5" />, label: 'All', count: counts.all },
                                         { key: 'documents', icon: <DocumentIcon className="w-5 h-5" />, label: 'Docs', count: counts.documents, loading: isLoadingPdfs },
+                                        { key: 'presentations', icon: <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><rect x="3" y="4" width="18" height="12" rx="2" strokeWidth="2" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 16v4M8 20h8" /></svg>, label: 'PPT', count: counts.presentations, loading: isLoadingPptx },
                                         { key: 'videos', icon: <PlayCircleIcon className="w-5 h-5" />, label: 'Videos', count: counts.videos },
                                         { key: 'websites', icon: <GlobeAltIcon className="w-5 h-5" />, label: 'Web', count: counts.websites },
                                         { key: 'flowcharts', icon: <MapIcon className="w-5 h-5" />, label: 'Flow', count: counts.flowcharts },
@@ -2104,8 +2165,40 @@ export default function AITutorPage() {
                                 </div>
                             )}
 
+                            {/* PPTX Presentation Viewer - Uses PDF version for in-browser viewing */}
+                            {activeSource.type === 'pptx' && !viewerError && (
+                                <div className="flex-1 flex flex-col bg-white overflow-hidden">
+                                    {/* If PDF version available, use PDFViewer */}
+                                    {activeSource.pdfUrl ? (
+                                        <PDFViewerWithHighlight
+                                            pdfUrl={activeSource.pdfUrl}
+                                            title={activeSource.title + ' (Converted)'}
+                                            onClose={() => {
+                                                setActiveSource(null)
+                                                setViewerMode('resources')
+                                            }}
+                                            onLoad={() => setViewerLoading(false)}
+                                            onError={(err) => {
+                                                setViewerLoading(false)
+                                                setViewerError(err)
+                                            }}
+                                        />
+                                    ) : (
+                                        /* Fallback: Convert on-demand using PptxToPdfViewer */
+                                        <PptxToPdfViewer
+                                            pptxUrl={`${getApiBaseUrl()}${activeSource.url}`}
+                                            title={activeSource.title}
+                                            onClose={() => {
+                                                setActiveSource(null)
+                                                setViewerMode('resources')
+                                            }}
+                                        />
+                                    )}
+                                </div>
+                            )}
+
                             {/* PDF/Document Viewer */}
-                            {(activeSource.type === 'pdf' || activeSource.type === 'pptx' || activeSource.type === 'note') && !viewerError && (
+                            {(activeSource.type === 'pdf' || activeSource.type === 'note') && !viewerError && (
                                 <div className="flex-1 flex flex-col bg-white overflow-hidden">
                                     {/* Document Header */}
                                     <div className="p-3 border-b border-gray-200 flex items-center justify-between bg-gray-50">
@@ -2175,10 +2268,10 @@ export default function AITutorPage() {
                     {/* Categorized Sources List - Only show in list mode */}
                     {viewerMode === 'list' && (
                         <div className="flex-1 overflow-y-auto">
-                            {/* Section 1: Documents */}
+                            {/* Section 1: Documents (PDFs/Notes/Docs - excludes PPTX) */}
                             {(() => {
-                                // Use memoized filteredSources from above
-                                const documents = filteredSources.filter(s => ['pdf', 'pptx', 'note', 'docx'].includes(s.type))
+                                // Use memoized filteredSources from above - exclude pptx for this section
+                                const documents = filteredSources.filter(s => ['pdf', 'note', 'docx'].includes(s.type))
                                 if (documents.length === 0) return null
                                 return (
                                     <div className="border-b border-gray-100">
@@ -2200,8 +2293,7 @@ export default function AITutorPage() {
                                                         }`}
                                                 >
                                                     <div className={`p-2 rounded-lg flex-shrink-0 ${source.type === 'pdf' ? 'bg-red-50 text-red-600' :
-                                                        source.type === 'pptx' ? 'bg-orange-50 text-orange-600' :
-                                                            'bg-blue-50 text-blue-600'
+                                                        'bg-blue-50 text-blue-600'
                                                         }`}>
                                                         <DocumentIcon className="w-5 h-5" />
                                                     </div>
@@ -2212,16 +2304,13 @@ export default function AITutorPage() {
                                                             {source.fileSize && <span className="text-xs text-gray-400">{source.fileSize}</span>}
                                                         </div>
                                                     </div>
-                                                    {/* Hover Open button - appears between name and score */}
+                                                    {/* Hover Open button */}
                                                     <div className="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
-                                                        <span className={`text-xs px-3 py-1.5 rounded-full font-medium shadow-sm ${source.type === 'pdf' ? 'bg-red-600 text-white' :
-                                                            source.type === 'pptx' ? 'bg-orange-600 text-white' :
-                                                                'bg-blue-600 text-white'
-                                                            }`}>
+                                                        <span className={`text-xs px-3 py-1.5 rounded-full font-medium shadow-sm ${source.type === 'pdf' ? 'bg-red-600 text-white' : 'bg-blue-600 text-white'}`}>
                                                             Open
                                                         </span>
                                                     </div>
-                                                    {/* Relevance/Trust badge - shows trust for web resources */}
+                                                    {/* Relevance/Trust badge */}
                                                     <span
                                                         className={`text-xs px-2 py-0.5 rounded-full flex-shrink-0 ${source.trustScore
                                                             ? source.trustScore >= 0.9
@@ -2241,6 +2330,67 @@ export default function AITutorPage() {
                                                             ? `${Math.round(source.trustScore * 100)}%`
                                                             : `${source.relevance}%`
                                                         }
+                                                    </span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )
+                            })()}
+
+                            {/* Section 1.5: Presentations (PPTX only - dedicated section) */}
+                            {(() => {
+                                const presentations = filteredSources.filter(s => s.type === 'pptx' || s.type === 'ppt')
+                                if (presentations.length === 0) return null
+                                return (
+                                    <div className="border-b border-gray-100">
+                                        <div className="px-4 py-3 bg-gradient-to-r from-orange-50 to-amber-50 flex items-center gap-2">
+                                            <svg className="w-4 h-4 text-orange-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <rect x="3" y="4" width="18" height="12" rx="2" strokeWidth="2" />
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 16v4M8 20h8" />
+                                            </svg>
+                                            <span className="text-sm font-semibold text-gray-900">Presentations</span>
+                                            <span className="text-xs bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full ml-auto">
+                                                {presentations.length}
+                                            </span>
+                                        </div>
+                                        <div className="p-2 space-y-2">
+                                            {presentations.map((source) => (
+                                                <div
+                                                    key={source.id}
+                                                    onClick={() => openContentViewer(source)}
+                                                    className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-all group relative ${activeSource?.id === source.id
+                                                        ? 'bg-orange-50 border border-orange-200'
+                                                        : 'hover:bg-orange-50/50 hover:shadow-sm'
+                                                        }`}
+                                                >
+                                                    <div className="p-2 rounded-lg flex-shrink-0 bg-gradient-to-br from-orange-100 to-amber-100 text-orange-600">
+                                                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                            <rect x="3" y="4" width="18" height="12" rx="2" strokeWidth="2" />
+                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 16v4M8 20h8" />
+                                                        </svg>
+                                                    </div>
+                                                    <div className="flex-1 min-w-0">
+                                                        <p className="text-sm font-medium text-gray-900 truncate">{source.title}</p>
+                                                        <div className="flex items-center gap-2 mt-0.5">
+                                                            <span className="text-xs text-orange-600 font-medium">PowerPoint</span>
+                                                            {source.fileSize && <span className="text-xs text-gray-400">{source.fileSize}</span>}
+                                                            {(source as any).slide_count && (
+                                                                <span className="text-xs bg-orange-100 text-orange-600 px-1.5 py-0.5 rounded">
+                                                                    {(source as any).slide_count} slides
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                    {/* Hover Open button */}
+                                                    <div className="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                                                        <span className="text-xs px-3 py-1.5 rounded-full font-medium shadow-sm bg-orange-600 text-white">
+                                                            Open
+                                                        </span>
+                                                    </div>
+                                                    {/* Relevance badge */}
+                                                    <span className="text-xs px-2 py-0.5 rounded-full flex-shrink-0 bg-orange-100 text-orange-700">
+                                                        {source.relevance || 80}%
                                                     </span>
                                                 </div>
                                             ))}

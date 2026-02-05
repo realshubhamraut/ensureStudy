@@ -128,21 +128,24 @@ def get_web_resource(filename):
         if os.path.isfile(encoded_path):
             found_path = encoded_path
         else:
-            # Fallback: Search in subdirectories for both versions
+            # Fallback: Walk through subdirectories (more reliable than glob for special chars)
             basename = os.path.basename(decoded_filename)
             encoded_basename = os.path.basename(filename)
             
-            # Search for decoded basename first
-            search_pattern = os.path.join(WEB_RESOURCES_DIR, '**', basename)
-            matches = glob.glob(search_pattern, recursive=True)
-            
-            if not matches:
-                # Try encoded basename
-                search_pattern = os.path.join(WEB_RESOURCES_DIR, '**', encoded_basename)
-                matches = glob.glob(search_pattern, recursive=True)
-            
-            if matches:
-                found_path = matches[0]
+            # Try both versions of the filename
+            for root, dirs, files in os.walk(WEB_RESOURCES_DIR):
+                for f in files:
+                    # Check if filename matches (decoded or encoded)
+                    if f == basename or f == encoded_basename:
+                        found_path = os.path.join(root, f)
+                        break
+                    # Also check for partial match with topic prefix
+                    # e.g., "Maxwells third equation_e23b3f73_Notes 4 3317..."
+                    if basename in f or encoded_basename in f:
+                        found_path = os.path.join(root, f)
+                        break
+                if found_path:
+                    break
     
     if not found_path:
         return jsonify({'error': 'Web resource not found', 'searched': decoded_filename}), 404

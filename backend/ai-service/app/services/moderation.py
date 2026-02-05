@@ -1,20 +1,20 @@
 """
-Academic Moderation Gate - HuggingFace Inference API (Cloud BART-MNLI)
+Academic Moderation Gate - LLM-Based Classification
 
-Uses HuggingFace Inference API for zero-shot classification.
-No local model loading - calls the cloud API instead.
+Uses Groq LLM for intelligent query classification.
+No brittle regex patterns - pure LLM reasoning.
 
 Philosophy:
-- ALLOW: Any question that seeks knowledge/learning
-- BLOCK: Only genuinely irrelevant or harmful content
+- ALLOW: Educational questions, learning-focused queries
+- BLOCK: Shopping, entertainment, casual chat, harmful content
 """
-import re
 import logging
 import os
+import re
 from typing import Tuple
 from functools import lru_cache
 
-import httpx
+from groq import Groq
 
 from ..api.schemas.tutor import ModerationResult
 
@@ -22,49 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 # ============================================================================
-# HuggingFace Inference API Configuration
-# ============================================================================
-
-# Use facebook/bart-large-mnli - reliable and well-maintained
-HF_API_URL = "https://api-inference.huggingface.co/models/facebook/bart-large-mnli"
-
-# Classification labels (simple, clear)
-CANDIDATE_LABELS = [
-    "educational question about learning or knowledge",
-    "casual chat or entertainment request"
-]
-
-# Educational keywords for fallback classification
-EDUCATIONAL_KEYWORDS = [
-    # Question words
-    'what', 'why', 'how', 'when', 'where', 'who', 'which', 'explain', 'describe',
-    'define', 'tell me about', 'what is', 'what are', 'what was', 'what were',
-    
-    # Academic subjects
-    'science', 'physics', 'chemistry', 'biology', 'math', 'mathematics',
-    'history', 'geography', 'literature', 'economics', 'psychology',
-    'philosophy', 'sociology', 'anthropology', 'astronomy', 'geology',
-    
-    # Technical topics
-    'programming', 'algorithm', 'computer', 'software', 'technology',
-    'engineering', 'machine learning', 'artificial intelligence', 'data',
-    
-    # Learning words
-    'learn', 'study', 'understand', 'concept', 'theory', 'principle',
-    'example', 'difference between', 'compare', 'contrast', 'analyze',
-    
-    # Natural phenomena
-    'photosynthesis', 'evolution', 'gravity', 'electricity', 'magnetism',
-    'refraction', 'reflection', 'diffraction', 'thermodynamics', 'quantum',
-    
-    # Historical/Cultural
-    'revolution', 'war', 'civilization', 'culture', 'religion', 'art',
-    'music', 'architecture', 'invention', 'discovery'
-]
-
-
-# ============================================================================
-# Minimal Safety Filters (Regex - very fast)
+# Minimal Safety Filter (Regex only for truly harmful content)
 # ============================================================================
 
 HARMFUL_PATTERNS = [
@@ -76,136 +34,95 @@ HARMFUL_PATTERNS = [
     r'\b(porn|nude|nsfw|xxx)\b',
 ]
 
-PURE_CHITCHAT = [
-    r'^(hi+|hello+|hey+|sup|yo)[\s!?.]*$',
-    r'^how are you[\s?!]*$',
-    r'^what\'?s up[\s?!]*$',
-    r'^(good morning|good night|bye|goodbye)[\s!.]*$',
-]
 
-
-def _matches_any_pattern(text: str, patterns: list) -> bool:
-    """Check if text matches any regex pattern."""
+def _is_harmful(text: str) -> bool:
+    """Check for genuinely harmful content (safety filter)."""
     text_lower = text.lower().strip()
-    for pattern in patterns:
+    for pattern in HARMFUL_PATTERNS:
         if re.search(pattern, text_lower, re.IGNORECASE):
             return True
     return False
 
 
 # ============================================================================
-# Keyword-Based Classification (Primary - Fast & Reliable)
+# LLM-Based Classification using Groq
 # ============================================================================
 
-def _classify_with_keywords(question: str) -> Tuple[str, float]:
+CLASSIFICATION_PROMPT = """You are a moderation classifier for an educational tutoring platform.
+
+Classify the following user query into ONE of these categories:
+
+1. EDUCATIONAL - Questions seeking knowledge, learning, or understanding about any academic topic (science, history, technology, how things work, etc.)
+
+2. NON_EDUCATIONAL - Queries that are NOT about learning, including:
+   - Product prices, shopping queries ("what is the price of...")
+   - Entertainment recommendations (movies, shows, games)
+   - Sports scores/results
+   - Weather updates
+   - Social media/trending topics
+   - Casual chat/greetings
+   - Personal advice unrelated to academics
+
+Rules:
+- Questions about HOW something works = EDUCATIONAL
+- Questions about understanding concepts = EDUCATIONAL  
+- Questions asking for prices, recommendations, or current events = NON_EDUCATIONAL
+- When in doubt, lean towards EDUCATIONAL
+
+User Query: "{query}"
+
+Respond with ONLY one word: EDUCATIONAL or NON_EDUCATIONAL"""
+
+
+def _get_groq_client() -> Groq:
+    """Get Groq client instance."""
+    api_key = os.getenv("GROQ_API_KEY")
+    if not api_key:
+        raise RuntimeError("GROQ_API_KEY not set")
+    return Groq(api_key=api_key)
+
+
+@lru_cache(maxsize=500)
+def _classify_with_llm(question: str) -> Tuple[str, float]:
     """
-    Classify using keyword matching - fast and reliable.
+    Classify query using Groq LLM.
     
-    Returns: (intent, confidence)
-    - intent: "educational" or "non_educational"
+    Returns: (category, confidence)
+    - category: "educational" or "non_educational"
     - confidence: 0.0 to 1.0
     """
-    question_lower = question.lower().strip()
-    
-    # Count educational keyword matches
-    matches = 0
-    for keyword in EDUCATIONAL_KEYWORDS:
-        if keyword in question_lower:
-            matches += 1
-    
-    # Calculate confidence based on matches
-    if matches >= 3:
-        confidence = 0.95
-    elif matches >= 2:
-        confidence = 0.90
-    elif matches >= 1:
-        confidence = 0.85
-    else:
-        # Check if it looks like a question (starts with question word or ends with ?)
-        if question_lower.endswith('?') or any(question_lower.startswith(w) for w in ['what', 'why', 'how', 'when', 'where', 'who', 'which', 'can', 'could', 'would', 'is', 'are', 'was', 'were', 'does', 'do', 'did']):
-            confidence = 0.80
-            matches = 1  # Treat as educational
-        else:
-            confidence = 0.70
-    
-    if matches > 0:
-        logger.debug(f"[MODERATION] Keyword match: {matches} keywords, confidence {confidence:.0%}")
-        return ("educational", confidence)
-    else:
-        return ("non_educational", confidence)
-
-
-def _get_hf_token() -> str:
-    """Get HuggingFace API token from environment."""
-    return os.getenv("HUGGINGFACE_TOKEN") or os.getenv("HF_TOKEN") or ""
-
-
-@lru_cache(maxsize=1000)
-def _classify_with_hf_api(question: str) -> Tuple[str, float]:
-    """
-    Classify using HuggingFace Inference API (BART-MNLI).
-    Falls back to keyword classification if API fails.
-    
-    Returns: (intent, confidence)
-    - intent: "educational" or "non_educational"
-    - confidence: 0.0 to 1.0
-    """
-    # First try keyword classification (fast, reliable)
-    keyword_result = _classify_with_keywords(question)
-    
-    # If keyword classification is confident, use it directly
-    if keyword_result[1] >= 0.85:
-        logger.info(f"[MODERATION] Using keyword classifier: {keyword_result[0]} ({keyword_result[1]:.0%})")
-        return keyword_result
-    
-    # Try HuggingFace API for edge cases
-    hf_token = _get_hf_token()
-    
-    headers = {"Content-Type": "application/json"}
-    if hf_token:
-        headers["Authorization"] = f"Bearer {hf_token}"
-    
-    payload = {
-        "inputs": question,
-        "parameters": {
-            "candidate_labels": CANDIDATE_LABELS,
-            "multi_label": False
-        }
-    }
-    
     try:
-        logger.debug(f"[MODERATION] 🔄 Trying HF API for: {question[:40]}...")
+        client = _get_groq_client()
         
-        response = httpx.post(
-            HF_API_URL,
-            headers=headers,
-            json=payload,
-            timeout=5.0  # 5 second timeout
+        response = client.chat.completions.create(
+            model="llama-3.1-8b-instant",  # Fast, cheap model for classification
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a query classifier. Respond with only one word."
+                },
+                {
+                    "role": "user", 
+                    "content": CLASSIFICATION_PROMPT.format(query=question)
+                }
+            ],
+            max_tokens=10,
+            temperature=0.0  # Deterministic output
         )
         
-        if response.status_code == 200:
-            result = response.json()
-            
-            if isinstance(result, dict) and "labels" in result and "scores" in result:
-                top_label = result["labels"][0]
-                top_score = result["scores"][0]
-                
-                # Determine intent based on top label
-                if "educational" in top_label.lower():
-                    logger.info(f"[MODERATION] HF API: educational ({top_score:.0%})")
-                    return ("educational", top_score)
-                else:
-                    logger.info(f"[MODERATION] HF API: non-educational ({top_score:.0%})")
-                    return ("non_educational", top_score)
+        result = response.choices[0].message.content.strip().upper()
         
-        # API failed - use keyword fallback
-        logger.warning(f"[MODERATION] HF API error {response.status_code}, using keyword fallback")
-    
+        if "NON" in result or "NON_EDUCATIONAL" in result:
+            logger.info(f"[MODERATION] LLM classified as NON_EDUCATIONAL: {question[:50]}...")
+            return ("non_educational", 0.92)
+        else:
+            logger.info(f"[MODERATION] LLM classified as EDUCATIONAL: {question[:50]}...")
+            return ("educational", 0.92)
+            
     except Exception as e:
-        logger.warning(f"[MODERATION] HF API exception: {e}, using keyword fallback")
-    
-    # Return keyword result as fallback
-    return keyword_result
+        logger.warning(f"[MODERATION] LLM classification failed: {e}")
+        # Fallback: allow on error (fail-open for better UX)
+        return ("educational", 0.5)
 
 
 # ============================================================================
@@ -214,15 +131,12 @@ def _classify_with_hf_api(question: str) -> Tuple[str, float]:
 
 def moderate_query(user_id: str, question: str) -> ModerationResult:
     """
-    Moderate using HuggingFace Inference API (cloud BART-MNLI).
+    Moderate query using LLM-based classification.
     
     Flow:
-    1. Block harmful content (regex - instant)
-    2. Block pure chitchat (regex - instant)
-    3. Use HF API for zero-shot classification
-    4. Allow if educational, block if clearly non-educational
-    
-    Philosophy: Be permissive. Only block clearly irrelevant content.
+    1. Block harmful content (regex - instant safety check)
+    2. Use LLM for intelligent classification
+    3. Return appropriate decision
     """
     question = question.strip()
     
@@ -235,56 +149,35 @@ def moderate_query(user_id: str, question: str) -> ModerationResult:
             reason="Please enter a question!"
         )
     
-    # 1. Block harmful content (instant, no API needed)
-    if _matches_any_pattern(question, HARMFUL_PATTERNS):
+    # 1. Block harmful content (safety filter - instant)
+    if _is_harmful(question):
         logger.warning(f"[MODERATION] 🚫 Harmful content blocked")
         return ModerationResult(
             decision="block",
-            confidence=0.95,
+            confidence=0.99,
             category="harmful",
             reason="I can't help with that. Let's focus on learning! 📚"
         )
     
-    # 2. Block pure chitchat (instant, no API needed)
-    if _matches_any_pattern(question, PURE_CHITCHAT):
-        logger.info(f"[MODERATION] ❌ Pure chitchat blocked: {question}")
-        return ModerationResult(
-            decision="block",
-            confidence=0.9,
-            category="chitchat",
-            reason="I'm your learning assistant! Ask me anything educational - history, science, math, technology, or any topic you want to learn about. 🎓"
-        )
+    # 2. LLM-based classification
+    category, confidence = _classify_with_llm(question)
     
-    # 3. Use HuggingFace API for classification
-    intent, confidence = _classify_with_hf_api(question)
-    
-    logger.info(f"[MODERATION] {'✅' if intent == 'educational' else '❌'} {intent} ({confidence:.0%}): {question[:40]}...")
-    
-    if intent == "educational":
+    if category == "educational":
+        logger.info(f"[MODERATION] ✅ Allowed: {question[:40]}...")
         return ModerationResult(
             decision="allow",
             confidence=confidence,
             category="academic",
             reason=None
         )
-    
-    # Non-educational - but only block if high confidence
-    if confidence >= 0.75:
+    else:
+        logger.info(f"[MODERATION] ❌ Blocked (non-educational): {question[:40]}...")
         return ModerationResult(
             decision="block",
             confidence=confidence,
             category="non_educational",
-            reason="I'm here to help you learn! Ask me about any topic - history, science, technology, culture, or anything you're curious about. 🌟"
+            reason="I'm your learning assistant! I can help with educational topics like science, history, math, technology, and more. For shopping or entertainment, try other services! 📚"
         )
-    
-    # Low confidence non-educational - give benefit of doubt, allow
-    logger.info(f"[MODERATION] ⚠️ Low confidence ({confidence:.0%}), allowing anyway")
-    return ModerationResult(
-        decision="allow",
-        confidence=confidence,
-        category="uncertain",
-        reason=None
-    )
 
 
 # ============================================================================
@@ -292,13 +185,13 @@ def moderate_query(user_id: str, question: str) -> ModerationResult:
 # ============================================================================
 
 def preload_classifier():
-    """Warm up the HF API by making a test call."""
-    logger.info("[MODERATION] Warming up HuggingFace API...")
+    """Warm up the LLM by making a test call."""
+    logger.info("[MODERATION] Warming up LLM classifier...")
     try:
-        _classify_with_hf_api("What is photosynthesis?")
-        logger.info("[MODERATION] ✅ HuggingFace API ready")
+        _classify_with_llm("What is photosynthesis?")
+        logger.info("[MODERATION] ✅ LLM classifier ready")
     except Exception as e:
-        logger.warning(f"[MODERATION] API warmup failed: {e}")
+        logger.warning(f"[MODERATION] Warmup failed: {e}")
 
 
 # ============================================================================
@@ -308,31 +201,35 @@ def preload_classifier():
 if __name__ == "__main__":
     test_cases = [
         # Should ALLOW (educational)
-        "Who was Adolf Hitler?",
-        "What is photosynthesis?",
-        "Explain machine learning",
-        "How do vaccines work?",
-        "Tell me about the French Revolution",
-        "What causes earthquakes?",
-        "History of jazz music",
-        "What is blockchain technology?",
+        ("What is photosynthesis?", True),
+        ("Explain machine learning", True),
+        ("How do vaccines work?", True),
+        ("Who was Napoleon Bonaparte?", True),
+        ("What causes earthquakes?", True),
+        ("How does WiFi work?", True),
+        ("What is the structure of an atom?", True),
         
         # Should BLOCK (non-educational)
-        "Hi how are you?",
-        "Hey!",
-        "What's up",
-        "Recommend me a Netflix show",
+        ("What is the price of Samsung Galaxy S23?", False),
+        ("Recommend me a Netflix show", False),
+        ("Hi how are you?", False),
+        ("What's the weather in Mumbai?", False),
+        ("Who won the IPL match yesterday?", False),
+        ("Best games to play on PS5", False),
     ]
     
     print("=" * 60)
-    print("HUGGINGFACE API MODERATION TEST")
-    print("=" * 60)
-    print(f"HF Token: {'✅ Set' if _get_hf_token() else '❌ Not set'}")
+    print("LLM-BASED MODERATION TEST")
     print("=" * 60)
     
-    for q in test_cases:
+    correct = 0
+    for q, expected_allow in test_cases:
         result = moderate_query("test", q)
-        status = "✅" if result.decision == "allow" else "❌"
-        print(f"{status} [{result.confidence:.0%}] {q[:45]}")
+        actual_allow = result.decision == "allow"
+        status = "✅" if actual_allow == expected_allow else "❌"
+        if actual_allow == expected_allow:
+            correct += 1
+        print(f"{status} [{result.decision:5s}] {q[:50]}")
     
-    print("\n" + "=" * 60)
+    print(f"\nAccuracy: {correct}/{len(test_cases)} ({100*correct/len(test_cases):.0f}%)")
+    print("=" * 60)

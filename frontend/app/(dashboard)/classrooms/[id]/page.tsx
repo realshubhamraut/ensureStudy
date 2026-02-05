@@ -32,6 +32,7 @@ import {
 } from '@heroicons/react/24/outline'
 import PDFViewer from '@/components/PDFViewer'
 import ImageViewer from '@/components/ImageViewer'
+import PptxToPdfViewer from '@/components/PptxToPdfViewer'
 import { RecordingsList } from '@/components/meeting/RecordingsList'
 import { MeetingQA } from '@/components/meeting/MeetingQA'
 import StudentTopicsViewer from '@/components/classroom/StudentTopicsViewer'
@@ -2111,6 +2112,16 @@ export default function StudentClassroomDetailPage() {
                             fileSize={viewingDocument.size}
                             materialId={viewingDocument.id}
                             classroomId={classroomId}
+                            onClose={() => {
+                                setShowDocumentViewer(false)
+                                setViewingDocument(null)
+                            }}
+                        />
+                    ) : (viewingDocument.type.includes('pptx') || viewingDocument.type.includes('ppt') || viewingDocument.name?.toLowerCase().endsWith('.pptx') || viewingDocument.name?.toLowerCase().endsWith('.ppt')) ? (
+                        /* For PPTX, convert to PDF on-demand and display */
+                        <PptxToPdfViewer
+                            pptxUrl={fixFileUrl(viewingDocument.url)}
+                            title={viewingDocument.name}
                             onClose={() => {
                                 setShowDocumentViewer(false)
                                 setViewingDocument(null)

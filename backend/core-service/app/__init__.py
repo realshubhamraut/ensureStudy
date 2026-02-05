@@ -49,6 +49,7 @@ def create_app(config_name=None):
     from app.routes.leaderboard import leaderboard_bp
     from app.routes.admin import admin_bp
     from app.routes.curriculum import curriculum_bp
+    from app.routes.revision import revision_bp
     from app.routes.teacher import teacher_bp
     from app.routes.classroom import classroom_bp
     from app.routes.students import bp as students_bp
@@ -76,6 +77,7 @@ def create_app(config_name=None):
     app.register_blueprint(leaderboard_bp)
     app.register_blueprint(admin_bp)
     app.register_blueprint(curriculum_bp)
+    app.register_blueprint(revision_bp)
     app.register_blueprint(teacher_bp)
     app.register_blueprint(classroom_bp)
     app.register_blueprint(students_bp)

@@ -119,6 +119,10 @@ app.include_router(questions_scoring_router)  # /api/questions
 from .api.routes.sse import router as sse_router
 app.include_router(sse_router)  # /sse (Server-Sent Events for real-time updates)
 
+# Documents router for PDF viewer and PPTX conversion
+from .api.routes.documents import router as documents_router
+app.include_router(documents_router)  # /api/convert/pptx-to-pdf and document endpoints
+
 
 @app.on_event("startup")
 async def startup_event():

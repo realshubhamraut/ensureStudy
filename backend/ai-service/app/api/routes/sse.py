@@ -64,6 +64,14 @@ async def push_pdf_update(request_id: str, pdf: Dict[str, Any]):
     })
 
 
+async def push_pptx_update(request_id: str, pptx: Dict[str, Any]):
+    """Push a PPTX/presentation update to the stream."""
+    await push_event(request_id, "pptx_added", {
+        "type": "pptx",
+        "pptx": pptx
+    })
+
+
 async def push_loading_status(request_id: str, status: str, progress: int = 0):
     """Push loading status update."""
     await push_event(request_id, "loading_status", {

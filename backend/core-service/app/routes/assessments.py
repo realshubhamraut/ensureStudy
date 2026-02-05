@@ -140,6 +140,12 @@ def create_assessment():
     if not data.get("questions") and not data.get("use_ai_questions"):
         return jsonify({"error": "Either questions or use_ai_questions is required"}), 400
     
+    # Support multiple classroom IDs for mixed-subject assessments
+    classroom_ids = data.get("classroom_ids", [])
+    primary_classroom_id = data.get("classroom_id")
+    if primary_classroom_id and primary_classroom_id not in classroom_ids:
+        classroom_ids.insert(0, primary_classroom_id)
+    
     # Build assessment
     assessment = Assessment(
         id=str(uuid4()),
@@ -155,18 +161,23 @@ def create_assessment():
         created_by=request.user_id,
         # New fields
         assessment_type=assessment_type,
-        classroom_id=data.get("classroom_id"),
+        classroom_id=classroom_ids[0] if classroom_ids else primary_classroom_id,  # Primary classroom
         use_ai_questions=data.get("use_ai_questions", False),
-        source_topics=data.get("source_topics", []),
+        source_topics=data.get("source_topics") or data.get("topic_ids", []),
         source_chapters=data.get("source_chapters", []),
         include_weak_topics=data.get("include_weak_topics", False),
         is_challenge=data.get("is_challenge", False)
     )
     
+    # Store additional classroom IDs in description if mixed assessment
+    if len(classroom_ids) > 1:
+        assessment.description = f"Mixed assessment from {len(classroom_ids)} subjects. Classrooms: {','.join(classroom_ids)}"
+    
     db.session.add(assessment)
     db.session.commit()
     
     return jsonify({"assessment": assessment.to_dict()}), 201
+
 
 
 @assessments_bp.route("/<assessment_id>", methods=["DELETE"])
