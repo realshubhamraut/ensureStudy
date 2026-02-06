@@ -1,6 +1,12 @@
 """
 AI Tutor Service - FastAPI Application with Comprehensive Logging
 """
+# Load environment variables from root .env file FIRST
+from pathlib import Path
+from dotenv import load_dotenv
+root_env = Path(__file__).resolve().parents[3] / '.env'  # Go up to project root
+load_dotenv(root_env)
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 import time
@@ -106,6 +112,10 @@ app.include_router(agent_router)  # /api/agent (Orchestrator + sub-agents)
 app.include_router(curriculum_router)  # /api/curriculum (Personalized learning paths)
 app.include_router(topic_scores_router)  # /api/curriculum topic scores
 app.include_router(tts_router)  # /api/tts (AWS Polly TTS with visemes)
+
+# Local STT router (Whisper-based fallback for Web Speech API)
+from .api.routes.stt import router as stt_router
+app.include_router(stt_router)  # /api/stt (Local Whisper STT)
 
 # Classroom syllabus extraction and topic hierarchy
 from .api.routes.classroom_syllabus import router as classroom_syllabus_router

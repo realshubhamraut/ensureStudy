@@ -16,7 +16,7 @@ import {
     ExclamationTriangleIcon,
     SparklesIcon
 } from '@heroicons/react/24/outline'
-import { useSpeechEngine, useSpeechRecognition } from '@/components/avatar/SpeechEngine'
+import { useSpeechEngine, useSpeechRecognition, useLocalWhisperSTT } from '@/components/avatar/SpeechEngine'
 
 // Professional 3D Avatar with TalkingHead.js lip-sync
 const TalkingHeadAvatar = dynamic(() => import('@/components/avatar/TalkingHeadAvatar'), {
@@ -135,15 +135,63 @@ function InterviewSessionContent() {
     }, [])
 
 
+    // Web Speech API (primary - needs internet)
     const {
-        isListening,
-        transcript,
-        startListening,
-        stopListening,
-        resetTranscript,
-        isSupported: sttSupported,
-        error: sttError
+        isListening: webSttListening,
+        transcript: webSttTranscript,
+        startListening: webSttStart,
+        stopListening: webSttStop,
+        resetTranscript: webSttReset,
+        isSupported: webSttSupported,
+        error: webSttError
     } = useSpeechRecognition()
+
+    // Local Whisper STT (fallback - offline)
+    const {
+        isRecording: whisperRecording,
+        isTranscribing: whisperTranscribing,
+        transcript: whisperTranscript,
+        startRecording: whisperStart,
+        stopRecording: whisperStop,
+        resetTranscript: whisperReset,
+        isAvailable: whisperAvailable,
+        error: whisperError
+    } = useLocalWhisperSTT()
+
+    // Determine which STT to use based on network errors
+    const hasNetworkError = webSttError === 'network'
+    const useWhisperFallback = hasNetworkError && whisperAvailable
+
+    // Combined STT state
+    const isListening = useWhisperFallback ? whisperRecording : webSttListening
+    const transcript = useWhisperFallback ? whisperTranscript : webSttTranscript
+    const sttSupported = webSttSupported || whisperAvailable
+    const sttError = useWhisperFallback ? whisperError : webSttError
+    const isTranscribing = whisperTranscribing
+
+    // Combined controls
+    const startListening = useCallback(() => {
+        if (useWhisperFallback) {
+            console.log('[MockInterview] Using local Whisper STT (network error fallback)')
+            whisperStart()
+        } else {
+            console.log('[MockInterview] Using Web Speech API')
+            webSttStart()
+        }
+    }, [useWhisperFallback, whisperStart, webSttStart])
+
+    const stopListening = useCallback(() => {
+        if (useWhisperFallback) {
+            whisperStop()
+        } else {
+            webSttStop()
+        }
+    }, [useWhisperFallback, whisperStop, webSttStop])
+
+    const resetTranscript = useCallback(() => {
+        webSttReset()
+        whisperReset()
+    }, [webSttReset, whisperReset])
 
     const currentQuestion = questions[currentQuestionIndex]
 
@@ -657,60 +705,116 @@ function InterviewSessionContent() {
                         </div>
 
                         {/* Question Display */}
-                        <div className="bg-white/10 backdrop-blur-sm rounded-2xl p-6">
-                            <p className="text-sm text-white/60 mb-2">Current Question{currentQuestion?.topic_name ? ` (${currentQuestion.topic_name})` : ''}:</p>
-                            <p className="text-lg font-medium">{currentQuestion?.question || 'Loading...'}</p>
+                        <div className="bg-gradient-to-br from-slate-800/80 to-slate-900/80 backdrop-blur-sm rounded-2xl p-6 border border-white/10">
+                            <div className="flex items-center gap-2 mb-3">
+                                <span className="px-2 py-1 bg-blue-500/20 text-blue-300 text-xs font-medium rounded-full">
+                                    Q{currentQuestionIndex + 1}
+                                </span>
+                                {currentQuestion?.topic_name && (
+                                    <span className="px-2 py-1 bg-purple-500/20 text-purple-300 text-xs font-medium rounded-full">
+                                        {currentQuestion.topic_name}
+                                    </span>
+                                )}
+                            </div>
+                            <p className="text-lg font-medium leading-relaxed">{currentQuestion?.question || 'Loading...'}</p>
                         </div>
 
-                        {/* STT Warning */}
-                        {!sttSupported && (
-                            <div className="bg-yellow-500/20 border border-yellow-500/30 rounded-xl p-4">
-                                <p className="text-yellow-200 text-sm font-medium">⚠️ Speech Recognition Not Supported</p>
-                                <p className="text-yellow-200/70 text-xs mt-1">
-                                    Your browser doesn't support speech recognition. Please use Chrome or Edge for the best experience,
-                                    or type your answer in the text box below.
-                                </p>
-                            </div>
-                        )}
-
-                        {/* STT Error */}
-                        {sttError && sttError !== 'no-speech' && (
-                            <div className="bg-red-500/20 border border-red-500/30 rounded-xl p-4">
-                                <p className="text-red-200 text-sm font-medium">🎤 Microphone Error: {sttError}</p>
-                                <p className="text-red-200/70 text-xs mt-1">
-                                    {sttError === 'not-allowed'
-                                        ? 'Microphone permission denied. Please allow microphone access and refresh the page.'
-                                        : 'Please check your microphone settings and try again.'}
-                                </p>
-                            </div>
-                        )}
-
-                        {/* Transcript Display */}
-                        {(isListening || transcript) && (
-                            <div className="bg-white/5 rounded-2xl p-6">
-                                <p className="text-sm text-white/60 mb-2">Your Answer:</p>
-                                <p className="text-white/90">
-                                    {transcript || <span className="text-white/40 italic">Listening...</span>}
-                                </p>
-                            </div>
-                        )}
-
-                        {/* Text Input Fallback (when STT not available or user prefers typing) */}
+                        {/* Unified Answer Input Area */}
                         {sessionState === 'listening' && (
-                            <div className="bg-white/5 rounded-2xl p-6 space-y-4">
-                                <p className="text-sm text-white/60 mb-2">
-                                    {sttSupported ? 'Or type your answer:' : 'Type your answer:'}
-                                </p>
-                                <textarea
-                                    value={manualAnswer}
-                                    onChange={(e) => setManualAnswer(e.target.value)}
-                                    placeholder="Type your answer here..."
-                                    className="w-full h-32 bg-white/10 backdrop-blur-sm rounded-xl p-4 text-white placeholder-white/40 border border-white/10 focus:border-blue-500 focus:outline-none resize-none"
-                                />
+                            <div className="bg-gradient-to-br from-slate-800/60 to-slate-900/60 backdrop-blur-sm rounded-2xl border border-white/10 overflow-hidden">
+                                {/* Status bar */}
+                                <div className="px-4 py-2 bg-white/5 border-b border-white/10 flex items-center justify-between">
+                                    <div className="flex items-center gap-2">
+                                        {isListening ? (
+                                            <>
+                                                <span className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />
+                                                <span className="text-red-300 text-sm font-medium">Recording...</span>
+                                            </>
+                                        ) : isTranscribing ? (
+                                            <>
+                                                <div className="w-3 h-3 border-2 border-purple-400 border-t-transparent rounded-full animate-spin" />
+                                                <span className="text-purple-300 text-sm font-medium">Transcribing...</span>
+                                            </>
+                                        ) : useWhisperFallback ? (
+                                            <>
+                                                <span className="w-2 h-2 bg-blue-400 rounded-full" />
+                                                <span className="text-blue-300 text-sm">Local Speech Recognition</span>
+                                            </>
+                                        ) : (
+                                            <>
+                                                <span className="w-2 h-2 bg-green-400 rounded-full" />
+                                                <span className="text-white/60 text-sm">Ready to answer</span>
+                                            </>
+                                        )}
+                                    </div>
+                                    {transcript.trim() && (
+                                        <button
+                                            onClick={resetTranscript}
+                                            className="text-white/40 hover:text-white/70 text-xs transition-colors"
+                                        >
+                                            Clear
+                                        </button>
+                                    )}
+                                </div>
+
+                                {/* Answer textarea - editable, shows both transcript and typed text */}
+                                <div className="p-4">
+                                    <textarea
+                                        value={transcript || manualAnswer}
+                                        onChange={(e) => {
+                                            // If user types, prefer manual answer
+                                            if (!transcript) {
+                                                setManualAnswer(e.target.value)
+                                            }
+                                        }}
+                                        placeholder={isListening ? "Listening... speak now" : isTranscribing ? "Transcribing your speech..." : "Speak or type your answer here..."}
+                                        disabled={isListening || isTranscribing}
+                                        className="w-full h-32 bg-transparent text-white placeholder-white/30 border-0 focus:outline-none resize-none text-base leading-relaxed disabled:opacity-70"
+                                    />
+                                </div>
+
+                                {/* Control buttons */}
+                                <div className="px-4 py-3 bg-white/5 border-t border-white/10 flex items-center gap-3">
+                                    {/* Recording toggle */}
+                                    {isListening ? (
+                                        <button
+                                            onClick={stopListening}
+                                            className="flex items-center gap-2 px-4 py-2.5 bg-red-500 hover:bg-red-600 rounded-xl font-medium transition-colors"
+                                        >
+                                            <StopIcon className="w-4 h-4" />
+                                            Stop
+                                        </button>
+                                    ) : !isTranscribing && (
+                                        <button
+                                            onClick={() => {
+                                                resetTranscript()
+                                                setManualAnswer('')
+                                                startListening()
+                                            }}
+                                            className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-emerald-500 to-green-600 hover:from-emerald-600 hover:to-green-700 rounded-xl font-medium transition-all"
+                                        >
+                                            <MicrophoneIcon className="w-4 h-4" />
+                                            {transcript.trim() ? 'Re-record' : 'Speak'}
+                                        </button>
+                                    )}
+
+                                    <div className="flex-1" />
+
+                                    {/* Submit button */}
+                                    {!isListening && !isTranscribing && (transcript.trim() || manualAnswer.trim()) && (
+                                        <button
+                                            onClick={submitAnswer}
+                                            className="flex items-center gap-2 px-6 py-2.5 bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 rounded-xl font-semibold transition-all shadow-lg shadow-blue-500/25"
+                                        >
+                                            <CheckCircleIcon className="w-4 h-4" />
+                                            Submit Answer
+                                        </button>
+                                    )}
+                                </div>
                             </div>
                         )}
 
-                        {/* Controls */}
+                        {/* Non-listening state controls */}
                         <div className="flex gap-4">
                             {sessionState === 'ready' && (
                                 <button
@@ -719,47 +823,6 @@ function InterviewSessionContent() {
                                     className="flex-1 py-4 rounded-xl bg-gradient-to-r from-blue-500 to-indigo-600 font-semibold flex items-center justify-center gap-2 hover:shadow-lg transition-all disabled:opacity-50"
                                 >
                                     Start Interview
-                                </button>
-                            )}
-
-                            {sessionState === 'listening' && !isListening && (
-                                <button
-                                    onClick={startListening}
-                                    className="flex-1 py-4 rounded-xl bg-gradient-to-r from-green-500 to-emerald-600 font-semibold flex items-center justify-center gap-2 hover:shadow-lg transition-all"
-                                >
-                                    <MicrophoneIcon className="w-5 h-5" />
-                                    Start Speaking
-                                </button>
-                            )}
-
-                            {isListening && (
-                                <>
-                                    <button
-                                        onClick={stopListening}
-                                        className="flex-1 py-4 rounded-xl bg-gradient-to-r from-red-500 to-rose-600 font-semibold flex items-center justify-center gap-2 hover:shadow-lg transition-all"
-                                    >
-                                        <StopIcon className="w-5 h-5" />
-                                        Stop Recording
-                                    </button>
-                                    <button
-                                        onClick={submitAnswer}
-                                        disabled={!transcript.trim() && !manualAnswer.trim()}
-                                        className="flex-1 py-4 rounded-xl bg-gradient-to-r from-blue-500 to-indigo-600 font-semibold flex items-center justify-center gap-2 hover:shadow-lg transition-all disabled:opacity-50"
-                                    >
-                                        <CheckCircleIcon className="w-5 h-5" />
-                                        Submit Answer
-                                    </button>
-                                </>
-                            )}
-
-                            {/* Submit button for text-only input (when not listening but has typed answer) */}
-                            {sessionState === 'listening' && !isListening && manualAnswer.trim() && (
-                                <button
-                                    onClick={submitAnswer}
-                                    className="flex-1 py-4 rounded-xl bg-gradient-to-r from-blue-500 to-indigo-600 font-semibold flex items-center justify-center gap-2 hover:shadow-lg transition-all"
-                                >
-                                    <CheckCircleIcon className="w-5 h-5" />
-                                    Submit Typed Answer
                                 </button>
                             )}
 

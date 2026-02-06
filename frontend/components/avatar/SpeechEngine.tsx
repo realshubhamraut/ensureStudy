@@ -241,6 +241,9 @@ export function useSpeechRecognition() {
     const [error, setError] = useState<string | null>(null)
     const recognitionRef = useRef<any>(null)
     const shouldListenRef = useRef(false)
+    const restartAttemptsRef = useRef(0)
+    const maxRestartAttempts = 3
+    const hasNetworkErrorRef = useRef(false)
 
     useEffect(() => {
         if (typeof window === 'undefined') {
@@ -311,7 +314,16 @@ export function useSpeechRecognition() {
                 return
             }
 
-            // For other errors, stop listening
+            // Track network errors - don't auto-restart on these
+            if (event.error === 'network') {
+                console.log('Network error - stopping auto-restart (Web Speech API needs internet)')
+                hasNetworkErrorRef.current = true
+                shouldListenRef.current = false
+                setIsListening(false)
+                return
+            }
+
+            // For permission errors, stop completely
             if (event.error === 'not-allowed') {
                 setIsListening(false)
                 shouldListenRef.current = false
@@ -321,20 +333,33 @@ export function useSpeechRecognition() {
         recognition.onend = () => {
             console.log('Speech recognition ended')
 
-            // Auto-restart if we should still be listening
-            if (shouldListenRef.current) {
-                console.log('Auto-restarting speech recognition...')
+            // Don't restart if we had network errors
+            if (hasNetworkErrorRef.current) {
+                console.log('Not restarting due to previous network error')
+                setIsListening(false)
+                return
+            }
+
+            // Auto-restart if we should still be listening (with limits)
+            if (shouldListenRef.current && restartAttemptsRef.current < maxRestartAttempts) {
+                restartAttemptsRef.current++
+                const delay = Math.min(100 * Math.pow(2, restartAttemptsRef.current), 2000) // Exponential backoff
+                console.log(`Auto-restarting speech recognition (attempt ${restartAttemptsRef.current}/${maxRestartAttempts})...`)
                 try {
                     setTimeout(() => {
-                        if (shouldListenRef.current && recognitionRef.current) {
+                        if (shouldListenRef.current && recognitionRef.current && !hasNetworkErrorRef.current) {
                             recognitionRef.current.start()
                         }
-                    }, 100)
+                    }, delay)
                 } catch (e) {
                     console.error('Failed to restart recognition:', e)
                     setIsListening(false)
                     shouldListenRef.current = false
                 }
+            } else if (restartAttemptsRef.current >= maxRestartAttempts) {
+                console.log('Max restart attempts reached, stopping')
+                setIsListening(false)
+                shouldListenRef.current = false
             } else {
                 setIsListening(false)
             }
@@ -367,6 +392,8 @@ export function useSpeechRecognition() {
             setTranscript('')
             setInterimTranscript('')
             setError(null)
+            restartAttemptsRef.current = 0  // Reset restart counter
+            hasNetworkErrorRef.current = false  // Reset network error flag
             shouldListenRef.current = true
             recognitionRef.current.start()
             console.log('Started listening')
@@ -411,6 +438,191 @@ export function useSpeechRecognition() {
         stopListening,
         resetTranscript,
         isSupported,
+        error
+    }
+}
+
+/**
+ * Hook for local Whisper-based speech recognition (fallback when Web Speech API fails)
+ * Records audio and sends to local Whisper API for transcription
+ */
+export function useLocalWhisperSTT() {
+    const [isRecording, setIsRecording] = useState(false)
+    const [isTranscribing, setIsTranscribing] = useState(false)
+    const [transcript, setTranscript] = useState('')
+    const [error, setError] = useState<string | null>(null)
+    const [isAvailable, setIsAvailable] = useState(false)
+
+    const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+    const audioChunksRef = useRef<Blob[]>([])
+    const streamRef = useRef<MediaStream | null>(null)
+
+    const AI_SERVICE_URL = typeof window !== 'undefined'
+        ? (process.env.NEXT_PUBLIC_AI_SERVICE_URL || 'https://localhost:8001')
+        : 'https://localhost:8001'
+
+    // Check if local Whisper STT is available
+    useEffect(() => {
+        const checkAvailability = async () => {
+            try {
+                const response = await fetch(`${AI_SERVICE_URL}/api/stt/status`, {
+                    method: 'GET'
+                })
+                if (response.ok) {
+                    const data = await response.json()
+                    setIsAvailable(data.available)
+                    console.log('[LocalWhisperSTT] Service available:', data.available)
+                }
+            } catch (err) {
+                console.log('[LocalWhisperSTT] Service not reachable')
+                setIsAvailable(false)
+            }
+        }
+        checkAvailability()
+    }, [AI_SERVICE_URL])
+
+    const startRecording = useCallback(async () => {
+        try {
+            setError(null)
+            setTranscript('')
+            audioChunksRef.current = []
+
+            // Get microphone access
+            const stream = await navigator.mediaDevices.getUserMedia({
+                audio: {
+                    sampleRate: 16000,
+                    channelCount: 1,
+                    echoCancellation: true,
+                    noiseSuppression: true
+                }
+            })
+            streamRef.current = stream
+
+            // Create MediaRecorder with best available format
+            const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+                ? 'audio/webm;codecs=opus'
+                : MediaRecorder.isTypeSupported('audio/webm')
+                    ? 'audio/webm'
+                    : 'audio/mp4'
+
+            const recorder = new MediaRecorder(stream, { mimeType })
+            mediaRecorderRef.current = recorder
+
+            recorder.ondataavailable = (event) => {
+                if (event.data.size > 0) {
+                    audioChunksRef.current.push(event.data)
+                }
+            }
+
+            recorder.start(1000) // Collect chunks every second
+            setIsRecording(true)
+            console.log('[LocalWhisperSTT] Recording started')
+
+        } catch (err: any) {
+            console.error('[LocalWhisperSTT] Failed to start recording:', err)
+            setError(err.message || 'Failed to access microphone')
+        }
+    }, [])
+
+    const stopRecording = useCallback(async () => {
+        return new Promise<string>((resolve) => {
+            if (!mediaRecorderRef.current || mediaRecorderRef.current.state === 'inactive') {
+                setIsRecording(false)
+                resolve(transcript)
+                return
+            }
+
+            const recorder = mediaRecorderRef.current
+
+            recorder.onstop = async () => {
+                setIsRecording(false)
+
+                // Stop all tracks
+                if (streamRef.current) {
+                    streamRef.current.getTracks().forEach(track => track.stop())
+                    streamRef.current = null
+                }
+
+                // Create audio blob
+                const audioBlob = new Blob(audioChunksRef.current, { type: recorder.mimeType })
+                console.log('[LocalWhisperSTT] Recording stopped, size:', audioBlob.size)
+
+                if (audioBlob.size < 1000) {
+                    console.warn('[LocalWhisperSTT] Audio too short')
+                    setError('Recording too short')
+                    resolve('')
+                    return
+                }
+
+                // Send to Whisper API
+                setIsTranscribing(true)
+                try {
+                    const formData = new FormData()
+                    formData.append('audio', audioBlob, 'recording.webm')
+                    formData.append('language', 'en')
+
+                    console.log('[LocalWhisperSTT] Sending to Whisper API...')
+                    const response = await fetch(`${AI_SERVICE_URL}/api/stt/transcribe`, {
+                        method: 'POST',
+                        body: formData
+                    })
+
+                    if (!response.ok) {
+                        throw new Error(`Transcription failed: ${response.status}`)
+                    }
+
+                    const data = await response.json()
+                    console.log('[LocalWhisperSTT] Transcription result:', data.text)
+                    setTranscript(data.text)
+                    setIsTranscribing(false)
+                    resolve(data.text)
+
+                } catch (err: any) {
+                    console.error('[LocalWhisperSTT] Transcription failed:', err)
+                    setError(err.message || 'Transcription failed')
+                    setIsTranscribing(false)
+                    resolve('')
+                }
+            }
+
+            recorder.stop()
+        })
+    }, [AI_SERVICE_URL, transcript])
+
+    const resetTranscript = useCallback(() => {
+        setTranscript('')
+        setError(null)
+    }, [])
+
+    const cancelRecording = useCallback(() => {
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+            mediaRecorderRef.current.stop()
+        }
+        if (streamRef.current) {
+            streamRef.current.getTracks().forEach(track => track.stop())
+            streamRef.current = null
+        }
+        setIsRecording(false)
+        audioChunksRef.current = []
+    }, [])
+
+    // Cleanup on unmount
+    useEffect(() => {
+        return () => {
+            cancelRecording()
+        }
+    }, [cancelRecording])
+
+    return {
+        isRecording,
+        isTranscribing,
+        isProcessing: isRecording || isTranscribing,
+        transcript,
+        startRecording,
+        stopRecording,
+        resetTranscript,
+        cancelRecording,
+        isAvailable,
         error
     }
 }

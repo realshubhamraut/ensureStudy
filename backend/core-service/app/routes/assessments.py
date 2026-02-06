@@ -92,10 +92,20 @@ def start_assessment(assessment_id):
         
         # For MCQ: include options WITHOUT is_correct flag or explanation
         if q.get("question_type") == "mcq" and q.get("options"):
-            question_data["options"] = [
-                {"id": opt.get("id"), "text": opt.get("text")}
-                for opt in q.get("options", [])
-            ]
+            raw_options = q.get("options", [])
+            formatted_options = []
+            for idx, opt in enumerate(raw_options):
+                # Handle string options (from AI generation)
+                if isinstance(opt, str):
+                    letter = chr(65 + idx)  # A, B, C, D...
+                    formatted_options.append({"id": letter, "text": opt})
+                # Handle dict options (traditional format)
+                elif isinstance(opt, dict):
+                    formatted_options.append({
+                        "id": opt.get("id", chr(65 + idx)), 
+                        "text": opt.get("text", str(opt))
+                    })
+            question_data["options"] = formatted_options
         
         questions_for_taking.append(question_data)
     
@@ -767,3 +777,383 @@ def get_challengeable_students():
             "count": 0,
             "error": str(e)
         }), 200
+
+
+# ============================================================================
+# Daily Revision Assessment
+# ============================================================================
+
+@assessments_bp.route("/daily-revision", methods=["GET"])
+@require_auth
+def get_daily_revision():
+    """
+    Get the revision assessment for a specific date.
+    Query params:
+    - date: ISO date string (defaults to today)
+    """
+    from datetime import date as date_type
+    
+    date_str = request.args.get("date", date_type.today().isoformat())
+    try:
+        target_date = date_type.fromisoformat(date_str)
+    except ValueError:
+        return jsonify({"error": "Invalid date format. Use YYYY-MM-DD"}), 400
+    
+    # Find revision assessment for this user and date
+    assessment = Assessment.query.filter_by(
+        created_by=request.user_id,
+        is_revision_assessment=True,
+        revision_date=target_date
+    ).first()
+    
+    if not assessment:
+        return jsonify({
+            "assessment": None,
+            "message": "No revision assessment for this date"
+        }), 200
+    
+    # Check if user has completed it
+    result = AssessmentResult.query.filter_by(
+        user_id=request.user_id,
+        assessment_id=assessment.id
+    ).first()
+    
+    response_data = assessment.to_dict(include_questions=True)
+    response_data["completed"] = result is not None
+    response_data["score"] = result.score if result else None
+    
+    return jsonify({"assessment": response_data}), 200
+
+
+@assessments_bp.route("/generate-daily-revision", methods=["POST"])
+@require_auth
+def generate_daily_revision():
+    """
+    Trigger generation of daily revision assessment.
+    Request body (optional):
+    - date: ISO date string (defaults to today)
+    - force: Boolean to regenerate even if assessment exists
+    
+    This calls the AI service to generate questions based on today's revision schedule.
+    """
+    from datetime import date as date_type
+    import httpx
+    import os
+    
+    data = request.get_json() or {}
+    date_str = data.get("date", date_type.today().isoformat())
+    force = data.get("force", False)
+    
+    try:
+        target_date = date_type.fromisoformat(date_str)
+    except ValueError:
+        return jsonify({"error": "Invalid date format. Use YYYY-MM-DD"}), 400
+    
+    # Check if assessment already exists (unless force=True)
+    if not force:
+        existing = Assessment.query.filter_by(
+            created_by=request.user_id,
+            is_revision_assessment=True,
+            revision_date=target_date
+        ).first()
+        
+        if existing:
+            return jsonify({
+                "assessment": existing.to_dict(include_questions=False),
+                "message": "Revision assessment already exists",
+                "already_exists": True
+            }), 200
+    
+    # Get revision topics for this date
+    from app.routes.revision import revision_bp
+    from app.models.curriculum import StudentTopicScore, ClassroomTopic, Chapter
+    from app.models.classroom import Classroom, StudentClassroom
+    
+    print(f"[Revision Assessment] Generating for user {request.user_id}, date {target_date}")
+    
+    # Fetch enrolled classrooms
+    enrollments = StudentClassroom.query.filter_by(
+        student_id=request.user_id,
+        is_active=True
+    ).all()
+    print(f"[Revision Assessment] Found {len(enrollments)} enrollments")
+    
+    classroom_ids = [e.classroom_id for e in enrollments]
+    topics = ClassroomTopic.query.filter(ClassroomTopic.classroom_id.in_(classroom_ids)).all()
+    print(f"[Revision Assessment] Found {len(topics)} topics in enrolled classrooms")
+    
+    # Get scores and filter for revision
+    scores_query = StudentTopicScore.query.filter(
+        StudentTopicScore.user_id == request.user_id,
+        StudentTopicScore.classroom_topic_id.in_([t.id for t in topics])
+    ).all()
+    scores_map = {s.classroom_topic_id: s for s in scores_query}
+    
+    # Find topics scheduled for revision based on mastery and interval
+    from datetime import timedelta
+    revision_topics = []
+    today = target_date
+    
+    for topic in topics:
+        score = scores_map.get(topic.id)
+        classroom = Classroom.query.get(topic.classroom_id)
+        chapter = Chapter.query.get(topic.chapter_id) if topic.chapter_id else None
+        
+        # Case 1: Topic has never been practiced - include for initial review
+        if not score or not score.last_activity_at:
+            revision_topics.append({
+                "topic_id": topic.id,
+                "topic_name": topic.name,
+                "subject_name": classroom.subject if classroom else "General",
+                "chapter_name": chapter.name if chapter else "",
+                "mastery_percentage": 0,
+                "reason": "new_topic"
+            })
+            continue
+        
+        mastery = score.mastery_percentage
+        review_count = score.mcq_attempts + score.descriptive_attempts
+        
+        # Case 2: Low mastery topics need frequent review
+        if mastery < 50 and review_count > 0:
+            revision_topics.append({
+                "topic_id": topic.id,
+                "topic_name": topic.name,
+                "subject_name": classroom.subject if classroom else "General",
+                "chapter_name": chapter.name if chapter else "",
+                "mastery_percentage": mastery,
+                "reason": "low_mastery"
+            })
+            continue
+        
+        # Case 3: Check spaced repetition interval for other topics
+        if mastery >= 90:
+            interval = 7
+        elif mastery >= 70:
+            interval = 3
+        elif mastery >= 50:
+            interval = 2
+        else:
+            interval = 1
+        
+        last_activity = score.last_activity_at.date()
+        next_review = last_activity + timedelta(days=interval)
+        
+        if next_review <= today:
+            revision_topics.append({
+                "topic_id": topic.id,
+                "topic_name": topic.name,
+                "subject_name": classroom.subject if classroom else "General",
+                "chapter_name": chapter.name if chapter else "",
+                "mastery_percentage": mastery,
+                "reason": "scheduled_review"
+            })
+    
+    if not revision_topics:
+        return jsonify({
+            "assessment": None,
+            "message": "No topics scheduled for revision today",
+            "topics_checked": len(topics)
+        }), 200
+    
+    # Generate questions using Groq API
+    import os
+    import json
+    import httpx
+    
+    GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
+    generated_questions = []
+    questions_per_topic = 3
+    
+    for topic in revision_topics[:5]:  # Max 5 topics
+        topic_name = topic.get("topic_name", "General")
+        subject = topic.get("subject_name", "")
+        chapter_name = topic.get("chapter_name", "")
+        mastery = topic.get("mastery_percentage", 50)
+        
+        # Determine difficulty based on mastery
+        if mastery < 40:
+            difficulty = "easy"
+        elif mastery < 70:
+            difficulty = "medium"
+        else:
+            difficulty = "hard"
+        
+        prompt = f"""You are a quiz generator. Generate exactly {questions_per_topic} multiple choice questions for students revising the topic: "{topic_name}" in {subject}.
+
+Topic: {topic_name}
+Subject: {subject}
+Chapter: {chapter_name}
+Student's current mastery: {mastery}%
+Difficulty level: {difficulty}
+
+Return ONLY a valid JSON array with no other text. Each question must have this exact structure:
+[
+  {{
+    "question_text": "Clear, specific question about the topic?",
+    "options": ["Option A", "Option B", "Option C", "Option D"],
+    "correct_answer": "A",
+    "explanation": "Brief explanation why this is correct"
+  }}
+]
+
+Important:
+- Make questions specific to {topic_name}
+- The correct_answer must be just a single letter (A, B, C, or D)
+- Options should be plausible but only one correct
+- Questions should test understanding, not just memorization
+- Return ONLY the JSON array, no markdown, no extra text"""
+
+        try:
+            if GROQ_API_KEY:
+                response = httpx.post(
+                    "https://api.groq.com/openai/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {GROQ_API_KEY}",
+                        "Content-Type": "application/json"
+                    },
+                    json={
+                        "model": "llama-3.3-70b-versatile",
+                        "messages": [{"role": "user", "content": prompt}],
+                        "temperature": 0.7,
+                        "max_tokens": 1500
+                    },
+                    timeout=30.0
+                )
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    content = result["choices"][0]["message"]["content"].strip()
+                    
+                    # Clean up markdown code blocks if present
+                    if "```json" in content:
+                        content = content.split("```json")[1].split("```")[0].strip()
+                    elif "```" in content:
+                        content = content.split("```")[1].split("```")[0].strip()
+                    
+                    questions = json.loads(content)
+                    
+                    for idx, q in enumerate(questions):
+                        if "question_text" in q and "options" in q and "correct_answer" in q:
+                            # Normalize correct_answer to single letter
+                            correct = q["correct_answer"].strip().upper()
+                            if len(correct) > 1:
+                                correct = correct[0]
+                            
+                            generated_questions.append({
+                                "id": f"{topic.get('topic_id', 'q')}_{idx}",
+                                "question_type": "mcq",
+                                "question_text": q["question_text"],
+                                "options": q["options"],
+                                "correct_answer": correct,
+                                "explanation": q.get("explanation", ""),
+                                "marks": 1,
+                                "difficulty": difficulty,
+                                "topic_id": topic.get("topic_id"),
+                                "topic": topic_name
+                            })
+        except Exception as e:
+            print(f"[Revision Assessment] Error generating questions for {topic_name}: {str(e)}")
+            # Continue to next topic, don't fail completely
+            continue
+    
+    # If no questions generated, create fallback questions
+    if not generated_questions:
+        for idx, topic in enumerate(revision_topics[:3]):
+            topic_name = topic.get("topic_name", "Topic")
+            mastery = topic.get("mastery_percentage", 50)
+            difficulty = "easy" if mastery < 40 else "medium" if mastery < 70 else "hard"
+            
+            generated_questions.append({
+                "id": f"fallback_{idx}",
+                "question_type": "mcq", 
+                "question_text": f"Which of the following best describes {topic_name}?",
+                "options": [
+                    f"A core concept in {topic_name}",
+                    f"An unrelated topic",
+                    f"A different subject entirely", 
+                    f"None of the above"
+                ],
+                "correct_answer": "A",
+                "explanation": f"Review the fundamentals of {topic_name}.",
+                "marks": 1,
+                "difficulty": difficulty,
+                "topic_id": topic.get("topic_id"),
+                "topic": topic_name
+            })
+    
+    if not generated_questions:
+        return jsonify({
+            "error": "Failed to generate questions",
+            "topics_found": len(revision_topics)
+        }), 500
+    
+    # Create the assessment
+    topic_names = [t.get("topic_name", "") for t in revision_topics[:3]]
+    topics_str = ", ".join(topic_names)
+    if len(revision_topics) > 3:
+        topics_str += f" +{len(revision_topics) - 3} more"
+    
+    assessment = Assessment(
+        id=str(uuid4()),
+        title=f"Automated Revision Assessment - {date_str}",
+        topic=topics_str,
+        subject="Revision",
+        description=f"Daily revision quiz covering {len(revision_topics)} topic(s): {topics_str}",
+        questions=generated_questions,
+        difficulty="mixed",
+        time_limit_minutes=max(len(generated_questions) * 2, 10),
+        assessment_type="self_practice",
+        use_ai_questions=True,
+        created_by=request.user_id,
+        is_revision_assessment=True,
+        revision_date=target_date
+    )
+    
+    db.session.add(assessment)
+    db.session.commit()
+    
+    return jsonify({
+        "assessment": assessment.to_dict(include_questions=False),
+        "topics_covered": [t.get("topic_name") for t in revision_topics],
+        "questions_generated": len(generated_questions),
+        "message": "Revision assessment created successfully"
+    }), 201
+
+
+@assessments_bp.route("/<assessment_id>/append-questions", methods=["PATCH"])
+@require_auth
+def append_questions(assessment_id):
+    """
+    Append new questions to an existing assessment.
+    Request body:
+    - questions: List of question objects to append
+    """
+    assessment = Assessment.query.get(assessment_id)
+    
+    if not assessment:
+        return jsonify({"error": "Assessment not found"}), 404
+    
+    if assessment.created_by != request.user_id:
+        return jsonify({"error": "Not authorized to modify this assessment"}), 403
+    
+    data = request.get_json()
+    new_questions = data.get("questions", [])
+    
+    if not new_questions:
+        return jsonify({"error": "No questions provided"}), 400
+    
+    # Append new questions
+    existing = assessment.questions or []
+    assessment.questions = existing + new_questions
+    
+    # Update time limit
+    assessment.time_limit_minutes = len(assessment.questions) * 2
+    
+    db.session.commit()
+    
+    return jsonify({
+        "assessment": assessment.to_dict(include_questions=False),
+        "questions_added": len(new_questions),
+        "total_questions": len(assessment.questions)
+    }), 200

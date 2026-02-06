@@ -20,6 +20,7 @@ import { getApiBaseUrl } from '@/utils/api'
 import CreateAssessmentModal from '@/components/assessments/CreateAssessmentModal'
 import ChallengeModal from '@/components/assessments/ChallengeModal'
 import ReceivedChallenges from '@/components/assessments/ReceivedChallenges'
+import DailyRevisionBanner from '@/components/assessments/DailyRevisionBanner'
 
 interface Assessment {
     id: string
@@ -34,6 +35,9 @@ interface Assessment {
     created_by?: string
     completed?: boolean
     score?: number
+    is_revision_assessment?: boolean
+    revision_date?: string
+    source_topics?: string[]
 }
 
 interface Classroom {
@@ -167,6 +171,9 @@ export default function AssessmentsPage() {
                 </button>
             </div>
 
+            {/* Daily Revision Banner */}
+            <DailyRevisionBanner />
+
             {/* Stats */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                 <StatCard
@@ -266,8 +273,16 @@ export default function AssessmentsPage() {
                                             {assessment.use_ai_questions && (
                                                 <SparklesIcon className="w-4 h-4 text-yellow-500" title="AI Generated" />
                                             )}
+                                            {assessment.is_revision_assessment && (
+                                                <span className="px-1.5 py-0.5 bg-gradient-to-r from-indigo-100 to-purple-100 text-indigo-700 text-xs rounded-full font-medium">
+                                                    📅 Revision
+                                                </span>
+                                            )}
                                         </div>
                                         <p className="text-sm text-gray-500">{assessment.topic}</p>
+                                        {assessment.subject && assessment.subject !== 'General' && assessment.subject !== 'Revision' && (
+                                            <p className="text-xs text-gray-400 mt-0.5">📚 {assessment.subject}</p>
+                                        )}
                                     </div>
                                     <div className="flex items-center gap-2">
                                         <span className={clsx(

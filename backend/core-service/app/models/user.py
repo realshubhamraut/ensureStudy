@@ -152,6 +152,10 @@ class Assessment(db.Model):
     is_challenge = db.Column(db.Boolean, default=False)
     original_assessment_id = db.Column(db.String(36), nullable=True)  # If cloned from challenge
     
+    # NEW: Revision assessment tracking
+    is_revision_assessment = db.Column(db.Boolean, default=False)  # Auto-generated from revision schedule
+    revision_date = db.Column(db.Date, nullable=True, index=True)  # Date this revision assessment is for
+    
     # Relationships
     results = db.relationship("AssessmentResult", backref="assessment", cascade="all, delete-orphan")
     
@@ -175,6 +179,8 @@ class Assessment(db.Model):
             "source_chapters": self.source_chapters or [],
             "include_weak_topics": self.include_weak_topics,
             "is_challenge": self.is_challenge,
+            "is_revision_assessment": self.is_revision_assessment,
+            "revision_date": self.revision_date.isoformat() if self.revision_date else None,
             "num_questions": len(self.questions) if self.questions else 0
         }
         if include_questions:

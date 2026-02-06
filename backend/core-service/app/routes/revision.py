@@ -195,42 +195,50 @@ def get_revision_schedule():
         chapter = chapters_map.get(topic.chapter_id)
         classroom = classrooms_map.get(topic.classroom_id)
         
-        # ONLY include topics that have been attempted (have a score with activity)
-        if score and score.last_activity_at:
-            # Calculate next review date based on mastery
-            mastery = score.mastery_percentage
-            review_count = score.mcq_attempts + score.descriptive_attempts
-            
-            # Get the interval based on mastery level
-            interval_days = calculate_review_interval(mastery, review_count)
-            
-            # Calculate next review date
-            last_activity = score.last_activity_at.date()
-            next_review = last_activity + timedelta(days=interval_days)
-            
-            # Calculate priority and status
-            days_overdue = max(0, (today - next_review).days)
-            days_since_activity = (today - last_activity).days
-            priority = calculate_priority_score(mastery, days_overdue, days_since_activity)
-            status = get_review_status(next_review, today)
-            
-            revision_items.append({
-                "topic_id": topic.id,
-                "topic_name": topic.name,
-                "subject_name": classroom.subject if classroom else "Unknown",
-                "chapter_name": chapter.name if chapter else "",
-                "chapter_color": chapter.color if chapter else "#6366F1",
-                "mastery_percentage": round(mastery, 1),
-                "quiz_score": round((score.mcq_total_score / score.mcq_max_score * 100) if score.mcq_max_score > 0 else 0, 1),
-                "interview_score": round(score.descriptive_avg_score, 1),
-                "review_count": review_count,
-                "scheduled_date": next_review.isoformat(),
-                "status": status,
-                "priority": priority,
-                "last_activity": last_activity.isoformat(),
-                "source": "assessment"  # Only includes topics with real assessment/interview data
-            })
-        # Skip unattempted topics - they shouldn't appear in revision schedule
+        # ONLY include topics that have been actually attempted AND have some mastery
+        # Skip topics with no activity, no attempts, or 0% mastery - these are "New" topics
+        if not score or not score.last_activity_at:
+            continue  # No score record or never had activity
+        
+        review_count = score.mcq_attempts + score.descriptive_attempts
+        if review_count == 0:
+            continue  # Never actually attempted - skip "New" topics
+        
+        mastery = score.mastery_percentage
+        if mastery <= 0:
+            continue  # No mastery earned yet - skip topics that would show as "New"
+        
+        # Topic has been attempted AND has mastery - include in revision schedule
+        
+        # Get the interval based on mastery level
+        interval_days = calculate_review_interval(mastery, review_count)
+        
+        # Calculate next review date
+        last_activity = score.last_activity_at.date()
+        next_review = last_activity + timedelta(days=interval_days)
+        
+        # Calculate priority and status
+        days_overdue = max(0, (today - next_review).days)
+        days_since_activity = (today - last_activity).days
+        priority = calculate_priority_score(mastery, days_overdue, days_since_activity)
+        status = get_review_status(next_review, today)
+        
+        revision_items.append({
+            "topic_id": topic.id,
+            "topic_name": topic.name,
+            "subject_name": classroom.subject if classroom else "Unknown",
+            "chapter_name": chapter.name if chapter else "",
+            "chapter_color": chapter.color if chapter else "#6366F1",
+            "mastery_percentage": round(mastery, 1),
+            "quiz_score": round((score.mcq_total_score / score.mcq_max_score * 100) if score.mcq_max_score > 0 else 0, 1),
+            "interview_score": round(score.descriptive_avg_score, 1),
+            "review_count": review_count,
+            "scheduled_date": next_review.isoformat(),
+            "status": status,
+            "priority": priority,
+            "last_activity": last_activity.isoformat(),
+            "source": "assessment"  # Only includes topics with real assessment/interview data
+        })
 
     
     # Sort by priority (highest first)

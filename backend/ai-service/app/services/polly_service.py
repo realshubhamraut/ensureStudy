@@ -6,6 +6,23 @@ AWS Polly Free Tier: 5M characters/month for 12 months
 Neural voices provide the best quality for interviews.
 """
 
+# Load .env file for AWS credentials
+import os
+from pathlib import Path
+from dotenv import load_dotenv
+
+# First try AI service's own .env
+ai_env = Path(__file__).resolve().parents[2] / '.env'
+print(f"[Polly] Looking for AI .env at: {ai_env} (exists: {ai_env.exists()})")
+if ai_env.exists():
+    load_dotenv(ai_env, override=True)
+    print(f"[Polly] Loaded AI .env, AWS_ACCESS_KEY_ID present: {bool(os.getenv('AWS_ACCESS_KEY_ID'))}")
+# Then try root .env  
+root_env = Path(__file__).resolve().parents[4] / '.env'
+print(f"[Polly] Looking for root .env at: {root_env} (exists: {root_env.exists()})")
+if root_env.exists():
+    load_dotenv(root_env, override=False)
+
 # boto3 is optional - service will work without it (fallback to browser TTS)
 try:
     import boto3
@@ -19,7 +36,6 @@ import os
 import hashlib
 import base64
 from typing import Optional, List, Dict, Any
-from pathlib import Path
 import logging
 
 logger = logging.getLogger(__name__)

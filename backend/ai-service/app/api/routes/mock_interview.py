@@ -542,12 +542,19 @@ async def get_question_evaluation_data(question_id: str, token: str) -> dict:
 
 async def evaluate_answer_with_llm(student_answer: str, expected_answer: str, key_concepts: List[str]) -> dict:
     """
-    Enhanced answer evaluation using LLM for semantic similarity.
+    Enhanced answer evaluation using Groq LLM for semantic similarity.
+    Falls back to keyword matching if Groq fails.
     """
     try:
-        from app.services.llm_provider import get_llm
+        import os
+        from groq import Groq
         
-        llm = get_llm()
+        groq_api_key = os.getenv("GROQ_API_KEY")
+        if not groq_api_key:
+            logger.warning("No GROQ_API_KEY, using fallback evaluation")
+            return fallback_evaluation(student_answer, expected_answer, key_concepts)
+        
+        client = Groq(api_key=groq_api_key)
         
         prompt = f"""Evaluate this student's answer against the expected answer.
 
@@ -568,17 +575,27 @@ Provide evaluation in JSON format:
     "answer_quality": "excellent|good|partial|needs_improvement"
 }}
 
-Return ONLY the JSON."""
+Return ONLY the JSON, no other text."""
 
-        response = llm.invoke(prompt)
+        response = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.3,
+            max_tokens=500
+        )
         
-        # Parse response
-        text = response.strip()
-        if "```" in text:
-            text = text.split("```")[1].replace("json", "").strip()
+        result_text = response.choices[0].message.content.strip()
         
+        # Parse JSON response
         import json
-        result = json.loads(text)
+        # Extract JSON from response (handle markdown code blocks)
+        if "```json" in result_text:
+            result_text = result_text.split("```json")[1].split("```")[0].strip()
+        elif "```" in result_text:
+            result_text = result_text.split("```")[1].split("```")[0].strip()
+        
+        result = json.loads(result_text)
+        logger.info(f"✅ Groq evaluation: score={result.get('score')}")
         return result
         
     except Exception as e:
