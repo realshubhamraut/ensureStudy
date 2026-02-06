@@ -124,28 +124,30 @@ class PollyService:
     def _get_cached(self, cache_key: str) -> Optional[Dict[str, Any]]:
         """Get cached audio and visemes if available."""
         audio_path = self.cache_dir / f"{cache_key}.mp3"
-        viseme_path = self.cache_dir / f"{cache_key}.json"
+        meta_path = self.cache_dir / f"{cache_key}.json"
         
-        if audio_path.exists() and viseme_path.exists():
-            with open(viseme_path, 'r') as f:
-                visemes = json.load(f)
+        if audio_path.exists() and meta_path.exists():
+            with open(meta_path, 'r') as f:
+                meta = json.load(f)
             with open(audio_path, 'rb') as f:
                 audio_data = f.read()
             return {
                 'audio_base64': base64.b64encode(audio_data).decode('utf-8'),
-                'visemes': visemes
+                'visemes': meta.get('visemes', []),
+                'voice': meta.get('voice', 'Joanna'),
+                'duration_ms': meta.get('duration_ms', 0)
             }
         return None
     
-    def _cache_result(self, cache_key: str, audio_data: bytes, visemes: List[Dict]):
-        """Cache audio and visemes for future use."""
+    def _cache_result(self, cache_key: str, audio_data: bytes, meta: Dict[str, Any]):
+        """Cache audio and metadata for future use."""
         audio_path = self.cache_dir / f"{cache_key}.mp3"
-        viseme_path = self.cache_dir / f"{cache_key}.json"
+        meta_path = self.cache_dir / f"{cache_key}.json"
         
         with open(audio_path, 'wb') as f:
             f.write(audio_data)
-        with open(viseme_path, 'w') as f:
-            json.dump(visemes, f)
+        with open(meta_path, 'w') as f:
+            json.dump(meta, f)
     
     async def synthesize(
         self, 
@@ -226,7 +228,11 @@ class PollyService:
                 'duration_ms': visemes[-1]['time'] if visemes else 0
             }
             
-            self._cache_result(cache_key, audio_data, visemes)
+            self._cache_result(cache_key, audio_data, {
+                'visemes': visemes,
+                'voice': voice_id,
+                'duration_ms': visemes[-1]['time'] if visemes else 0
+            })
             logger.info(f"Synthesized {len(text)} chars with {len(visemes)} visemes")
             
             return result

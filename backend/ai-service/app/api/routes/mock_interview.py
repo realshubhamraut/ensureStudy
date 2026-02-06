@@ -644,26 +644,31 @@ def fallback_evaluation(student_answer: str, expected_answer: str, key_concepts:
     }
 
 
-async def update_question_stats(question_id: str, score: float, data: dict, token: str):
-    """Update question statistics in core-service."""
+async def update_topic_score(topic_id: str, score: float, data: dict, token: str):
+    """
+    Update topic mastery score in core-service.
+    Uses the new topic-based endpoint that works for dynamically generated questions.
+    """
     try:
         async with httpx.AsyncClient(verify=False) as client:
-            await client.put(
-                f"{CORE_SERVICE_URL}/api/interview-questions/{question_id}/stats",
+            response = await client.put(
+                f"{CORE_SERVICE_URL}/api/interview-questions/topic/{topic_id}/update-score",
                 json={
                     "score": score,
                     "session_id": data.get("session_id"),
                     "student_answer": data.get("student_answer"),
-                    "feedback": data.get("feedback"),
-                    "concept_scores": data.get("concept_scores"),
-                    "response_time_seconds": data.get("response_time_seconds"),
-                    "audio_duration_seconds": data.get("audio_duration_seconds")
+                    "question_text": data.get("question_text")
                 },
                 headers={"Authorization": f"Bearer {token}"},
                 timeout=10.0
             )
+            if response.status_code == 200:
+                result = response.json()
+                logger.info(f"✅ Topic score updated: topic={topic_id}, mastery={result.get('topic_score', {}).get('mastery_percentage')}%")
+            else:
+                logger.warning(f"Failed to update topic score: {response.status_code} - {response.text}")
     except Exception as e:
-        logger.warning(f"Failed to update question stats: {e}")
+        logger.warning(f"Failed to update topic score: {e}")
 
 
 async def check_and_generate_more_questions(topic_ids: List[str], token: str):
@@ -776,6 +781,14 @@ async def start_topic_interview(request: StartTopicInterviewRequest):
     
     first_question = questions[0]
     
+    # DEBUG: Log what we're storing in the session
+    logger.info(f"[DEBUG] Storing session with {len(questions)} questions")
+    for i, q in enumerate(questions[:2]):  # Log first 2
+        logger.info(f"[DEBUG] Q{i} keys: {list(q.keys())}")
+        logger.info(f"[DEBUG] Q{i} expected_answer length: {len(q.get('expected_answer', ''))}")
+        logger.info(f"[DEBUG] Q{i} reference_answer length: {len(q.get('reference_answer', ''))}")
+        logger.info(f"[DEBUG] Q{i} key_concepts: {q.get('key_concepts', [])}")
+    
     # Store session with full question data (including expected answers for evaluation)
     TOPIC_INTERVIEW_SESSIONS[session_id] = {
         "user_id": request.user_id,
@@ -811,6 +824,12 @@ async def submit_topic_answer(request: SubmitTopicAnswerRequest):
     Submit answer for topic-based interview and get evaluation.
     Uses LLM for semantic similarity evaluation.
     """
+    logger.info(f"[SUBMIT] ========== ANSWER SUBMISSION ==========")
+    logger.info(f"[SUBMIT] Session ID: {request.session_id}")
+    logger.info(f"[SUBMIT] Question ID: {request.question_id}")
+    logger.info(f"[SUBMIT] Answer received: '{request.answer_text[:100] if request.answer_text else 'EMPTY'}...'")
+    logger.info(f"[SUBMIT] Answer length: {len(request.answer_text) if request.answer_text else 0} chars")
+    
     session = TOPIC_INTERVIEW_SESSIONS.get(request.session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -823,18 +842,58 @@ async def submit_topic_answer(request: SubmitTopicAnswerRequest):
     
     current_question = questions[current_idx]
     
+    # Validate answer is not empty
+    answer_text = request.answer_text.strip() if request.answer_text else ""
+    if not answer_text:
+        logger.warning(f"[SUBMIT] EMPTY ANSWER RECEIVED! Returning 0 score.")
+        evaluation = TopicAnswerEvaluation(
+            question_id=current_question["id"],
+            score=0,
+            concept_scores={},
+            covered_concepts=[],
+            missed_concepts=current_question.get("key_concepts", []),
+            feedback="No answer was recorded. Please speak clearly into your microphone or type your answer.",
+            expected_answer_summary=""
+        )
+        session["evaluations"].append(evaluation.dict())
+        session["current_index"] += 1
+        is_complete = session["current_index"] >= len(questions)
+        return SubmitTopicAnswerResponse(
+            evaluation=evaluation,
+            is_complete=is_complete,
+            next_question=None if is_complete else TopicInterviewQuestion(
+                id=questions[session["current_index"]]["id"],
+                question=questions[session["current_index"]]["question"],
+                topic_id=questions[session["current_index"]].get("topic_id", ""),
+                topic_name=questions[session["current_index"]].get("topic_name", ""),
+                difficulty=questions[session["current_index"]].get("difficulty", "medium")
+            ) if not is_complete else None
+        )
+    
     # Get expected answer and key concepts (stored in session, not exposed to student)
     expected_answer = current_question.get("reference_answer", current_question.get("expected_answer", ""))
     key_concepts = current_question.get("key_concepts", [])
     
+    # DEBUG: Log what we have for evaluation
+    logger.info(f"[SUBMIT] Question: {current_question.get('question', '')[:80]}...")
+    logger.info(f"[SUBMIT] Expected answer length: {len(expected_answer)} chars")
+    logger.info(f"[SUBMIT] Expected answer preview: '{expected_answer[:150] if expected_answer else 'NO EXPECTED ANSWER'}'...")
+    logger.info(f"[SUBMIT] Key concepts: {key_concepts}")
+    logger.info(f"[SUBMIT] Student answer (full): '{answer_text}'")
+    
     # Evaluate using LLM
+    logger.info(f"[SUBMIT] Calling LLM evaluation...")
     eval_result = await evaluate_answer_with_llm(
-        request.answer_text,
+        answer_text,
         expected_answer,
         key_concepts
     )
     
     score = eval_result.get("score", 50)
+    logger.info(f"[SUBMIT] ✅ Evaluation complete! Score: {score}")
+    logger.info(f"[SUBMIT] Covered concepts: {eval_result.get('covered_concepts', [])}")
+    logger.info(f"[SUBMIT] Missed concepts: {eval_result.get('missed_concepts', [])}")
+    logger.info(f"[SUBMIT] Feedback: {eval_result.get('feedback', '')}")
     
     # Create evaluation response
     evaluation = TopicAnswerEvaluation(
@@ -852,20 +911,19 @@ async def submit_topic_answer(request: SubmitTopicAnswerRequest):
     session["weak_concepts"].extend(eval_result.get("missed_concepts", []))
     session["current_index"] += 1
     
-    # Update question stats in background
-    await update_question_stats(
-        current_question["id"],
-        score,
-        {
-            "session_id": request.session_id,
-            "student_answer": request.answer_text,
-            "feedback": evaluation.feedback,
-            "concept_scores": evaluation.concept_scores,
-            "response_time_seconds": request.response_time_seconds,
-            "audio_duration_seconds": request.audio_duration_seconds
-        },
-        request.token
-    )
+    # Update topic mastery score in core-service
+    topic_id = current_question.get("topic_id", "")
+    if topic_id:
+        await update_topic_score(
+            topic_id,
+            score,
+            {
+                "session_id": request.session_id,
+                "student_answer": answer_text,
+                "question_text": current_question.get("question", "")
+            },
+            request.token
+        )
     
     # Check if more questions
     next_idx = session["current_index"]

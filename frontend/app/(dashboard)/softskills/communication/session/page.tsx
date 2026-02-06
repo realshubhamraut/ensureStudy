@@ -18,16 +18,16 @@ import {
     FaceSmileIcon,
     ExclamationTriangleIcon
 } from '@heroicons/react/24/outline'
-import { useSpeechEngine, useSpeechRecognition } from '@/components/avatar/SpeechEngine'
+import { useSpeechRecognition } from '@/components/avatar/SpeechEngine'
 import { useSoftSkillsAnalysis, useFrameCapture } from '@/hooks/useSoftSkillsAnalysis'
 import { RealTimeScoreCard } from '@/components/softskills/RealTimeScoreCard'
 
-// Dynamic import for Avatar
-const AvatarViewer = dynamic(() => import('@/components/avatar/AvatarViewer'), {
+// Professional 3D Avatar with TalkingHead.js lip-sync (same as mock interview)
+const TalkingHeadAvatar = dynamic(() => import('@/components/avatar/TalkingHeadAvatar'), {
     ssr: false,
     loading: () => (
-        <div className="w-full h-full bg-gray-200 animate-pulse rounded-2xl flex items-center justify-center">
-            <span className="text-gray-400">Loading Avatar...</span>
+        <div className="w-full h-full bg-gradient-to-b from-slate-100 to-slate-200 animate-pulse rounded-2xl flex items-center justify-center">
+            <span className="text-gray-400">Loading 3D Avatar...</span>
         </div>
     )
 })
@@ -65,6 +65,8 @@ function CommunicationSessionContent() {
     const [timeElapsed, setTimeElapsed] = useState(0)
     const [permissionState, setPermissionState] = useState<PermissionState>('pending')
     const [permissionError, setPermissionError] = useState<string>('')
+    const [textToSpeak, setTextToSpeak] = useState<string>('')  // For TalkingHead AWS Polly TTS
+    const [isSpeaking, setIsSpeaking] = useState(false)
 
     // Generate unique session ID
     const sessionIdRef = useRef(`session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`)
@@ -98,10 +100,33 @@ function CommunicationSessionContent() {
     const timerRef = useRef<NodeJS.Timeout | null>(null)
     const scoreUpdateRef = useRef<NodeJS.Timeout | null>(null)
 
-    const { speak, stop: stopSpeaking, isSpeaking } = useSpeechEngine({
-        onSpeakStart: () => setSessionState('speaking'),
-        onSpeakEnd: () => setSessionState('listening')
-    })
+    // Speech function - sets text for TalkingHead avatar to speak with AWS Polly lip sync
+    const speak = useCallback((text: string) => {
+        console.log('[Communication] Triggering TalkingHead Polly speech:', text)
+        setTextToSpeak(text)
+        setIsSpeaking(true)
+        setSessionState('speaking')
+    }, [])
+
+    const stopSpeaking = useCallback(() => {
+        console.log('[Communication] Stopping speech')
+        setTextToSpeak('')
+        setIsSpeaking(false)
+    }, [])
+
+    // TalkingHead speech callbacks
+    const handleSpeechStart = useCallback(() => {
+        console.log('[Communication] Avatar started speaking')
+        setIsSpeaking(true)
+        setSessionState('speaking')
+    }, [])
+
+    const handleSpeechEnd = useCallback(() => {
+        console.log('[Communication] Avatar finished speaking')
+        setIsSpeaking(false)
+        setTextToSpeak('')
+        setSessionState('listening')
+    }, [])
 
     const {
         isListening,
@@ -438,11 +463,14 @@ function CommunicationSessionContent() {
                 <div className="grid lg:grid-cols-3 gap-8">
                     {/* Avatar Section */}
                     <div className="space-y-4">
-                        <div className="aspect-square max-h-[400px] rounded-2xl overflow-hidden shadow-2xl">
-                            <AvatarViewer
+                        <div className="aspect-square max-h-[400px] rounded-2xl overflow-hidden shadow-2xl bg-gradient-to-b from-slate-50 to-slate-100">
+                            <TalkingHeadAvatar
                                 avatarId={avatarId}
                                 isSpeaking={isSpeaking}
+                                textToSpeak={textToSpeak}
                                 onReady={() => setAvatarReady(true)}
+                                onSpeechStart={handleSpeechStart}
+                                onSpeechEnd={handleSpeechEnd}
                             />
                         </div>
 

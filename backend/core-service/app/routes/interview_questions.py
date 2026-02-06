@@ -78,6 +78,9 @@ def get_questions_for_topics():
             "questions_per_topic": 3,
             "session_id": "optional"
         }
+    
+    Note: Returns expected_answer and key_concepts for AI-service evaluation.
+    Frontend should NOT display expected_answer to students.
     """
     user_id = request.user_id
     data = request.get_json() or {}
@@ -99,7 +102,8 @@ def get_questions_for_topics():
         
         topics_info.append({
             'id': topic.id,
-            'name': topic.name
+            'name': topic.name,
+            'description': topic.description
         })
         
         # Get questions for this topic
@@ -119,8 +123,12 @@ def get_questions_for_topics():
         questions = query.order_by(DescriptiveQuestion.times_asked.asc()).limit(questions_per_topic).all()
         
         for q in questions:
-            q_dict = q.to_interview_dict()
-            q_dict['topic_name'] = topic.name
+            # Merge interview dict (for display) with evaluation dict (for AI)
+            q_dict = {
+                **q.to_interview_dict(),
+                **q.to_evaluation_dict(),  # Adds reference_answer and key_concepts
+                'topic_name': topic.name
+            }
             all_questions.append(q_dict)
     
     return jsonify({
@@ -313,4 +321,61 @@ def get_user_question_history():
         'success': True,
         'attempts': [a.to_dict() for a in attempts],
         'count': len(attempts)
+    })
+
+
+@interview_questions_bp.route('/topic/<topic_id>/update-score', methods=['PUT'])
+@require_auth
+def update_topic_score(topic_id):
+    """
+    Update topic mastery score after mock interview answer.
+    Works with both DB questions and dynamically generated ones.
+    
+    Body:
+        {
+            "score": 85.5,  # 0-100
+            "session_id": "...",  # Optional
+            "question_text": "...",  # Optional, for logging
+            "student_answer": "..."  # Optional, for logging
+        }
+    """
+    from app.models.curriculum import StudentTopicScore, ClassroomTopic
+    
+    user_id = request.user_id
+    data = request.get_json() or {}
+    
+    score = float(data.get('score', 0))  # 0-100
+    
+    # Verify topic exists
+    topic = ClassroomTopic.query.get(topic_id)
+    if not topic:
+        return jsonify({'success': False, 'error': 'Topic not found'}), 404
+    
+    # Get or create StudentTopicScore
+    topic_score = StudentTopicScore.query.filter_by(
+        user_id=user_id,
+        classroom_topic_id=topic_id
+    ).first()
+    
+    if not topic_score:
+        topic_score = StudentTopicScore(
+            user_id=user_id,
+            classroom_topic_id=topic_id
+        )
+        db.session.add(topic_score)
+    
+    # Update descriptive score (score is 0-100, max is 100)
+    topic_score.update_descriptive_score(score_awarded=score, max_score=100)
+    db.session.commit()
+    
+    return jsonify({
+        'success': True,
+        'topic_id': topic_id,
+        'topic_name': topic.name,
+        'topic_score': {
+            'mastery_percentage': round(topic_score.mastery_percentage, 1),
+            'status': topic_score.status,
+            'descriptive_attempts': topic_score.descriptive_attempts,
+            'descriptive_avg_score': round(topic_score.descriptive_avg_score, 1)
+        }
     })

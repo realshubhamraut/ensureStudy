@@ -382,18 +382,42 @@ function InterviewSessionContent() {
     // Submit answer using new API
     const submitAnswer = useCallback(async () => {
         console.log('[MockInterview] Submit answer called')
-        console.log('[MockInterview] Current transcript:', transcript)
+        console.log('[MockInterview] useWhisperFallback:', useWhisperFallback)
+        console.log('[MockInterview] whisperRecording:', whisperRecording)
+        console.log('[MockInterview] Current transcript state:', transcript)
         console.log('[MockInterview] Manual answer:', manualAnswer)
 
-        stopListening()
         setIsEvaluating(true)
         setSessionState('processing')
 
-        // Use transcript from speech or manual text input as fallback
-        const answer = transcript.trim() || manualAnswer.trim()
+        let answer = ''
+
+        // If using Whisper and currently recording, wait for transcription to complete
+        if (useWhisperFallback && whisperRecording) {
+            console.log('[MockInterview] Waiting for Whisper transcription...')
+            const whisperText = await whisperStop()  // This returns the transcript
+            answer = whisperText.trim()
+            console.log('[MockInterview] Whisper transcription completed:', answer)
+        } else if (useWhisperFallback && whisperTranscript) {
+            // Already transcribed (user stopped recording before submitting)
+            answer = whisperTranscript.trim()
+            console.log('[MockInterview] Using existing Whisper transcript:', answer)
+        } else {
+            // Web Speech API - transcript is already in state (real-time)
+            webSttStop()
+            answer = transcript.trim()
+            console.log('[MockInterview] Using Web Speech transcript:', answer)
+        }
+
+        // Fallback to manual input if speech transcript is empty
+        if (!answer && manualAnswer.trim()) {
+            answer = manualAnswer.trim()
+            console.log('[MockInterview] Using manual answer:', answer)
+        }
+
         setAnswers(prev => [...prev, answer])
         setManualAnswer('')  // Clear manual input
-        console.log('[MockInterview] Answer saved:', answer)
+        console.log('[MockInterview] Final answer to submit:', answer, `(${answer.length} chars)`)
 
         const responseTime = Math.round((Date.now() - answerStartTimeRef.current) / 1000)
 
@@ -475,7 +499,7 @@ function InterviewSessionContent() {
                 }
             }
         }
-    }, [transcript, currentQuestion, sessionId, currentQuestionIndex, questions, stopListening, resetTranscript, speak, stopCamera, AI_SERVICE_URL])
+    }, [transcript, whisperTranscript, whisperRecording, useWhisperFallback, whisperStop, webSttStop, manualAnswer, currentQuestion, sessionId, currentQuestionIndex, questions, resetTranscript, speak, stopCamera, AI_SERVICE_URL])
 
     // Format time
     const formatTime = (seconds: number) => {
