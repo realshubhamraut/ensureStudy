@@ -1,5 +1,10 @@
-# ensureStudy 🎓
-<strong>AI-First Learning Platform with Multi-Agent Tutoring & Real-Time Proctoring</strong>
+<div align="left">
+  <img src="docs/images/logo.png" alt="ensureStudy" width="240">
+  <br/><br/>
+  <strong>AI-First Learning Platform with Multi-Agent Tutoring & Real-Time Proctoring</strong>
+</div>
+
+---
 
 <div style="display: flex; gap: 10px; flex-wrap: wrap;">
 
