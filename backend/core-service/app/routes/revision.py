@@ -96,6 +96,114 @@ def get_review_status(next_review_date: date, today: date) -> str:
 
 
 # ============================================================================
+# Reusable: Get today's revision topics (used by assessment generator)
+# ============================================================================
+
+def get_todays_revision_topics(user_id: str, target_date: date, max_topics: int = 5) -> list:
+    """
+    Get topics that are due for revision on a specific date.
+    Uses the SM-2 spaced repetition algorithm.
+    
+    Returns a list of dicts with:
+        topic_id, topic_name, subject_name, chapter_name, mastery_percentage, reason
+    
+    Only includes topics with REAL activity (skips new/untouched topics).
+    """
+    # Get enrolled classrooms
+    enrollments = StudentClassroom.query.filter_by(
+        student_id=user_id, is_active=True
+    ).all()
+    classroom_ids = [e.classroom_id for e in enrollments]
+    
+    if not classroom_ids:
+        return []
+    
+    # Get all classroom topics
+    topics = ClassroomTopic.query.filter(
+        ClassroomTopic.classroom_id.in_(classroom_ids),
+        ClassroomTopic.is_active == True
+    ).all()
+    
+    if not topics:
+        return []
+    
+    # Get chapters and classrooms for context
+    chapters_query = Chapter.query.filter(
+        Chapter.classroom_id.in_(classroom_ids),
+        Chapter.is_active == True
+    ).all()
+    chapters_map = {ch.id: ch for ch in chapters_query}
+    
+    classrooms_query = Classroom.query.filter(
+        Classroom.id.in_(classroom_ids)
+    ).all()
+    classrooms_map = {c.id: c for c in classrooms_query}
+    
+    # Get student scores
+    scores_query = StudentTopicScore.query.filter(
+        StudentTopicScore.user_id == user_id,
+        StudentTopicScore.classroom_topic_id.in_([t.id for t in topics])
+    ).all()
+    scores_map = {s.classroom_topic_id: s for s in scores_query}
+    
+    # Find topics due for revision using SM-2 algorithm
+    revision_topics = []
+    
+    for topic in topics:
+        score = scores_map.get(topic.id)
+        chapter = chapters_map.get(topic.chapter_id)
+        classroom = classrooms_map.get(topic.classroom_id)
+        
+        # ONLY include topics that have been actually attempted
+        if not score or not score.last_activity_at:
+            continue
+        
+        review_count = score.mcq_attempts + score.descriptive_attempts
+        if review_count == 0:
+            continue
+        
+        mastery = score.mastery_percentage
+        if mastery <= 0:
+            continue
+        
+        # Calculate next review date using SM-2
+        interval_days = calculate_review_interval(mastery, review_count)
+        last_activity = score.last_activity_at.date()
+        next_review = last_activity + timedelta(days=interval_days)
+        
+        # Only include if due or overdue on target_date
+        if next_review > target_date:
+            continue
+        
+        # Calculate priority
+        days_overdue = max(0, (target_date - next_review).days)
+        days_since_activity = (target_date - last_activity).days
+        priority = calculate_priority_score(mastery, days_overdue, days_since_activity)
+        
+        # Determine reason
+        if days_overdue > 3:
+            reason = "overdue"
+        elif mastery < 50:
+            reason = "low_mastery"
+        else:
+            reason = "scheduled_review"
+        
+        revision_topics.append({
+            "topic_id": topic.id,
+            "topic_name": topic.name,
+            "subject_name": classroom.subject if classroom else "General",
+            "chapter_name": chapter.name if chapter else "",
+            "mastery_percentage": round(mastery, 1),
+            "reason": reason,
+            "priority": priority
+        })
+    
+    # Sort by priority (highest first) and limit
+    revision_topics.sort(key=lambda x: x["priority"], reverse=True)
+    return revision_topics[:max_topics]
+
+
+# ============================================================================
 # API Routes
 # ============================================================================
 

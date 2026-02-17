@@ -18,7 +18,7 @@ import {
     FaceSmileIcon,
     ExclamationTriangleIcon
 } from '@heroicons/react/24/outline'
-import { useSpeechRecognition } from '@/components/avatar/SpeechEngine'
+import { useSpeechRecognition, useLocalWhisperSTT } from '@/components/avatar/SpeechEngine'
 import { useSoftSkillsAnalysis, useFrameCapture } from '@/hooks/useSoftSkillsAnalysis'
 import { RealTimeScoreCard } from '@/components/softskills/RealTimeScoreCard'
 
@@ -77,9 +77,11 @@ function CommunicationSessionContent() {
         isAnalyzing,
         visualMetrics,
         fluencyMetrics,
+        audioAnalysis,
         framesProcessed,
         sendFrame,
         sendTranscript,
+        sendAudioChunk,
         startAnalysis,
         stopAnalysis,
         requestSummary,
@@ -95,10 +97,18 @@ function CommunicationSessionContent() {
         grammar: 0
     })
 
+    // Live filler detection state
+    const [liveFillerWarning, setLiveFillerWarning] = useState(false)
+
     const videoRef = useRef<HTMLVideoElement>(null)
     const mediaStreamRef = useRef<MediaStream | null>(null)
     const timerRef = useRef<NodeJS.Timeout | null>(null)
     const scoreUpdateRef = useRef<NodeJS.Timeout | null>(null)
+
+    // Audio recording for fluency analysis
+    const audioRecorderRef = useRef<MediaRecorder | null>(null)
+    const audioChunksRef = useRef<Blob[]>([])
+    const audioStreamRef = useRef<MediaStream | null>(null)
 
     // Speech function - sets text for TalkingHead avatar to speak with AWS Polly lip sync
     const speak = useCallback((text: string) => {
@@ -128,14 +138,93 @@ function CommunicationSessionContent() {
         setSessionState('listening')
     }, [])
 
+    // Web Speech API (primary - needs internet)
     const {
-        isListening,
-        transcript,
-        startListening,
-        stopListening,
-        resetTranscript,
-        isSupported: sttSupported
+        isListening: webSttListening,
+        transcript: webSttTranscript,
+        startListening: webSttStart,
+        stopListening: webSttStop,
+        resetTranscript: webSttReset,
+        isSupported: webSttSupported,
+        error: webSttError
     } = useSpeechRecognition()
+
+    // Local Whisper STT (fallback - offline)
+    const {
+        isRecording: whisperRecording,
+        isTranscribing: whisperTranscribing,
+        transcript: whisperTranscript,
+        startRecording: whisperStart,
+        stopRecording: whisperStop,
+        resetTranscript: whisperReset,
+        isAvailable: whisperAvailable,
+        error: whisperError
+    } = useLocalWhisperSTT()
+
+    // Determine which STT to use based on network errors
+    const hasNetworkError = webSttError === 'network'
+    const useWhisperFallback = hasNetworkError && whisperAvailable
+
+    // Combined STT state
+    const isListening = useWhisperFallback ? whisperRecording : webSttListening
+    const transcript = useWhisperFallback ? whisperTranscript : webSttTranscript
+    const sttSupported = webSttSupported || whisperAvailable
+
+    // Combined controls with audio recording
+    const startListening = useCallback(async () => {
+        // Start audio recording for fluency analysis
+        try {
+            if (!audioStreamRef.current) {
+                audioStreamRef.current = await navigator.mediaDevices.getUserMedia({ audio: true })
+            }
+            audioChunksRef.current = []
+            const recorder = new MediaRecorder(audioStreamRef.current, { mimeType: 'audio/webm' })
+            recorder.ondataavailable = (e) => {
+                if (e.data.size > 0) {
+                    audioChunksRef.current.push(e.data)
+                }
+            }
+            recorder.start()
+            audioRecorderRef.current = recorder
+            console.log('[Communication] Started audio recording')
+        } catch (err) {
+            console.warn('[Communication] Audio recording not available:', err)
+        }
+
+        if (useWhisperFallback) {
+            console.log('[Communication] Using local Whisper STT (network error fallback)')
+            whisperStart()
+        } else {
+            console.log('[Communication] Using Web Speech API')
+            webSttStart()
+        }
+    }, [useWhisperFallback, whisperStart, webSttStart])
+
+    const stopListening = useCallback(() => {
+        // Stop audio recording
+        if (audioRecorderRef.current && audioRecorderRef.current.state === 'recording') {
+            audioRecorderRef.current.stop()
+            console.log('[Communication] Stopped audio recording')
+        }
+
+        if (useWhisperFallback) {
+            whisperStop()
+        } else {
+            webSttStop()
+        }
+    }, [useWhisperFallback, whisperStop, webSttStop])
+
+    const getRecordedAudioBlob = useCallback(() => {
+        if (audioChunksRef.current.length > 0) {
+            return new Blob(audioChunksRef.current, { type: 'audio/webm' })
+        }
+        return null
+    }, [])
+
+    const resetTranscript = useCallback(() => {
+        webSttReset()
+        whisperReset()
+    }, [webSttReset, whisperReset])
 
     const currentPrompt = COMMUNICATION_PROMPTS[currentPromptIndex]
 
@@ -184,6 +273,16 @@ function CommunicationSessionContent() {
             }))
         }
     }, [fluencyMetrics])
+
+    // Real-time filler detection from audio streaming
+    useEffect(() => {
+        if (audioAnalysis && audioAnalysis.filler_likelihood > 0.5) {
+            setLiveFillerWarning(true)
+            // Clear warning after 1 second
+            const timeout = setTimeout(() => setLiveFillerWarning(false), 1000)
+            return () => clearTimeout(timeout)
+        }
+    }, [audioAnalysis])
 
     // Frame capture for real-time analysis
     useFrameCapture(videoRef, sendFrame, isAnalyzing && isListening, 5)
@@ -260,19 +359,80 @@ function CommunicationSessionContent() {
         const answer = transcript.trim()
         setAnswers(prev => [...prev, answer])
 
-        // Send transcript for fluency analysis
-        if (answer && timeElapsed > 0) {
-            sendTranscript(answer, timeElapsed)
+        // Get recorded audio blob
+        const audioBlob = getRecordedAudioBlob()
+
+        // Parallel: Call both LLM text analysis and audio analysis
+        const evaluations = []
+
+        // 1. LLM text-based fluency evaluation
+        if (answer && answer.length > 10) {
+            evaluations.push(
+                fetch(`${process.env.NEXT_PUBLIC_AI_API_URL || 'https://localhost:8001'}/softskills/evaluate-fluency`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        transcript: answer,
+                        duration_seconds: timeElapsed,
+                        context: 'communication practice'
+                    })
+                }).then(res => res.ok ? res.json() : null).catch(() => null)
+            )
         }
 
-        // Simple grammar score (can be enhanced with backend grammar analysis)
-        const grammarScore = Math.min(100, 70 + Math.random() * 20)
-        setRealtimeScores(prev => ({
-            ...prev,
-            grammar: Math.round((prev.grammar * currentPromptIndex + grammarScore) / (currentPromptIndex + 1))
-        }))
+        // 2. Audio-based fluency analysis (if audio available)
+        if (audioBlob && audioBlob.size > 1000) {
+            const formData = new FormData()
+            formData.append('audio', audioBlob, 'recording.webm')
+            formData.append('transcript', answer)
+
+            evaluations.push(
+                fetch(`${process.env.NEXT_PUBLIC_AI_API_URL || 'https://localhost:8001'}/softskills/analyze-audio`, {
+                    method: 'POST',
+                    body: formData
+                }).then(res => res.ok ? res.json() : null).catch(() => null)
+            )
+        }
+
+        // Wait for evaluations
+        try {
+            const results = await Promise.all(evaluations)
+            const [textResult, audioResult] = results
+
+            console.log('[Communication] Evaluation results:', { textResult, audioResult })
+
+            // Combine scores (prefer audio if available, fall back to text)
+            if (audioResult?.score) {
+                setRealtimeScores(prev => ({
+                    ...prev,
+                    fluency: Math.round((prev.fluency * currentPromptIndex + audioResult.score) / (currentPromptIndex + 1)),
+                    grammar: Math.round((prev.grammar * currentPromptIndex + audioResult.clarity_score) / (currentPromptIndex + 1))
+                }))
+            } else if (textResult?.score) {
+                setRealtimeScores(prev => ({
+                    ...prev,
+                    fluency: Math.round((prev.fluency * currentPromptIndex + textResult.score) / (currentPromptIndex + 1)),
+                    grammar: Math.round((prev.grammar * currentPromptIndex + textResult.coherence_score) / (currentPromptIndex + 1))
+                }))
+            } else {
+                // Fallback to basic calculation
+                const basicScore = Math.min(100, 60 + (answer.split(' ').length / 2))
+                setRealtimeScores(prev => ({
+                    ...prev,
+                    fluency: Math.round((prev.fluency * currentPromptIndex + basicScore) / (currentPromptIndex + 1))
+                }))
+            }
+        } catch (error) {
+            console.error('[Communication] Fluency evaluation error:', error)
+            const basicScore = Math.min(100, 60 + (answer.split(' ').length / 2))
+            setRealtimeScores(prev => ({
+                ...prev,
+                fluency: Math.round((prev.fluency * currentPromptIndex + basicScore) / (currentPromptIndex + 1))
+            }))
+        }
 
         resetTranscript()
+        audioChunksRef.current = []
 
         if (currentPromptIndex < COMMUNICATION_PROMPTS.length - 1) {
             setCurrentPromptIndex(prev => prev + 1)
@@ -288,7 +448,7 @@ function CommunicationSessionContent() {
                 clearInterval(timerRef.current)
             }
         }
-    }, [transcript, currentPromptIndex, stopListening, resetTranscript, speak, stopCamera, sendTranscript, timeElapsed, stopAnalysis, requestSummary])
+    }, [transcript, currentPromptIndex, stopListening, resetTranscript, speak, stopCamera, timeElapsed, stopAnalysis, requestSummary, getRecordedAudioBlob])
 
     const formatTime = (seconds: number) => {
         const mins = Math.floor(seconds / 60)
@@ -505,6 +665,14 @@ function CommunicationSessionContent() {
                                     <span className="text-xs font-medium">Recording</span>
                                 </div>
                             )}
+
+                            {/* Live filler word warning */}
+                            {liveFillerWarning && isListening && (
+                                <div className="absolute top-4 right-4 flex items-center gap-2 bg-yellow-500 px-3 py-1 rounded-full animate-pulse">
+                                    <ExclamationTriangleIcon className="w-4 h-4" />
+                                    <span className="text-xs font-medium">Filler detected!</span>
+                                </div>
+                            )}
                         </div>
 
                         {/* Prompt */}
@@ -605,13 +773,26 @@ function CommunicationSessionContent() {
                             )}
 
                             {sessionState === 'listening' && !isListening && (
-                                <button
-                                    onClick={startListening}
-                                    className="w-full py-4 rounded-xl bg-gradient-to-r from-green-500 to-emerald-600 font-semibold flex items-center justify-center gap-2 hover:shadow-lg transition-all"
-                                >
-                                    <MicrophoneIcon className="w-5 h-5" />
-                                    Start Speaking
-                                </button>
+                                <div className="flex flex-col gap-2">
+                                    <button
+                                        onClick={startListening}
+                                        className="w-full py-4 rounded-xl bg-gradient-to-r from-green-500 to-emerald-600 font-semibold flex items-center justify-center gap-2 hover:shadow-lg transition-all"
+                                    >
+                                        <MicrophoneIcon className="w-5 h-5" />
+                                        {transcript.trim() ? 'Continue Speaking' : 'Start Speaking'}
+                                    </button>
+
+                                    {/* Submit button when user has a transcript */}
+                                    {transcript.trim() && (
+                                        <button
+                                            onClick={submitAnswer}
+                                            className="w-full py-4 rounded-xl bg-gradient-to-r from-purple-500 to-pink-600 font-semibold flex items-center justify-center gap-2 hover:shadow-lg transition-all"
+                                        >
+                                            <CheckCircleIcon className="w-5 h-5" />
+                                            Submit Answer
+                                        </button>
+                                    )}
+                                </div>
                             )}
 
                             {isListening && (

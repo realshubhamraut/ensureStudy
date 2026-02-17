@@ -125,10 +125,10 @@ export default function TopicsSidebar({ onDragStart, selectedClassroomIds = [] }
                 }))
                 setClassrooms(classroomsWithMastery)
                 // Auto-expand all classrooms and first chapter of each
-                const classroomIds = new Set(classroomsWithMastery.map((c: ClassroomData) => c.classroom_id))
+                const classroomIds = new Set<string>(classroomsWithMastery.map((c: ClassroomData) => c.classroom_id))
                 setExpandedClassrooms(classroomIds)
-                const firstChapterIds = new Set(
-                    classroomsWithMastery.map((c: ClassroomData) => c.chapters[0]?.id).filter(Boolean)
+                const firstChapterIds = new Set<string>(
+                    classroomsWithMastery.map((c: ClassroomData) => c.chapters[0]?.id).filter(Boolean) as string[]
                 )
                 setExpandedChapters(firstChapterIds)
             }
@@ -312,12 +312,12 @@ export default function TopicsSidebar({ onDragStart, selectedClassroomIds = [] }
                                                                             <DifficultyBadge difficulty={topic.difficulty} />
                                                                             {/* Mastery Badge */}
                                                                             <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${topic.mastery_level === undefined || topic.mastery_level === 0
-                                                                                    ? 'bg-gray-100 text-gray-500'
-                                                                                    : topic.mastery_level >= 70
-                                                                                        ? 'bg-green-100 text-green-700'
-                                                                                        : topic.mastery_level >= 50
-                                                                                            ? 'bg-yellow-100 text-yellow-700'
-                                                                                            : 'bg-red-100 text-red-700'
+                                                                                ? 'bg-gray-100 text-gray-500'
+                                                                                : topic.mastery_level >= 70
+                                                                                    ? 'bg-green-100 text-green-700'
+                                                                                    : topic.mastery_level >= 50
+                                                                                        ? 'bg-yellow-100 text-yellow-700'
+                                                                                        : 'bg-red-100 text-red-700'
                                                                                 }`}>
                                                                                 {topic.mastery_level === undefined || topic.mastery_level === 0
                                                                                     ? 'New'

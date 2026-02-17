@@ -451,6 +451,150 @@ async def evaluate_with_video(
     )
 
 
+# ============================================
+# LLM-Based Fluency Evaluation
+# ============================================
+
+class FluencyEvaluationRequest(BaseModel):
+    """Request for LLM-based fluency evaluation."""
+    transcript: str = Field(..., description="Speech transcript to analyze")
+    duration_seconds: float = Field(default=0.0, description="Speaking duration in seconds")
+    context: str = Field(default="communication practice", description="Context of the speech")
+
+
+class FluencyEvaluationResponse(BaseModel):
+    """Response from LLM fluency evaluation."""
+    score: float
+    wpm_score: float
+    filler_score: float
+    coherence_score: float
+    feedback: str
+    filler_words_found: List[str]
+    suggestions: List[str]
+
+
+@router.post("/evaluate-fluency", response_model=FluencyEvaluationResponse)
+async def evaluate_fluency_llm(request: FluencyEvaluationRequest):
+    """
+    Evaluate speech fluency using LLM.
+    
+    Uses Groq LLM to analyze:
+    - Speaking pace (WPM estimation)
+    - Filler word usage
+    - Speech coherence and flow
+    
+    Returns a fluency score (0-100) with detailed feedback.
+    """
+    if not request.transcript or len(request.transcript.strip()) < 10:
+        raise HTTPException(status_code=400, detail="Transcript too short for evaluation")
+    
+    try:
+        from ...services.fluency_evaluator import get_fluency_evaluator
+        
+        evaluator = get_fluency_evaluator()
+        result = await evaluator.evaluate_fluency(
+            transcript=request.transcript,
+            duration_seconds=request.duration_seconds,
+            context=request.context
+        )
+        
+        return FluencyEvaluationResponse(
+            score=result.score,
+            wpm_score=result.wpm_score,
+            filler_score=result.filler_score,
+            coherence_score=result.coherence_score,
+            feedback=result.feedback,
+            filler_words_found=result.filler_words_found,
+            suggestions=result.suggestions
+        )
+        
+    except Exception as e:
+        print(f"[SoftSkills] LLM fluency evaluation error: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Fluency evaluation failed: {str(e)}")
+
+
+class AudioFluencyResponse(BaseModel):
+    """Response from audio-based fluency evaluation."""
+    score: float
+    wpm_score: float
+    filler_score: float
+    pause_score: float
+    clarity_score: float
+    filler_count: int
+    filler_words: List[str]
+    estimated_wpm: float
+    pause_ratio: float
+    duration_seconds: float
+    feedback: str
+    suggestions: List[str]
+
+
+@router.post("/analyze-audio", response_model=AudioFluencyResponse)
+async def analyze_audio(
+    audio: UploadFile = File(...),
+    transcript: str = Form(default="")
+):
+    """
+    Analyze audio recording for speech fluency.
+    
+    Features analyzed:
+    - Speaking pace (WPM)
+    - Filler word detection
+    - Pause ratio
+    - Audio clarity
+    
+    Args:
+        audio: Audio file (webm, wav, mp3)
+        transcript: Optional transcript (will transcribe if not provided)
+    
+    Returns:
+        AudioFluencyResponse with detailed scores and feedback
+    """
+    try:
+        from ...services.audio_fluency_analyzer import get_audio_fluency_analyzer
+        
+        # Read audio data
+        audio_data = await audio.read()
+        
+        if len(audio_data) < 1000:
+            raise HTTPException(status_code=400, detail="Audio file too small")
+        
+        content_type = audio.content_type or "audio/webm"
+        
+        # Analyze
+        analyzer = get_audio_fluency_analyzer()
+        result = await analyzer.analyze_audio(
+            audio_data=audio_data,
+            transcript=transcript,
+            content_type=content_type
+        )
+        
+        return AudioFluencyResponse(
+            score=result.score,
+            wpm_score=result.wpm_score,
+            filler_score=result.filler_score,
+            pause_score=result.pause_score,
+            clarity_score=result.clarity_score,
+            filler_count=result.filler_count,
+            filler_words=result.filler_words,
+            estimated_wpm=result.estimated_wpm,
+            pause_ratio=result.pause_ratio,
+            duration_seconds=result.duration_seconds,
+            feedback=result.feedback,
+            suggestions=result.suggestions
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[SoftSkills] Audio fluency analysis error: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Audio analysis failed: {str(e)}")
+
+
 @router.post("/analyze-frame", response_model=FrameAnalysisResult)
 async def analyze_frame(request: FrameAnalysisRequest):
     """
@@ -572,20 +716,21 @@ async def websocket_realtime_analysis(websocket: WebSocket, session_id: str):
                     try:
                         result = pipeline.process_frame_base64(frame_base64)
                         
+                        # Convert numpy float32 to Python float for JSON serialization
                         response = {
                             "type": "analysis",
-                            "timestamp": result.timestamp_ms,
-                            "face_detected": result.face_detected,
-                            "gaze_direction": result.gaze_direction,
-                            "gaze_score": round(result.gaze_score, 1),
-                            "is_looking_at_camera": result.is_looking_at_camera,
-                            "hands_visible": result.hands_visible,
-                            "num_hands": result.num_hands,
-                            "gesture_score": round(result.gesture_score, 1),
-                            "body_detected": result.body_detected,
-                            "posture_score": round(result.posture_score, 1),
-                            "is_upright": result.is_upright,
-                            "shoulders_level": result.shoulders_level
+                            "timestamp": int(result.timestamp_ms),
+                            "face_detected": bool(result.face_detected),
+                            "gaze_direction": str(result.gaze_direction),
+                            "gaze_score": float(round(result.gaze_score, 1)),
+                            "is_looking_at_camera": bool(result.is_looking_at_camera),
+                            "hands_visible": bool(result.hands_visible),
+                            "num_hands": int(result.num_hands),
+                            "gesture_score": float(round(result.gesture_score, 1)),
+                            "body_detected": bool(result.body_detected),
+                            "posture_score": float(round(result.posture_score, 1)),
+                            "is_upright": bool(result.is_upright),
+                            "shoulders_level": bool(result.shoulders_level)
                         }
                         print(f"[WebSocket] Sending analysis: gaze={result.gaze_score:.1f}, posture={result.posture_score:.1f}")
                         
@@ -613,6 +758,63 @@ async def websocket_realtime_analysis(websocket: WebSocket, session_id: str):
                         "filler_count": fluency_result.filler_word_count,
                         "fillers": fluency_result.filler_words_used
                     })
+            
+            elif message.get("type") == "audio_chunk":
+                # Real-time audio chunk analysis for live feedback
+                audio_base64 = message.get("data", "")
+                
+                if audio_base64:
+                    try:
+                        import io
+                        import tempfile
+                        
+                        # Decode base64 audio
+                        audio_bytes = base64.b64decode(audio_base64)
+                        
+                        # Quick analysis using librosa
+                        with tempfile.NamedTemporaryFile(suffix='.webm', delete=False) as f:
+                            f.write(audio_bytes)
+                            temp_path = f.name
+                        
+                        try:
+                            import librosa
+                            y, sr = librosa.load(temp_path, sr=16000)
+                            
+                            # Quick filler detection based on audio characteristics
+                            rms = librosa.feature.rms(y=y)[0]
+                            zcr = librosa.feature.zero_crossing_rate(y)[0]
+                            
+                            # Detect potential fillers (low energy variations, specific ZCR patterns)
+                            avg_rms = float(np.mean(rms))
+                            rms_var = float(np.std(rms))
+                            avg_zcr = float(np.mean(zcr))
+                            
+                            # Simplified filler likelihood based on audio patterns
+                            # Fillers often have: low RMS variance, moderate ZCR
+                            filler_likelihood = 0.0
+                            if rms_var < 0.02 and 0.02 < avg_zcr < 0.08:
+                                filler_likelihood = 0.7
+                            elif rms_var < 0.03:
+                                filler_likelihood = 0.4
+                            
+                            # Calculate real-time clarity
+                            spectral_centroid = librosa.feature.spectral_centroid(y=y, sr=sr)
+                            clarity = min(100, float(50 + np.mean(spectral_centroid) / 100))
+                            
+                            await websocket.send_json({
+                                "type": "audio_analysis",
+                                "filler_likelihood": round(filler_likelihood, 2),
+                                "clarity": round(clarity, 1),
+                                "energy": round(avg_rms * 1000, 2),
+                                "timestamp": int(asyncio.get_event_loop().time() * 1000)
+                            })
+                        finally:
+                            import os
+                            os.unlink(temp_path)
+                            
+                    except Exception as e:
+                        print(f"[WebSocket] Audio chunk error: {e}")
+
             
             elif message.get("type") == "get_summary":
                 # Get aggregated metrics

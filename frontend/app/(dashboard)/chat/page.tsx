@@ -215,7 +215,7 @@ export default function AITutorPage() {
     // Source category counts - memoized to prevent recalculation on every render
     const sourceCounts = useMemo(() => {
         const documents = sources.filter(s => ['pdf', 'note', 'docx'].includes(s.type)).length
-        const presentations = sources.filter(s => s.type === 'pptx' || s.type === 'ppt').length
+        const presentations = sources.filter(s => s.type === 'pptx' || (s.type as any) === 'ppt').length
         const videos = sources.filter(s => s.type === 'video').length
         const websites = sources.filter(s => s.type === 'article' || s.type === 'webpage').length
         const flowcharts = sources.filter(s => s.type === 'flowchart' as any).length
@@ -227,7 +227,7 @@ export default function AITutorPage() {
     const filteredSources = useMemo(() => {
         if (sourceFilter === 'all') return sources
         if (sourceFilter === 'documents') return sources.filter(s => ['pdf', 'note', 'docx'].includes(s.type))
-        if (sourceFilter === 'presentations') return sources.filter(s => s.type === 'pptx' || s.type === 'ppt')
+        if (sourceFilter === 'presentations') return sources.filter(s => s.type === 'pptx' || (s.type as any) === 'ppt')
         if (sourceFilter === 'videos') return sources.filter(s => s.type === 'video')
         if (sourceFilter === 'websites') return sources.filter(s => s.type === 'article' || s.type === 'webpage')
         if (sourceFilter === 'flowcharts') return sources.filter(s => s.type === 'flowchart' as any)
@@ -2340,7 +2340,7 @@ export default function AITutorPage() {
 
                             {/* Section 1.5: Presentations (PPTX only - dedicated section) */}
                             {(() => {
-                                const presentations = filteredSources.filter(s => s.type === 'pptx' || s.type === 'ppt')
+                                const presentations = filteredSources.filter(s => s.type === 'pptx' || (s.type as any) === 'ppt')
                                 if (presentations.length === 0) return null
                                 return (
                                     <div className="border-b border-gray-100">

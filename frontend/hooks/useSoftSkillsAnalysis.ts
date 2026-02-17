@@ -28,6 +28,13 @@ interface FluencyMetrics {
     fillers: string[];
 }
 
+interface AudioAnalysis {
+    filler_likelihood: number;
+    clarity: number;
+    energy: number;
+    timestamp: number;
+}
+
 interface SessionSummary {
     frames_analyzed: number;
     eye_contact_score: number;
@@ -43,6 +50,7 @@ interface SoftSkillsAnalysisState {
     isAnalyzing: boolean;
     visualMetrics: VisualMetrics | null;
     fluencyMetrics: FluencyMetrics | null;
+    audioAnalysis: AudioAnalysis | null;
     sessionSummary: SessionSummary | null;
     error: string | null;
     framesProcessed: number;
@@ -58,6 +66,7 @@ export function useSoftSkillsAnalysis(sessionId: string) {
         isAnalyzing: false,
         visualMetrics: null,
         fluencyMetrics: null,
+        audioAnalysis: null,
         sessionSummary: null,
         error: null,
         framesProcessed: 0,
@@ -122,6 +131,17 @@ export function useSoftSkillsAnalysis(sessionId: string) {
                             is_upright_ratio: data.is_upright_ratio,
                         },
                     }));
+                } else if (data.type === 'audio_analysis') {
+                    // Real-time audio analysis for live filler detection
+                    setState(prev => ({
+                        ...prev,
+                        audioAnalysis: {
+                            filler_likelihood: data.filler_likelihood,
+                            clarity: data.clarity,
+                            energy: data.energy,
+                            timestamp: data.timestamp,
+                        },
+                    }));
                 } else if (data.type === 'session_complete') {
                     setState(prev => ({ ...prev, isAnalyzing: false }));
                 }
@@ -171,6 +191,16 @@ export function useSoftSkillsAnalysis(sessionId: string) {
         }
     }, []);
 
+    // Send audio chunk for real-time analysis
+    const sendAudioChunk = useCallback((audioBase64: string) => {
+        if (wsRef.current?.readyState === WebSocket.OPEN) {
+            wsRef.current.send(JSON.stringify({
+                type: 'audio_chunk',
+                data: audioBase64,
+            }));
+        }
+    }, []);
+
     // Request session summary
     const requestSummary = useCallback(() => {
         if (wsRef.current?.readyState === WebSocket.OPEN) {
@@ -214,6 +244,7 @@ export function useSoftSkillsAnalysis(sessionId: string) {
         disconnect,
         sendFrame,
         sendTranscript,
+        sendAudioChunk,
         requestSummary,
         endSession,
         startAnalysis,

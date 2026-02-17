@@ -961,7 +961,7 @@ Section C - Long Answer
                             ) : (
                                 <div className="space-y-3">
                                     {pastExamSessions.map((session) => {
-                                        const IconComponent = EXAM_TYPE_ICONS[session.exam_type]
+                                        const IconComponent = EXAM_TYPE_ICONS[session.exam_type as ExamType]
                                         const examTypeLabel = EXAM_TYPES.find(t => t.value === session.exam_type)?.label || session.exam_type
                                         const totalStudents = students.length
                                         const evaluatedCount = session.evaluation_count || 0
@@ -1168,7 +1168,7 @@ Section C - Long Answer
                                     <div className="flex items-center gap-3">
                                         <div className="w-12 h-12 bg-gradient-to-br from-purple-100 to-blue-100 rounded-xl flex items-center justify-center">
                                             {(() => {
-                                                const IconComponent = EXAM_TYPE_ICONS[selectedExamSession.exam_type]
+                                                const IconComponent = EXAM_TYPE_ICONS[selectedExamSession.exam_type as ExamType]
                                                 return <IconComponent className="w-6 h-6 text-purple-600" />
                                             })()}
                                         </div>
@@ -1412,7 +1412,7 @@ Section C - Long Answer
                         <div>
                             <div className="flex items-center gap-2">
                                 {(() => {
-                                    const IconComponent = EXAM_TYPE_ICONS[currentExamSession.exam_type]
+                                    const IconComponent = EXAM_TYPE_ICONS[currentExamSession.exam_type as ExamType]
                                     return <IconComponent className="w-6 h-6" />
                                 })()}
                                 <h1 className="text-xl font-bold">{currentExamSession.name}</h1>
@@ -1489,7 +1489,7 @@ Section C - Long Answer
                         <div>
                             <div className="flex items-center gap-2">
                                 {(() => {
-                                    const IconComponent = EXAM_TYPE_ICONS[currentExamSession.exam_type]
+                                    const IconComponent = EXAM_TYPE_ICONS[currentExamSession.exam_type as ExamType]
                                     return <IconComponent className="w-6 h-6" />
                                 })()}
                                 <h1 className="text-xl font-bold">{currentExamSession.name}</h1>

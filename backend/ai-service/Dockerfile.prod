@@ -6,9 +6,12 @@ FROM python:3.11-slim as builder
 
 WORKDIR /app
 
-# Install build dependencies
+# Install build dependencies (including cmake/boost for dlib)
 RUN apt-get update && apt-get install -y \
     build-essential \
+    cmake \
+    libboost-python-dev \
+    libboost-system-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy and install requirements

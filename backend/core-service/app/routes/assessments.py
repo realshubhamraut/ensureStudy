@@ -864,96 +864,20 @@ def generate_daily_revision():
                 "already_exists": True
             }), 200
     
-    # Get revision topics for this date
-    from app.routes.revision import revision_bp
-    from app.models.curriculum import StudentTopicScore, ClassroomTopic, Chapter
-    from app.models.classroom import Classroom, StudentClassroom
+    # Get revision topics from the actual revision calendar (SM-2 algorithm)
+    from app.routes.revision import get_todays_revision_topics
     
     print(f"[Revision Assessment] Generating for user {request.user_id}, date {target_date}")
     
-    # Fetch enrolled classrooms
-    enrollments = StudentClassroom.query.filter_by(
-        student_id=request.user_id,
-        is_active=True
-    ).all()
-    print(f"[Revision Assessment] Found {len(enrollments)} enrollments")
-    
-    classroom_ids = [e.classroom_id for e in enrollments]
-    topics = ClassroomTopic.query.filter(ClassroomTopic.classroom_id.in_(classroom_ids)).all()
-    print(f"[Revision Assessment] Found {len(topics)} topics in enrolled classrooms")
-    
-    # Get scores and filter for revision
-    scores_query = StudentTopicScore.query.filter(
-        StudentTopicScore.user_id == request.user_id,
-        StudentTopicScore.classroom_topic_id.in_([t.id for t in topics])
-    ).all()
-    scores_map = {s.classroom_topic_id: s for s in scores_query}
-    
-    # Find topics scheduled for revision based on mastery and interval
-    from datetime import timedelta
-    revision_topics = []
-    today = target_date
-    
-    for topic in topics:
-        score = scores_map.get(topic.id)
-        classroom = Classroom.query.get(topic.classroom_id)
-        chapter = Chapter.query.get(topic.chapter_id) if topic.chapter_id else None
-        
-        # Case 1: Topic has never been practiced - include for initial review
-        if not score or not score.last_activity_at:
-            revision_topics.append({
-                "topic_id": topic.id,
-                "topic_name": topic.name,
-                "subject_name": classroom.subject if classroom else "General",
-                "chapter_name": chapter.name if chapter else "",
-                "mastery_percentage": 0,
-                "reason": "new_topic"
-            })
-            continue
-        
-        mastery = score.mastery_percentage
-        review_count = score.mcq_attempts + score.descriptive_attempts
-        
-        # Case 2: Low mastery topics need frequent review
-        if mastery < 50 and review_count > 0:
-            revision_topics.append({
-                "topic_id": topic.id,
-                "topic_name": topic.name,
-                "subject_name": classroom.subject if classroom else "General",
-                "chapter_name": chapter.name if chapter else "",
-                "mastery_percentage": mastery,
-                "reason": "low_mastery"
-            })
-            continue
-        
-        # Case 3: Check spaced repetition interval for other topics
-        if mastery >= 90:
-            interval = 7
-        elif mastery >= 70:
-            interval = 3
-        elif mastery >= 50:
-            interval = 2
-        else:
-            interval = 1
-        
-        last_activity = score.last_activity_at.date()
-        next_review = last_activity + timedelta(days=interval)
-        
-        if next_review <= today:
-            revision_topics.append({
-                "topic_id": topic.id,
-                "topic_name": topic.name,
-                "subject_name": classroom.subject if classroom else "General",
-                "chapter_name": chapter.name if chapter else "",
-                "mastery_percentage": mastery,
-                "reason": "scheduled_review"
-            })
+    revision_topics = get_todays_revision_topics(request.user_id, target_date, max_topics=5)
+    print(f"[Revision Assessment] Found {len(revision_topics)} revision topics from calendar")
+    for t in revision_topics:
+        print(f"  - {t['topic_name']} (mastery: {t['mastery_percentage']}%, reason: {t['reason']}, priority: {t.get('priority', 'N/A')})")
     
     if not revision_topics:
         return jsonify({
             "assessment": None,
-            "message": "No topics scheduled for revision today",
-            "topics_checked": len(topics)
+            "message": "No topics scheduled for revision today"
         }), 200
     
     # Generate questions using Groq API
