@@ -37,33 +37,28 @@ def create_app(config_name='development'):
 
 ### Project Structure
 
-```
-backend/core-service/
-├── app/
-│   ├── __init__.py           # App factory
-│   ├── config.py             # Configuration classes
-│   ├── extensions.py         # Flask extensions
-│   ├── models/               # SQLAlchemy models
-│   │   ├── user.py
-│   │   ├── classroom.py
-│   │   ├── meeting.py
-│   │   ├── assessment.py
-│   │   ├── recording.py
-│   │   └── progress.py
-│   ├── routes/               # Route blueprints
-│   │   ├── auth.py
-│   │   ├── users.py
-│   │   ├── classroom.py
-│   │   ├── meetings.py
-│   │   ├── recordings.py
-│   │   ├── assessments.py
-│   │   └── progress.py
-│   ├── services/             # Business logic
-│   ├── schemas/              # Marshmallow schemas
-│   └── utils/                # Helper functions
-├── migrations/               # Alembic migrations
-├── tests/                    # Test suite
-└── run.py                    # Entry point
+```mermaid
+flowchart TB
+    subgraph MAIN["Overview"]
+        direction TB
+        N0["backend/core-service/"]
+        N1["app/"]
+        N2["__init__.py           # App factory"]
+        N3["config.py             # Configuration classes"]
+        N4["extensions.py         # Flask extensions"]
+        N5["models/               # SQLAlchemy models"]
+        N6["user.py"]
+        N7["classroom.py"]
+        N8["meeting.py"]
+        N9["assessment.py"]
+        N10["recording.py"]
+        N11["progress.py"]
+        N12["routes/               # Route blueprints"]
+        N13["auth.py"]
+        N14["users.py"]
+    end
+
+    style MAIN fill:#3b82f6,color:#fff
 ```
 
 ### Route Blueprints

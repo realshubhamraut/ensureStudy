@@ -16,34 +16,28 @@ The frontend is a Next.js 14 application using the App Router, React Server Comp
 
 ### Project Structure
 
-```
-frontend/
-├── app/
-│   ├── (admin)/              # Admin routes (grouped)
-│   ├── (dashboard)/          # Student dashboard routes
-│   ├── (parent)/             # Parent portal routes
-│   ├── (teacher)/            # Teacher dashboard routes
-│   ├── api/                  # API routes
-│   │   └── auth/            # NextAuth handlers
-│   ├── auth/                 # Auth pages
-│   │   ├── signin/
-│   │   ├── signup/
-│   │   └── error/
-│   ├── meet/                 # Video meeting pages
-│   │   └── [id]/
-│   ├── pricing/
-│   ├── layout.tsx            # Root layout
-│   ├── page.tsx              # Landing page
-│   └── globals.css           # Global styles
-├── components/
-│   ├── avatar/               # AI avatar components
-│   ├── chat/                 # Chat UI components
-│   ├── meeting/              # Meeting components
-│   ├── softskills/           # Soft skills UI
-│   └── viewers/              # Document viewers
-├── hooks/                    # Custom React hooks
-├── utils/                    # Utility functions
-└── public/                   # Static assets
+```mermaid
+flowchart TB
+    subgraph MAIN["Overview"]
+        direction TB
+        N0["frontend/"]
+        N1["app/"]
+        N2["(admin)/              # Admin routes (grouped)"]
+        N3["(dashboard)/          # Student dashboard routes"]
+        N4["(parent)/             # Parent portal routes"]
+        N5["(teacher)/            # Teacher dashboard routes"]
+        N6["api/                  # API routes"]
+        N7["auth/            # NextAuth handlers"]
+        N8["auth/                 # Auth pages"]
+        N9["signin/"]
+        N10["signup/"]
+        N11["error/"]
+        N12["meet/                 # Video meeting pages"]
+        N13["(id)/"]
+        N14["pricing/"]
+    end
+
+    style MAIN fill:#3b82f6,color:#fff
 ```
 
 ### Route Groups

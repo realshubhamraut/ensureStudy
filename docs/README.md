@@ -104,18 +104,24 @@ cd frontend && npm run dev
 
 ### Project Structure
 
-```
-ensureStudy/
-├── frontend/                    # Next.js application
-├── backend/
-│   ├── core-service/           # Flask API
-│   ├── ai-service/             # FastAPI AI service
-│   ├── data-pipelines/         # PySpark ETL
-│   └── kafka/                  # Event producers/consumers
-├── ml/                         # ML training and inference
-├── datadir/                    # Database schemas
-├── scripts/                    # Utility scripts
-└── docs/                       # Documentation
+```mermaid
+flowchart TB
+    subgraph MAIN["Overview"]
+        direction TB
+        N0["ensureStudy/"]
+        N1["frontend/                    # Next.js application"]
+        N2["backend/"]
+        N3["core-service/           # Flask API"]
+        N4["ai-service/             # FastAPI AI service"]
+        N5["data-pipelines/         # PySpark ETL"]
+        N6["kafka/                  # Event producers/consumers"]
+        N7["ml/                         # ML training and inference"]
+        N8["datadir/                    # Database schemas"]
+        N9["scripts/                    # Utility scripts"]
+        N10["docs/                       # Documentation"]
+    end
+
+    style MAIN fill:#3b82f6,color:#fff
 ```
 
 ### Contributing

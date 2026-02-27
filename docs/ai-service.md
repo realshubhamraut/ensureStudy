@@ -17,36 +17,28 @@ The AI Service is a FastAPI application that provides intelligent tutoring, docu
 
 ### Project Structure
 
-```
-backend/ai-service/
-├── app/
-│   ├── main.py                   # FastAPI application
-│   ├── config.py                 # Configuration
-│   ├── agents/
-│   │   ├── tutor_agent.py        # LangGraph tutor
-│   │   └── assessment_agent.py   # Assessment generation
-│   ├── api/
-│   │   └── routes/
-│   │       ├── tutor.py          # Chat endpoints
-│   │       ├── indexing.py       # Document indexing
-│   │       ├── grading.py        # Auto-grading
-│   │       ├── notes.py          # Note generation
-│   │       ├── meetings.py       # Meeting analysis
-│   │       └── softskills.py     # Soft skills evaluation
-│   ├── rag/
-│   │   ├── retriever.py          # RAGRetriever class
-│   │   ├── indexer.py            # Document indexer
-│   │   └── embeddings.py         # Embedding utilities
-│   ├── proctor/
-│   │   └── api.py                # Proctoring endpoints
-│   ├── services/
-│   │   ├── abcr_service.py       # Attention-Based Context Routing
-│   │   ├── tal_service.py        # Topic Anchor Layer
-│   │   ├── mcp_service.py        # Memory Context Processor
-│   │   └── web_ingest_service.py # Web content ingestion
-│   └── utils/
-│       └── text_processing.py
-└── tests/
+```mermaid
+flowchart TB
+    subgraph MAIN["Overview"]
+        direction TB
+        N0["backend/ai-service/"]
+        N1["app/"]
+        N2["main.py                   # FastAPI application"]
+        N3["config.py                 # Configuration"]
+        N4["agents/"]
+        N5["tutor_agent.py        # LangGraph tutor"]
+        N6["assessment_agent.py   # Assessment generation"]
+        N7["api/"]
+        N8["routes/"]
+        N9["tutor.py          # Chat endpoints"]
+        N10["indexing.py       # Document indexing"]
+        N11["grading.py        # Auto-grading"]
+        N12["notes.py          # Note generation"]
+        N13["meetings.py       # Meeting analysis"]
+        N14["softskills.py     # Soft skills evaluation"]
+    end
+
+    style MAIN fill:#3b82f6,color:#fff
 ```
 
 ### API Routes

@@ -1075,33 +1075,28 @@ curl http://localhost:6333/health
 
 ## Appendix B: Project Structure
 
-```
-ensureStudy/
-├── backend/
-│   ├── ai-service/
-│   │   ├── app/
-│   │   │   ├── agents/          # AI agents
-│   │   │   ├── api/             # FastAPI routes
-│   │   │   ├── proctor/         # Proctoring system
-│   │   │   ├── rag/             # RAG pipeline
-│   │   │   └── services/        # Business logic
-│   │   └── Dockerfile
-│   ├── core-service/
-│   │   ├── app/
-│   │   │   ├── models/          # SQLAlchemy models
-│   │   │   ├── routes/          # Flask blueprints
-│   │   │   └── utils/           # Utilities
-│   │   └── Dockerfile
-│   └── kafka/                   # Kafka consumers
-├── frontend/
-│   ├── app/                     # Next.js pages
-│   ├── components/              # React components
-│   └── hooks/                   # Custom hooks
-├── docs/                        # Documentation
-├── ml/                          # ML models & training
-├── scripts/                     # Utility scripts
-├── docker-compose.yml
-└── README.md
+```mermaid
+flowchart TB
+    subgraph MAIN["Overview"]
+        direction TB
+        N0["ensureStudy/"]
+        N1["backend/"]
+        N2["ai-service/"]
+        N3["app/"]
+        N4["agents/          # AI agents"]
+        N5["api/             # FastAPI routes"]
+        N6["proctor/         # Proctoring system"]
+        N7["rag/             # RAG pipeline"]
+        N8["services/        # Business logic"]
+        N9["Dockerfile"]
+        N10["core-service/"]
+        N11["app/"]
+        N12["models/          # SQLAlchemy models"]
+        N13["routes/          # Flask blueprints"]
+        N14["utils/           # Utilities"]
+    end
+
+    style MAIN fill:#3b82f6,color:#fff
 ```
 
 ---

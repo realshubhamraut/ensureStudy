@@ -36,46 +36,28 @@
 
 ### Existing Capabilities You Can Leverage
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                    EXISTING CAPABILITIES                            │
-├─────────────────────────────────────────────────────────────────────┤
-│ ✅ ABCR (Attention-Based Context Routing)                           │
-│    → Detects follow-up questions vs new topics                      │
-│    → File: abcr_service.py                                          │
-├─────────────────────────────────────────────────────────────────────┤
-│ ✅ TAL (Topic Anchor Layer)                                         │
-│    → Maintains topic continuity across conversation                 │
-│    → File: topic_anchor_service.py                                  │
-├─────────────────────────────────────────────────────────────────────┤
-│ ✅ MCP (Memory Context Processor)                                   │
-│    → Long-term conversation memory with summarization               │
-│    → File: mcp_context.py                                           │
-├─────────────────────────────────────────────────────────────────────┤
-│ ✅ Proctoring (YOLO + MediaPipe)                                    │
-│    → Face detection, gaze tracking, phone detection                 │
-│    → File: proctor/                                                 │
-├─────────────────────────────────────────────────────────────────────┤
-│ ✅ Soft Skills Analysis                                             │
-│    → Fluency, grammar, vocabulary, eye contact, expression          │
-│    → File: softskills_pipeline.py                                   │
-├─────────────────────────────────────────────────────────────────────┤
-│ ✅ Question Generation                                              │
-│    → MCQ, short answer, true/false generation                       │
-│    → File: question_generator.py                                    │
-├─────────────────────────────────────────────────────────────────────┤
-│ ✅ RAG Pipeline                                                     │
-│    → Document search, embedding, retrieval                          │
-│    → File: rag/, qdrant_service.py                                  │
-├─────────────────────────────────────────────────────────────────────┤
-│ ✅ Web Search & PDF Download                                        │
-│    → Serper API, PDF downloader                                     │
-│    → File: search_api.py, pdf_downloader.py                         │
-├─────────────────────────────────────────────────────────────────────┤
-│ ✅ Tool Framework (19 Tools)                                        │
-│    → Reusable tools for all agents                                  │
-│    → File: agents/tools/                                            │
-└─────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph MAIN["Overview"]
+        direction TB
+        N0["EXISTING CAPABILITIES"]
+        N1["✅ ABCR (Attention-Based Context Routing)"]
+        N2["→ Detects follow-up questions vs new topics"]
+        N3["→ File: abcr_service.py"]
+        N4["✅ TAL (Topic Anchor Layer)"]
+        N5["→ Maintains topic continuity across conversation"]
+        N6["→ File: topic_anchor_service.py"]
+        N7["✅ MCP (Memory Context Processor)"]
+        N8["→ Long-term conversation memory with summarization"]
+        N9["→ File: mcp_context.py"]
+        N10["✅ Proctoring (YOLO + MediaPipe)"]
+        N11["→ Face detection, gaze tracking, phone detection"]
+        N12["→ File: proctor/"]
+        N13["✅ Soft Skills Analysis"]
+        N14["→ Fluency, grammar, vocabulary, eye contact, expression"]
+    end
+
+    style MAIN fill:#3b82f6,color:#fff
 ```
 
 ---
