@@ -135,8 +135,7 @@ class SearchablePDFGenerator:
                 "--language", self.language,
                 "--output-type", "pdf",
                 "--optimize", str(self.optimize),
-                "--skip-text",  # Don't re-OCR pages that already have text
-                "--force-ocr",  # Force OCR even if text detected
+                "--force-ocr",  # Force OCR on all pages (needed for image-based PDFs)
             ]
             
             if self.deskew:

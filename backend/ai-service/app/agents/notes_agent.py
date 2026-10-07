@@ -60,7 +60,7 @@ class NotesProcessingAgent:
         internal_api_key: str = None
     ):
         self.core_service_url = core_service_url or os.getenv(
-            "CORE_SERVICE_URL", "http://localhost:8000"
+            "CORE_SERVICE_URL", "http://localhost:9000"
         )
         self.internal_api_key = internal_api_key or os.getenv(
             "INTERNAL_API_KEY", "dev-internal-key"
@@ -102,7 +102,10 @@ class NotesProcessingAgent:
             # Step 2: Enhance images
             processing_state = await self._enhance_images(processing_state)
             
-            # Step 3: Generate searchable PDF
+            # Step 3: OCR and save pages
+            processing_state = await self._ocr_and_save_pages(processing_state)
+            
+            # Step 4: Generate searchable PDF
             processing_state = await self._generate_searchable_pdf(processing_state)
             
             # Done
@@ -326,7 +329,203 @@ class NotesProcessingAgent:
                 enhanced_paths.append(output_path)
         
         state["enhanced_images"] = enhanced_paths
-        state["progress"] = 60
+        state["progress"] = 50
+        return state
+    
+    async def _ocr_and_save_pages(self, state: NotesProcessingState) -> NotesProcessingState:
+        """Run OCR on each image and save pages to database"""
+        state["current_step"] = "Extracting text from pages..."
+        state["progress"] = 55
+        await self._update_job_status(state)
+        
+        # Try TrOCR first (better for handwritten text), fallback to Tesseract
+        TROCR_AVAILABLE = False
+        trocr_processor = None
+        trocr_model = None
+        
+        try:
+            from transformers import TrOCRProcessor, VisionEncoderDecoderModel
+            from PIL import Image
+            import torch
+            
+            # Load TrOCR model for handwritten text
+            logger.info("Loading TrOCR handwritten model...")
+            trocr_processor = TrOCRProcessor.from_pretrained('microsoft/trocr-base-handwritten')
+            trocr_model = VisionEncoderDecoderModel.from_pretrained('microsoft/trocr-base-handwritten')
+            TROCR_AVAILABLE = True
+            logger.info("TrOCR model loaded successfully")
+        except Exception as e:
+            logger.warning(f"TrOCR not available ({e}), falling back to Tesseract")
+        
+        # Fallback to Tesseract
+        TESSERACT_AVAILABLE = False
+        if not TROCR_AVAILABLE:
+            try:
+                import pytesseract
+                TESSERACT_AVAILABLE = True
+            except ImportError:
+                logger.warning("Neither TrOCR nor Tesseract available")
+        
+        from PIL import Image
+        
+        total_confidence = 0
+        page_count = 0
+        
+        for i, img_path in enumerate(state["enhanced_images"]):
+            try:
+                # Extract text with OCR
+                extracted_text = ""
+                confidence = 0.0
+                
+                if os.path.exists(img_path):
+                    img = Image.open(img_path).convert("RGB")
+                    
+                    if TROCR_AVAILABLE:
+                        try:
+                            # Use TrOCR for handwritten text recognition
+                            # IMPORTANT: Detect actual text lines using horizontal projection
+                            # instead of fixed-height strips (which causes hallucinations)
+                            import cv2 as cv2_ocr
+                            
+                            # Convert PIL to numpy for line detection
+                            img_np = np.array(img)
+                            gray = cv2_ocr.cvtColor(img_np, cv2_ocr.COLOR_RGB2GRAY)
+                            
+                            # Binary threshold for line detection
+                            _, binary = cv2_ocr.threshold(gray, 0, 255, cv2_ocr.THRESH_BINARY_INV + cv2_ocr.THRESH_OTSU)
+                            
+                            # Horizontal projection to find text lines
+                            horizontal_proj = np.sum(binary, axis=1)
+                            
+                            # Find line boundaries using projection profile
+                            threshold = np.max(horizontal_proj) * 0.05  # 5% of max = text present
+                            in_line = False
+                            line_regions = []
+                            start = 0
+                            min_line_height = 20  # Minimum pixels for a valid line
+                            
+                            for y_idx, val in enumerate(horizontal_proj):
+                                if val > threshold and not in_line:
+                                    in_line = True
+                                    start = y_idx
+                                elif val <= threshold and in_line:
+                                    in_line = False
+                                    if y_idx - start > min_line_height:
+                                        # Add padding around the line
+                                        line_start = max(0, start - 5)
+                                        line_end = min(len(horizontal_proj), y_idx + 5)
+                                        line_regions.append((line_start, line_end))
+                            
+                            # Don't forget the last line if still in_line
+                            if in_line and len(horizontal_proj) - start > min_line_height:
+                                line_regions.append((max(0, start - 5), len(horizontal_proj)))
+                            
+                            # Merge nearby lines (within 15px of each other)
+                            merged_regions = []
+                            for region in line_regions:
+                                if merged_regions and region[0] - merged_regions[-1][1] < 15:
+                                    merged_regions[-1] = (merged_regions[-1][0], region[1])
+                                else:
+                                    merged_regions.append(region)
+                            
+                            logger.info(f"Page {i+1}: Detected {len(merged_regions)} text lines")
+                            
+                            # Process each detected line with TrOCR
+                            all_text = []
+                            width, height = img.size
+                            
+                            for line_start, line_end in merged_regions:
+                                # Crop the detected line
+                                line_img = img.crop((0, line_start, width, line_end))
+                                
+                                # Check if line has content (not blank)
+                                line_np = np.array(line_img.convert('L'))
+                                if np.mean(line_np) > 250:  # Nearly white = blank
+                                    continue
+                                
+                                # Process with TrOCR
+                                pixel_values = trocr_processor(images=line_img, return_tensors="pt").pixel_values
+                                
+                                with torch.no_grad():
+                                    generated_ids = trocr_model.generate(
+                                        pixel_values, 
+                                        max_length=256,  # Allow longer output
+                                        num_beams=4,     # Beam search for better quality
+                                        early_stopping=True
+                                    )
+                                
+                                line_text = trocr_processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
+                                if line_text.strip():
+                                    all_text.append(line_text.strip())
+                            
+                            extracted_text = '\n'.join(all_text)
+                            confidence = 0.85  # TrOCR typically has high accuracy on handwriting
+                            
+                            logger.info(f"Page {i+1}: TrOCR extracted {len(extracted_text)} chars from {len(merged_regions)} lines")
+                        except Exception as ocr_error:
+                            logger.warning(f"TrOCR failed for page {i+1}: {ocr_error}")
+                            # Try Tesseract as fallback
+                            if TESSERACT_AVAILABLE:
+                                import pytesseract
+                                extracted_text = pytesseract.image_to_string(img)
+                                confidence = 0.4
+                    
+                    elif TESSERACT_AVAILABLE:
+                        import pytesseract
+                        # Use Tesseract as fallback
+                        ocr_data = pytesseract.image_to_data(img, output_type=pytesseract.Output.DICT)
+                        
+                        texts = []
+                        confidences = []
+                        for j, text in enumerate(ocr_data['text']):
+                            if text.strip():
+                                texts.append(text)
+                                conf = int(ocr_data['conf'][j])
+                                if conf > 0:
+                                    confidences.append(conf)
+                        
+                        extracted_text = ' '.join(texts)
+                        if confidences:
+                            confidence = sum(confidences) / len(confidences) / 100
+                        
+                        logger.info(f"Page {i+1}: Tesseract extracted {len(extracted_text)} chars, confidence: {confidence:.2f}")
+                
+                # Calculate relative image URL for the page
+                # The enhanced images are stored relative to source_path
+                enhanced_url = f"/api/notes/images/{state['job_id']}/enhanced/page_{i+1:03d}.png"
+                
+                # Save page to database via internal API
+                async with httpx.AsyncClient() as client:
+                    await client.post(
+                        f"{self.core_service_url}/api/notes/internal/add-page",
+                        json={
+                            "job_id": state["job_id"],
+                            "page_number": i + 1,
+                            "enhanced_image_url": enhanced_url,
+                            "extracted_text": extracted_text,
+                            "confidence_score": confidence,
+                            "status": "ocr_done"
+                        },
+                        headers={"X-Internal-API-Key": self.internal_api_key},
+                        timeout=10.0
+                    )
+                
+                total_confidence += confidence
+                page_count += 1
+                
+                # Update progress
+                progress = 55 + int((i + 1) / len(state["enhanced_images"]) * 10)
+                state["progress"] = progress
+                
+            except Exception as e:
+                logger.error(f"Error saving page {i+1}: {e}")
+        
+        # Calculate average confidence
+        if page_count > 0:
+            state["avg_confidence"] = total_confidence / page_count
+        
+        state["progress"] = 65
+        logger.info(f"Saved {page_count} pages with OCR text")
         return state
     
     async def _generate_searchable_pdf(self, state: NotesProcessingState) -> NotesProcessingState:

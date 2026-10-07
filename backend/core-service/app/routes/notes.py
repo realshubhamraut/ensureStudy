@@ -496,16 +496,36 @@ def get_page(user, job_id, page_number):
 
 
 @notes_bp.route("/images/<job_id>/<path:image_path>", methods=["GET"])
-@student_required
-def serve_image(user, job_id, image_path):
+def serve_image(job_id, image_path):
     """
     Serve an image file from a job's directory
+    Supports token via query param for image loading in details modal
     
     URL patterns:
     - /api/notes/images/{job_id}/enhanced/page_001.png
     - /api/notes/images/{job_id}/frames/frame_001.png
     """
     try:
+        # Support token via query param
+        token = request.args.get("token")
+        auth_header = request.headers.get("Authorization")
+        
+        if auth_header and auth_header.startswith("Bearer "):
+            token = auth_header.split(" ")[1]
+        
+        if not token:
+            return jsonify({"error": "Authentication required"}), 401
+        
+        try:
+            payload = verify_token(token)
+            if not payload:
+                return jsonify({"error": "Invalid token"}), 401
+            user = User.query.get(payload.get("user_id"))
+            if not user:
+                return jsonify({"error": "User not found"}), 401
+        except Exception:
+            return jsonify({"error": "Invalid token"}), 401
+        
         # Verify job belongs to user
         job = NoteProcessingJob.query.filter_by(id=job_id, student_id=user.id).first()
         
@@ -545,10 +565,29 @@ def serve_image(user, job_id, image_path):
 
 
 @notes_bp.route("/pdf/<job_id>", methods=["GET"])
-@student_required
-def get_pdf(user, job_id):
-    """Serve the combined PDF for a job"""
+def get_pdf(job_id):
+    """Serve the combined PDF for a job (supports token via query param for iframe)"""
     try:
+        # Support token via query param for iframe embedding
+        token = request.args.get("token")
+        auth_header = request.headers.get("Authorization")
+        
+        if auth_header and auth_header.startswith("Bearer "):
+            token = auth_header.split(" ")[1]
+        
+        if not token:
+            return jsonify({"error": "Authentication required"}), 401
+        
+        try:
+            payload = verify_token(token)
+            if not payload:
+                return jsonify({"error": "Invalid token"}), 401
+            user = User.query.get(payload.get("user_id"))
+            if not user:
+                return jsonify({"error": "User not found"}), 401
+        except Exception:
+            return jsonify({"error": "Invalid token"}), 401
+        
         job = NoteProcessingJob.query.filter_by(id=job_id, student_id=user.id).first()
         
         if not job:
