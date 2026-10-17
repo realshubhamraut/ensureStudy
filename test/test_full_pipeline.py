@@ -3,10 +3,11 @@
 COMPREHENSIVE END-TO-END TEST OF WEB CRAWLER PIPELINE
 Tests all 7 workers with content truncation fix
 """
+import os
 import sys
 import asyncio
 import time
-sys.path.insert(0, '/Users/proxim/projects/ensureStudy/backend/ai-service')
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'backend', 'ai-service'))
 
 # Max content for performance
 MAX_CONTENT = 15000

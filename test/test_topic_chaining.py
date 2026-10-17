@@ -2,8 +2,9 @@
 """
 Test Topic Extraction and Chaining
 """
+import os
 import sys
-sys.path.insert(0, '/Users/proxim/projects/ensureStudy/backend/ai-service')
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'backend', 'ai-service'))
 
 from app.services.web_ingest_service import worker1_extract_topic
 

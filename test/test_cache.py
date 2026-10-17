@@ -2,9 +2,10 @@
 """
 Test Web Cache Service - Full cache-first workflow
 """
+import os
 import sys
 import asyncio
-sys.path.insert(0, '/Users/proxim/projects/ensureStudy/backend/ai-service')
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'backend', 'ai-service'))
 
 async def test_cache():
     print("\n" + "="*60)

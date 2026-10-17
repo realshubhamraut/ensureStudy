@@ -8,7 +8,7 @@ import sys
 import os
 
 # Add project to path
-sys.path.insert(0, '/Users/proxim/projects/ensureStudy/backend/ai-service')
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'backend', 'ai-service'))
 
 def test_subject_classification():
     """Test subject detection with various queries"""

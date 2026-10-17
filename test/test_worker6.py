@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Test Worker-6/7 processing"""
+import os
 import sys
-sys.path.insert(0, '/Users/proxim/projects/ensureStudy/backend/ai-service')
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'backend', 'ai-service'))
 
 # Simulate fetched page
 test_page = {
