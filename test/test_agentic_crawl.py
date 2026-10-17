@@ -7,15 +7,15 @@ Tests:
 3. Rate limiting behavior
 
 Usage:
-    cd /Users/proxim/projects/ensureStudy
-    python test_agentic_crawl.py
+    cd <repo-root>
+    python test/test_agentic_crawl.py
 """
 import asyncio
 import sys
 import os
 
 # Add project to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'backend/ai-service'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'backend/ai-service'))
 
 
 async def test_worker6b_pdf_search():

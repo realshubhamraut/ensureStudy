@@ -7386,20 +7386,20 @@ flowchart TB
 
 | Test File | Purpose |
 |-----------|---------|
-| `test_agentic_crawl.py` | Web crawling agent tests |
-| `test_cache_api.py` | Cache API integration tests |
-| `test_cache.py` | Redis caching unit tests |
-| `test_chunk_only.py` | Text chunking tests |
-| `test_chunking.py` | Advanced chunking tests |
-| `test_full_pipeline.py` | End-to-end pipeline tests |
-| `test_groq_classifier.py` | Groq LLM classifier tests |
-| `test_learning_agent_standalone.py` | Learning agent isolation tests |
-| `test_ocr_model.py` | OCR model accuracy tests |
-| `test_qdrant.py` | Qdrant vector DB tests |
-| `test_subject_classifier.py` | Subject classification tests |
-| `test_topic_chaining.py` | Topic dependency tests |
-| `test_worker6.py` | Kafka worker tests |
-| `test_workers.py` | Multi-worker tests |
+| `test/test_agentic_crawl.py` | Web crawling agent tests |
+| `test/test_cache_api.py` | Cache API integration tests |
+| `test/test_cache.py` | Redis caching unit tests |
+| `test/test_chunk_only.py` | Text chunking tests |
+| `test/test_chunking.py` | Advanced chunking tests |
+| `test/test_full_pipeline.py` | End-to-end pipeline tests |
+| `test/test_groq_classifier.py` | Groq LLM classifier tests |
+| `test/test_learning_agent_standalone.py` | Learning agent isolation tests |
+| `test/test_ocr_model.py` | OCR model accuracy tests |
+| `test/test_qdrant.py` | Qdrant vector DB tests |
+| `test/test_subject_classifier.py` | Subject classification tests |
+| `test/test_topic_chaining.py` | Topic dependency tests |
+| `test/test_worker6.py` | Kafka worker tests |
+| `test/test_workers.py` | Multi-worker tests |
 
 ### pytest Configuration
 
@@ -7432,7 +7432,7 @@ make test-ml
 
 ## 25.4 Seed Data & Database Initialization
 
-### `seed_database.py`
+### `seed/seed_database.py`
 
 Seeds the PostgreSQL database with initial data:
 - Default admin user
@@ -7440,7 +7440,7 @@ Seeds the PostgreSQL database with initial data:
 - Demo classrooms
 - Subject/topic hierarchies
 
-### `seed_progress_data.py`
+### `seed/seed_progress_data.py`
 
 Seeds student progress data for demo purposes:
 - Simulated assessment scores
@@ -8315,7 +8315,7 @@ The project root contains **test scripts, seed scripts, migration utilities, and
 
 ## 30.2 Seed Scripts
 
-### `seed_database.py`
+### `seed/seed_database.py`
 
 Seeds PostgreSQL with initial data for development and demos:
 - Creates default admin, teacher, and student users
@@ -8323,7 +8323,7 @@ Seeds PostgreSQL with initial data for development and demos:
 - Creates demo classrooms with join codes
 - Populates subject → topic → subtopic hierarchies
 
-### `seed_progress_data.py`
+### `seed/seed_progress_data.py`
 
 Seeds student progress records for analytics testing:
 - Generates simulated assessment scores across subjects
@@ -8337,20 +8337,20 @@ Seeds student progress records for analytics testing:
 
 | Script | Lines | Test Target |
 |--------|-------|-------------|
-| `test_agentic_crawl.py` | — | Web crawling agent with URL following |
-| `test_cache_api.py` | — | Redis cache API integration |
-| `test_cache.py` | — | Redis caching unit tests |
-| `test_chunk_only.py` | — | Text chunking (isolated) |
-| `test_chunking.py` | — | Advanced chunking strategies |
-| `test_full_pipeline.py` | — | End-to-end document → RAG test |
-| `test_groq_classifier.py` | — | Groq LLM classification accuracy |
-| `test_learning_agent_standalone.py` | — | Learning agent without dependencies |
-| `test_ocr_model.py` | — | OCR model accuracy benchmarks |
-| `test_qdrant.py` | — | Qdrant CRUD and search operations |
-| `test_subject_classifier.py` | — | Subject classification accuracy |
-| `test_topic_chaining.py` | — | Topic dependency graph building |
-| `test_worker6.py` | — | Kafka worker processing |
-| `test_workers.py` | — | Multi-worker concurrent processing |
+| `test/test_agentic_crawl.py` | — | Web crawling agent with URL following |
+| `test/test_cache_api.py` | — | Redis cache API integration |
+| `test/test_cache.py` | — | Redis caching unit tests |
+| `test/test_chunk_only.py` | — | Text chunking (isolated) |
+| `test/test_chunking.py` | — | Advanced chunking strategies |
+| `test/test_full_pipeline.py` | — | End-to-end document → RAG test |
+| `test/test_groq_classifier.py` | — | Groq LLM classification accuracy |
+| `test/test_learning_agent_standalone.py` | — | Learning agent without dependencies |
+| `test/test_ocr_model.py` | — | OCR model accuracy benchmarks |
+| `test/test_qdrant.py` | — | Qdrant CRUD and search operations |
+| `test/test_subject_classifier.py` | — | Subject classification accuracy |
+| `test/test_topic_chaining.py` | — | Topic dependency graph building |
+| `test/test_worker6.py` | — | Kafka worker processing |
+| `test/test_workers.py` | — | Multi-worker concurrent processing |
 
 ### pytest Configuration
 
@@ -12290,20 +12290,20 @@ The `try/` directory contains **12 test files** used during development and demo
 
 | Script | Purpose | Tests |
 |--------|---------|-------|
-| `test_full_pipeline.py` | End-to-end document → RAG pipeline | Upload → Process → Chunk → Embed → Query |
-| `test_chunking.py` | Text chunking algorithms | Semantic chunking, overlap, size limits |
-| `test_chunk_only.py` | Isolated chunk function tests | Edge cases, Unicode, empty input |
-| `test_qdrant.py` | Qdrant vector operations | Insert, search, delete, collection management |
-| `test_cache.py` | Redis cache operations | Set, get, TTL, eviction |
-| `test_cache_api.py` | Cache through API endpoints | Response caching, cache invalidation |
-| `test_agentic_crawl.py` | Web crawling agent | URL fetch, content extraction, caching |
-| `test_groq_classifier.py` | Groq LLM classification | Subject classification via Groq API |
-| `test_subject_classifier.py` | Subject detection | Input → Subject label mapping |
-| `test_topic_chaining.py` | Topic dependency detection | Prerequisite chain calculation |
-| `test_learning_agent_standalone.py` | Learning agent (isolated) | Critic → Learner → Performance loop |
-| `test_ocr_model.py` | OCR model accuracy | Handwritten text recognition |
-| `test_worker6.py` | Kafka consumer worker | Message consumption, processing |
-| `test_workers.py` | Multiple Kafka workers | Concurrent consumer testing |
+| `test/test_full_pipeline.py` | End-to-end document → RAG pipeline | Upload → Process → Chunk → Embed → Query |
+| `test/test_chunking.py` | Text chunking algorithms | Semantic chunking, overlap, size limits |
+| `test/test_chunk_only.py` | Isolated chunk function tests | Edge cases, Unicode, empty input |
+| `test/test_qdrant.py` | Qdrant vector operations | Insert, search, delete, collection management |
+| `test/test_cache.py` | Redis cache operations | Set, get, TTL, eviction |
+| `test/test_cache_api.py` | Cache through API endpoints | Response caching, cache invalidation |
+| `test/test_agentic_crawl.py` | Web crawling agent | URL fetch, content extraction, caching |
+| `test/test_groq_classifier.py` | Groq LLM classification | Subject classification via Groq API |
+| `test/test_subject_classifier.py` | Subject detection | Input → Subject label mapping |
+| `test/test_topic_chaining.py` | Topic dependency detection | Prerequisite chain calculation |
+| `test/test_learning_agent_standalone.py` | Learning agent (isolated) | Critic → Learner → Performance loop |
+| `test/test_ocr_model.py` | OCR model accuracy | Handwritten text recognition |
+| `test/test_worker6.py` | Kafka consumer worker | Message consumption, processing |
+| `test/test_workers.py` | Multiple Kafka workers | Concurrent consumer testing |
 
 ---
 
@@ -13998,8 +13998,8 @@ def downgrade():
 
 | Script | Purpose |
 |--------|---------|
-| `seed_database.py` | Create demo users, classrooms, subjects, topics |
-| `seed_progress_data.py` | Generate progress records, leaderboard entries |
+| `seed/seed_database.py` | Create demo users, classrooms, subjects, topics |
+| `seed/seed_progress_data.py` | Generate progress records, leaderboard entries |
 
 ---
 
@@ -16346,7 +16346,7 @@ class WebIngestService:
 
 ## 68.5 Agentic Crawling
 
-### Source: `test_agentic_crawl.py`, `agents/web_enrichment_agent.py`
+### Source: `test/test_agentic_crawl.py`, `agents/web_enrichment_agent.py`
 
 ```python
 class AgenticCrawler:
@@ -17066,7 +17066,7 @@ flowchart TB
 
 ## 72.3 Subject Classifier
 
-### Source: `services/classroom_matcher.py`, `test_subject_classifier.py`
+### Source: `services/classroom_matcher.py`, `test/test_subject_classifier.py`
 
 ```python
 class SubjectClassifier:
@@ -17118,7 +17118,7 @@ class SubjectClassifier:
 
 ## 72.4 Groq LLM Classifier
 
-### Source: `test_groq_classifier.py`
+### Source: `test/test_groq_classifier.py`
 
 ```python
 class GroqClassifier:
@@ -17148,7 +17148,7 @@ class GroqClassifier:
 
 ## 72.5 Topic Chaining
 
-### Source: `test_topic_chaining.py`
+### Source: `test/test_topic_chaining.py`
 
 ```python
 class TopicChainer:
@@ -17366,11 +17366,11 @@ The root-level test scripts validate worker functionality:
 
 | Script | Purpose |
 |--------|---------|
-| `test_workers.py` | Test all worker tasks end-to-end |
-| `test_worker6.py` | Test specific worker task (chunking) |
-| `test_full_pipeline.py` | Full document → index pipeline |
-| `test_chunk_only.py` | Chunking step in isolation |
-| `test_chunking.py` | Chunking strategy comparison |
+| `test/test_workers.py` | Test all worker tasks end-to-end |
+| `test/test_worker6.py` | Test specific worker task (chunking) |
+| `test/test_full_pipeline.py` | Full document → index pipeline |
+| `test/test_chunk_only.py` | Chunking step in isolation |
+| `test/test_chunking.py` | Chunking strategy comparison |
 
 ---
 

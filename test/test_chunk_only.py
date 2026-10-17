@@ -1,9 +1,10 @@
 
 #!/usr/bin/env python3
 """Test JUST chunking to find the slow point"""
+import os
 import sys
 import time
-sys.path.insert(0, '/Users/proxim/projects/ensureStudy/backend/ai-service')
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'backend', 'ai-service'))
 
 # Test 15K chars
 test_text = "Photosynthesis is the process by which plants convert light energy into chemical energy. " * 200

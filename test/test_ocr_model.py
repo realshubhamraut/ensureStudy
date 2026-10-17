@@ -3,8 +3,9 @@
 Test script to verify Nanonets-OCR2-3B model works correctly.
 Run from the ensureStudy directory with venv activated.
 """
+import os
 import sys
-sys.path.insert(0, 'backend/ai-service')
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'backend', 'ai-service'))
 
 import logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -39,7 +40,7 @@ def main():
     ]
     
     # Look for any uploaded notes in the data directory
-    data_dir = 'data/notes'
+    data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'data', 'notes')
     if os.path.exists(data_dir):
         for root, dirs, files in os.walk(data_dir):
             for f in files:

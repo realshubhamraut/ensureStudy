@@ -2,8 +2,9 @@
 """
 Test Qdrant connection - Fixed for latest API
 """
+import os
 import sys
-sys.path.insert(0, '/Users/proxim/projects/ensureStudy/backend/ai-service')
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'backend', 'ai-service'))
 
 print("[TEST] Testing Qdrant connection...")
 

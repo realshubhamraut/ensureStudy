@@ -135,11 +135,11 @@ The root-level test scripts validate worker functionality:
 
 | Script | Purpose |
 |--------|---------|
-| `test_workers.py` | Test all worker tasks end-to-end |
-| `test_worker6.py` | Test specific worker task (chunking) |
-| `test_full_pipeline.py` | Full document → index pipeline |
-| `test_chunk_only.py` | Chunking step in isolation |
-| `test_chunking.py` | Chunking strategy comparison |
+| `test/test_workers.py` | Test all worker tasks end-to-end |
+| `test/test_worker6.py` | Test specific worker task (chunking) |
+| `test/test_full_pipeline.py` | Full document → index pipeline |
+| `test/test_chunk_only.py` | Chunking step in isolation |
+| `test/test_chunking.py` | Chunking strategy comparison |
 
 ---
 
