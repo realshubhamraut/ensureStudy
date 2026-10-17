@@ -11,7 +11,7 @@ import sys
 from datetime import datetime, timedelta
 from uuid import uuid4
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'backend/core-service'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'backend/core-service'))
 
 from dotenv import load_dotenv
 load_dotenv()

@@ -14,8 +14,8 @@ import sys
 import os
 
 # Add paths for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'backend/ai-service'))
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'backend/core-service'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'backend/ai-service'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'backend/core-service'))
 
 print("=" * 60)
 print("Type 5 Learning Agent - Verification Tests")
@@ -160,7 +160,7 @@ except ImportError as e:
 print("\n[4] Testing Database Models...")
 
 try:
-    os.chdir(os.path.join(os.path.dirname(__file__), 'backend/core-service'))
+    os.chdir(os.path.join(os.path.dirname(__file__), '..', 'backend/core-service'))
     from app import create_app, db
     from app.models.curriculum import QuestionEffectiveness, LearningAgentMemory
     

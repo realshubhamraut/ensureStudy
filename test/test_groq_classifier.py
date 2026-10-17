@@ -6,7 +6,7 @@ import sys
 import os
 
 # Add backend to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'backend', 'ai-service'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'backend', 'ai-service'))
 
 from app.services.llm_provider import get_classifier
 

@@ -70,20 +70,20 @@ The `try/` directory contains **12 test files** used during development and demo
 
 | Script | Purpose | Tests |
 |--------|---------|-------|
-| `test_full_pipeline.py` | End-to-end document → RAG pipeline | Upload → Process → Chunk → Embed → Query |
-| `test_chunking.py` | Text chunking algorithms | Semantic chunking, overlap, size limits |
-| `test_chunk_only.py` | Isolated chunk function tests | Edge cases, Unicode, empty input |
-| `test_qdrant.py` | Qdrant vector operations | Insert, search, delete, collection management |
-| `test_cache.py` | Redis cache operations | Set, get, TTL, eviction |
-| `test_cache_api.py` | Cache through API endpoints | Response caching, cache invalidation |
-| `test_agentic_crawl.py` | Web crawling agent | URL fetch, content extraction, caching |
-| `test_groq_classifier.py` | Groq LLM classification | Subject classification via Groq API |
-| `test_subject_classifier.py` | Subject detection | Input → Subject label mapping |
-| `test_topic_chaining.py` | Topic dependency detection | Prerequisite chain calculation |
-| `test_learning_agent_standalone.py` | Learning agent (isolated) | Critic → Learner → Performance loop |
-| `test_ocr_model.py` | OCR model accuracy | Handwritten text recognition |
-| `test_worker6.py` | Kafka consumer worker | Message consumption, processing |
-| `test_workers.py` | Multiple Kafka workers | Concurrent consumer testing |
+| `test/test_full_pipeline.py` | End-to-end document → RAG pipeline | Upload → Process → Chunk → Embed → Query |
+| `test/test_chunking.py` | Text chunking algorithms | Semantic chunking, overlap, size limits |
+| `test/test_chunk_only.py` | Isolated chunk function tests | Edge cases, Unicode, empty input |
+| `test/test_qdrant.py` | Qdrant vector operations | Insert, search, delete, collection management |
+| `test/test_cache.py` | Redis cache operations | Set, get, TTL, eviction |
+| `test/test_cache_api.py` | Cache through API endpoints | Response caching, cache invalidation |
+| `test/test_agentic_crawl.py` | Web crawling agent | URL fetch, content extraction, caching |
+| `test/test_groq_classifier.py` | Groq LLM classification | Subject classification via Groq API |
+| `test/test_subject_classifier.py` | Subject detection | Input → Subject label mapping |
+| `test/test_topic_chaining.py` | Topic dependency detection | Prerequisite chain calculation |
+| `test/test_learning_agent_standalone.py` | Learning agent (isolated) | Critic → Learner → Performance loop |
+| `test/test_ocr_model.py` | OCR model accuracy | Handwritten text recognition |
+| `test/test_worker6.py` | Kafka consumer worker | Message consumption, processing |
+| `test/test_workers.py` | Multiple Kafka workers | Concurrent consumer testing |
 
 ---
 
